@@ -13,14 +13,14 @@ use hyper::{Body, Client, Method, Request, Response, Server, StatusCode, Uri};
 use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use smashsort::{List, ListItem, ListMode, Lists, QueryResponse};
+use smashsort::{ItemMetadata, ItemQuery, List, ListMode, Lists};
 use sqlparser::ast::{
     BinaryOperator, Expr, FunctionArg, FunctionArgExpr, Ident, Select, SelectItem, SetExpr,
     Statement, TableFactor,
 };
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
@@ -30,7 +30,7 @@ use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
-const ITEM_FIELDS: [&str; 2] = ["name", "user_score"];
+const ITEM_FIELDS: [&str; 3] = ["id", "name", "user_score"];
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Token {
@@ -325,7 +325,7 @@ async fn get_lists(
         resp
     };
     let lists = Lists {
-        items: resp
+        lists: resp
             .into_documents()?
             .results
             .into_iter()
@@ -356,12 +356,12 @@ async fn get_list_items(
         todo!()
     };
 
-    // TODO: merge list items
+    let mut map = HashMap::new();
     let original_query = if let ListMode::User = list.mode {
         list.query
     } else {
         // TODO: update AST directly
-        format!(
+        let mut query = format!(
             "{} WHERE c.id IN ({})",
             list.query,
             list.items
@@ -369,7 +369,13 @@ async fn get_list_items(
                 .map(|i| format!("\"{}\"", i.id))
                 .collect::<Vec<_>>()
                 .join(",")
-        )
+        );
+        let i = query.find("FROM").unwrap();
+        query.insert_str(i - 1, ", id ");
+        for i in list.items {
+            map.insert(i.id.clone(), i);
+        }
+        query
     };
     let db = db.into_collection_client("items");
     let mut query = parse_select(&original_query);
@@ -387,25 +393,32 @@ async fn get_list_items(
         *session.write().unwrap() = Some(ConsistencyLevel::Session(resp.session_token.clone()));
         resp
     };
-    let items: Vec<Value> = resp.into_raw().results;
-    let response = QueryResponse {
-        header: parse_select(&original_query)
+    let values: Vec<Map<String, Value>> = resp.into_raw().results;
+    let response = ItemQuery {
+        fields: parse_select(&original_query)
             .projection
-            .into_iter()
-            .map(|f| f.to_string())
+            .iter()
+            .map(ToString::to_string)
             .collect(),
-        items: items
+        items: values
             .iter()
             .map(|r| {
-                r.as_object()
-                    .unwrap()
-                    .values()
-                    .map(|v| match v {
-                        Value::String(s) => s.to_owned(),
-                        Value::Number(n) => n.to_string(),
-                        _ => todo!(),
-                    })
-                    .collect()
+                let mut iter = r.values();
+                let metadata = if map.is_empty() {
+                    None
+                } else {
+                    Some(map[iter.next_back().unwrap().as_str().unwrap()].clone())
+                };
+                smashsort::Item {
+                    values: iter
+                        .map(|v| match v {
+                            Value::String(s) => s.to_owned(),
+                            Value::Number(n) => n.to_string(),
+                            _ => todo!(),
+                        })
+                        .collect(),
+                    metadata,
+                }
             })
             .collect(),
     };
@@ -583,7 +596,7 @@ async fn import_playlist(
         items: playlist_items
             .items
             .iter()
-            .map(|i| ListItem::new(i.track.id.clone()))
+            .map(|i| new_spotify_item(&i.track))
             .collect(),
         mode: ListMode::External,
         query: String::from("SELECT name, user_score FROM tracks"),
@@ -633,7 +646,7 @@ async fn import_playlist(
         let got = hyper::body::to_bytes(resp.into_body()).await?;
         playlist_items = serde_json::from_slice(&got)?;
         for i in &playlist_items.items {
-            list.items.push(ListItem::new(i.track.id.clone()));
+            list.items.push(new_spotify_item(&i.track));
             let mut metadata = Map::new();
             metadata.insert(
                 String::from("album"),
@@ -663,6 +676,17 @@ async fn import_playlist(
         }
     }
     create_external_list(db, session, list, items, user_id == DEMO_USER).await
+}
+
+pub fn new_spotify_item(track: &smashsort_web::Track) -> ItemMetadata {
+    ItemMetadata::new(
+        track.id.clone(),
+        track.name.clone(),
+        Some(format!(
+            "https://open.spotify.com/embed/track/{}?utm_source=generator",
+            track.id
+        )),
+    )
 }
 
 async fn create_user_list(
