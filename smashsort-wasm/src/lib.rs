@@ -1,7 +1,10 @@
 #![feature(async_closure)]
 use rand::prelude::SliceRandom;
+use smashsort::{List, Lists, QueryResponse};
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
+use web_sys::{Request, RequestInit, RequestMode, Response};
 use yew::{html, Callback, Component, Context, Html, MouseEvent, Properties};
 
 pub struct App;
@@ -10,11 +13,11 @@ impl Component for App {
     type Message = ();
     type Properties = ();
 
-    fn create(ctx: &Context<Self>) -> Self {
+    fn create(_: &Context<Self>) -> Self {
         App
     }
 
-    fn view(&self, _ctx: &Context<Self>) -> Html {
+    fn view(&self, _: &Context<Self>) -> Html {
         html! {
           <div>
             <nav class="navbar navbar-dark bg-dark">
@@ -29,38 +32,59 @@ impl Component for App {
 }
 
 pub enum StateMsg {
-    LoadHome,
+    LoadUser(String),
+    LoadHome(Vec<(List, QueryResponse)>),
 }
 
 pub struct State {
     current_page: Page,
+    home_data: Vec<(List, QueryResponse)>,
 }
 
 impl Component for State {
     type Message = StateMsg;
     type Properties = ();
 
-    fn create(ctx: &Context<Self>) -> Self {
+    fn create(_: &Context<Self>) -> Self {
         State {
             current_page: Page::Login,
+            home_data: Vec::new(),
         }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         if let Page::Login = self.current_page {
             html! {
-                <Login on_demo_select={ctx.link().callback(|_| StateMsg::LoadHome)}/>
+                <Login on_demo_select={ctx.link().callback(|_| StateMsg::LoadUser(String::from("demo")))}/>
             }
         } else {
             html! {
-                <Home/>
+                <Home data={self.home_data.clone()}/>
             }
         }
     }
 
-    fn update(&mut self, _ctx: &Context<Self>, msg: Self::Message) -> bool {
-        self.current_page = Page::Home;
-        true
+    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
+        match msg {
+            StateMsg::LoadUser(user) => {
+                ctx.link().send_future(async move {
+                    let lists = fetch_lists(&user).await.unwrap();
+                    let items =
+                        futures::future::join_all(lists.iter().map(|l| fetch_items(&user, &l.id)))
+                            .await
+                            .into_iter()
+                            .collect::<Result<Vec<_>, _>>()
+                            .unwrap();
+                    StateMsg::LoadHome(lists.into_iter().zip(items).collect())
+                });
+                false
+            }
+            StateMsg::LoadHome(home_data) => {
+                self.current_page = Page::Home;
+                self.home_data = home_data;
+                true
+            }
+        }
     }
 }
 
@@ -88,7 +112,7 @@ impl Component for Login {
     type Message = ();
     type Properties = LoginProps;
 
-    fn create(ctx: &Context<Self>) -> Self {
+    fn create(_: &Context<Self>) -> Self {
         Login
     }
 
@@ -106,13 +130,18 @@ impl Component for Login {
     }
 }
 
+#[derive(PartialEq, Properties)]
+pub struct HomeProps {
+    data: Vec<(List, QueryResponse)>,
+}
+
 pub struct Home;
 
 impl Component for Home {
     type Message = ();
-    type Properties = ();
+    type Properties = HomeProps;
 
-    fn create(ctx: &Context<Self>) -> Self {
+    fn create(_: &Context<Self>) -> Self {
         Home
     }
 
@@ -133,7 +162,9 @@ impl Component for Home {
                 </select>
               </div>
             </div>
-            <div class="row"></div>
+            <div class="row">
+              {ctx.props().data.iter().map(|r| html! {<Widget data={r.clone()}/>}).collect::<Vec<_>>()}
+            </div>
             <h1>{"My Spotify Playlists"}</h1>
             <div></div>
             <form>
@@ -151,9 +182,114 @@ impl Component for Home {
     }
 }
 
+#[derive(PartialEq, Properties)]
+pub struct WidgetProps {
+    data: (List, QueryResponse),
+}
+
+struct Widget;
+
+impl Component for Widget {
+    type Message = ();
+    type Properties = WidgetProps;
+
+    fn create(_: &Context<Self>) -> Self {
+        Widget
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let (list, response) = &ctx.props().data;
+        html! {
+          <div class="col-6">
+            <div class="row">
+              <div class="col-8">
+                <h2>{&list.name}</h2>
+              </div>
+              <div class="col-2">
+                <button type="button" class="btn btn-success col-12">{"Go"}</button>
+              </div>
+              <div class="col-2">
+                <button type="button" class="btn btn-danger col-12">{"Unsave"}</button>
+              </div>
+            </div>
+            <table class="table table-striped">
+              <thead>
+                <tr>
+                  <th class="col-1">{"#"}</th>
+                  <th class="col-8">{&response.header[0]}</th>
+                  <th>{&response.header[1]}</th>
+                </tr>
+              </thead>
+              <tbody>{for response.items.iter().zip(1..).map(|(row, i)| html! {
+                <Row i={i} row={row.clone()}/>
+              })}</tbody>
+            </table>
+          </div>
+        }
+    }
+}
+
+#[derive(PartialEq, Properties)]
+pub struct RowProps {
+    i: i32,
+    row: Vec<String>,
+}
+
+struct Row;
+
+impl Component for Row {
+    type Message = ();
+    type Properties = RowProps;
+
+    fn create(_: &Context<Self>) -> Self {
+        Row
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        html! {
+          <tr>
+            <th>{ctx.props().i}</th>
+            <td>{&ctx.props().row[0]}</td>
+            <td>{&ctx.props().row[1]}</td>
+          </tr>
+        }
+    }
+}
+
 // Called by our JS entry point to run the example
 #[wasm_bindgen(start)]
 pub async fn run() -> Result<(), JsValue> {
     yew::start_app::<App>();
     Ok(())
+}
+
+async fn fetch_lists(auth: &str) -> Result<Vec<List>, JsValue> {
+    let window = web_sys::window().expect("no global `window` exists");
+    let document = window.document().expect("should have a document on window");
+    let request = query("/api/lists", "GET", auth)?;
+    let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
+    let resp: Response = resp_value.dyn_into()?;
+    let json = JsFuture::from(resp.json()?).await?;
+    let lists: Lists = json.into_serde().unwrap();
+    Ok(lists.items)
+}
+
+async fn fetch_items(auth: &str, id: &str) -> Result<QueryResponse, JsValue> {
+    let window = web_sys::window().expect("no global `window` exists");
+    let request = query(&format!("/api/lists/{}/items", id), "GET", auth).unwrap();
+    let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
+    let resp: Response = resp_value.dyn_into()?;
+    let json = JsFuture::from(resp.json()?).await?;
+    Ok(json.into_serde().unwrap())
+}
+
+fn query(url: &str, method: &str, auth: &str) -> Result<Request, JsValue> {
+    let mut opts = RequestInit::new();
+    opts.method(method);
+    opts.mode(RequestMode::Cors);
+    let request = Request::new_with_str_and_init(url, &opts)?;
+    request
+        .headers()
+        .set("Authorization", &format!("Basic {}", auth))?;
+    Ok(request)
 }

@@ -14,6 +14,7 @@ futures = "0"
 getrandom = { version = "0.2.2", features = [ "js" ] }
 rand = "0.8.3"
 serde = { version = "1.0.80", features = ["derive"] }
+smashsort = { path = "../smashsort/" }
 wasm-bindgen = { version = "0.2.78", features = ["serde-serialize"]  }
 wasm-bindgen-futures = "0.4.28"
 yew = "0.19"
