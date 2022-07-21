@@ -16,6 +16,7 @@ rand = "0.8.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 sqlparser = { version = "0", features = ["serde"] }
+smashsort = { path = "../smashsort/" }
 uuid = { version = "0.8", features = ["v4"] }
 url = "2"
 
