@@ -1,6 +1,6 @@
 #![feature(async_closure)]
 use rand::prelude::SliceRandom;
-use smashsort::{List, Lists, QueryResponse};
+use smashsort::{ItemMetadata, ItemQuery, List, Lists};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
@@ -25,20 +25,22 @@ impl Component for App {
                 <a id="brand" class="navbar-brand" href="#">{"Smashsort"}</a>
               </div>
             </nav>
-            <State/>
+            <div class="container-lg my-md-4">
+              <State/>
+            </div>
           </div>
         }
     }
 }
 
 pub enum StateMsg {
-    LoadUser(String),
-    LoadHome(Vec<(List, QueryResponse)>),
+    FetchHome(String),
+    LoadHome(String, Vec<(List, ItemQuery)>),
+    LoadRandom(String, ItemQuery),
 }
 
 pub struct State {
     current_page: Page,
-    home_data: Vec<(List, QueryResponse)>,
 }
 
 impl Component for State {
@@ -48,40 +50,64 @@ impl Component for State {
     fn create(_: &Context<Self>) -> Self {
         State {
             current_page: Page::Login,
-            home_data: Vec::new(),
         }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        if let Page::Login = self.current_page {
-            html! {
-                <Login on_demo_select={ctx.link().callback(|_| StateMsg::LoadUser(String::from("demo")))}/>
+        match &self.current_page {
+            Page::Login => html! {
+                <Login on_demo_select={ctx.link().callback(|_| StateMsg::FetchHome(String::from("demo")))}/>
+            },
+            Page::Home(lists) => {
+                html! {
+                    <Home lists={lists.clone()}/>
+                }
             }
-        } else {
-            html! {
-                <Home data={self.home_data.clone()}/>
+            Page::Random(query, _) => {
+                html! {
+                    <Random query={query.clone()}/>
+                }
             }
         }
     }
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
-            StateMsg::LoadUser(user) => {
+            StateMsg::FetchHome(user) => {
                 ctx.link().send_future(async move {
                     let lists = fetch_lists(&user).await.unwrap();
-                    let items =
-                        futures::future::join_all(lists.iter().map(|l| fetch_items(&user, &l.id)))
-                            .await
-                            .into_iter()
-                            .collect::<Result<Vec<_>, _>>()
-                            .unwrap();
-                    StateMsg::LoadHome(lists.into_iter().zip(items).collect())
+                    let lists = futures::future::join_all(lists.into_iter().map(|list| async {
+                        let query = query_items(&user, &list.id).await?;
+                        Ok((list, query))
+                    }))
+                    .await
+                    .into_iter()
+                    .collect::<Result<_, JsValue>>()
+                    .unwrap();
+                    StateMsg::LoadHome(user, lists)
                 });
                 false
             }
-            StateMsg::LoadHome(home_data) => {
-                self.current_page = Page::Home;
-                self.home_data = home_data;
+            StateMsg::LoadHome(user, lists) => {
+                self.current_page = Page::Home(
+                    lists
+                        .into_iter()
+                        .map(|(data, query)| {
+                            let user = user.clone();
+                            ListData {
+                                data,
+                                query: query.clone(),
+                                on_go_select: ctx
+                                    .link()
+                                    .callback_once(move |_| StateMsg::LoadRandom(user, query)),
+                            }
+                        })
+                        .collect(),
+                );
+                true
+            }
+            StateMsg::LoadRandom(user, query) => {
+                self.current_page = Page::Random(query, RandomMode::Match);
                 true
             }
         }
@@ -91,12 +117,12 @@ impl Component for State {
 #[derive(PartialEq)]
 enum Page {
     Login,
-    Home,
-    Random(Random, String),
+    Home(Vec<ListData>),
+    Random(ItemQuery, RandomMode),
 }
 
 #[derive(PartialEq)]
-enum Random {
+enum RandomMode {
     Match,
     Round,
 }
@@ -118,7 +144,7 @@ impl Component for Login {
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         html! {
-          <div class="container-lg my-md-4">
+          <div>
             <div class="row justify-content-center">
               <button type="button" id="login" class="col-2 btn btn-success">{"Login with Spotify"}</button>
             </div>
@@ -132,7 +158,7 @@ impl Component for Login {
 
 #[derive(PartialEq, Properties)]
 pub struct HomeProps {
-    data: Vec<(List, QueryResponse)>,
+    lists: Vec<ListData>,
 }
 
 pub struct Home;
@@ -163,7 +189,7 @@ impl Component for Home {
               </div>
             </div>
             <div class="row">
-              {ctx.props().data.iter().map(|r| html! {<Widget data={r.clone()}/>}).collect::<Vec<_>>()}
+              {ctx.props().lists.iter().map(|l| html! {<Widget list={l.clone()}/>}).collect::<Vec<_>>()}
             </div>
             <h1>{"My Spotify Playlists"}</h1>
             <div></div>
@@ -184,7 +210,7 @@ impl Component for Home {
 
 #[derive(PartialEq, Properties)]
 pub struct WidgetProps {
-    data: (List, QueryResponse),
+    list: ListData,
 }
 
 struct Widget;
@@ -198,15 +224,15 @@ impl Component for Widget {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let (list, response) = &ctx.props().data;
+        let list = &ctx.props().list;
         html! {
           <div class="col-6">
             <div class="row">
               <div class="col-8">
-                <h2>{&list.name}</h2>
+                <h2>{&list.data.name}</h2>
               </div>
               <div class="col-2">
-                <button type="button" class="btn btn-success col-12">{"Go"}</button>
+                <button type="button" class="btn btn-success col-12" onclick={list.on_go_select.clone()}>{"Go"}</button>
               </div>
               <div class="col-2">
                 <button type="button" class="btn btn-danger col-12">{"Unsave"}</button>
@@ -216,12 +242,12 @@ impl Component for Widget {
               <thead>
                 <tr>
                   <th class="col-1">{"#"}</th>
-                  <th class="col-8">{&response.header[0]}</th>
-                  <th>{&response.header[1]}</th>
+                  <th class="col-8">{&list.query.fields[0]}</th>
+                  <th>{&list.query.fields[1]}</th>
                 </tr>
               </thead>
-              <tbody>{for response.items.iter().zip(1..).map(|(row, i)| html! {
-                <Row i={i} row={row.clone()}/>
+              <tbody>{for list.query.items.iter().zip(1..).map(|(item, i)| html! {
+                <Row i={i} values={item.values.clone()}/>
               })}</tbody>
             </table>
           </div>
@@ -232,7 +258,7 @@ impl Component for Widget {
 #[derive(PartialEq, Properties)]
 pub struct RowProps {
     i: i32,
-    row: Vec<String>,
+    values: Vec<String>,
 }
 
 struct Row;
@@ -249,8 +275,125 @@ impl Component for Row {
         html! {
           <tr>
             <th>{ctx.props().i}</th>
-            <td>{&ctx.props().row[0]}</td>
-            <td>{&ctx.props().row[1]}</td>
+            <td>{&ctx.props().values[0]}</td>
+            <td>{&ctx.props().values[1]}</td>
+          </tr>
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Properties)]
+pub struct ListData {
+    data: List,
+    query: ItemQuery,
+    on_go_select: Callback<MouseEvent>,
+}
+
+#[derive(PartialEq, Properties)]
+pub struct RandomProps {
+    query: ItemQuery,
+}
+
+struct Random;
+
+impl Component for Random {
+    type Message = ();
+    type Properties = RandomProps;
+
+    fn create(_: &Context<Self>) -> Self {
+        Random
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let mut queued_scores = ctx.props().query.items.clone();
+        queued_scores.shuffle(&mut rand::thread_rng());
+        let first = queued_scores.pop().unwrap().metadata.unwrap();
+        let second = queued_scores.pop().unwrap().metadata.unwrap();
+        let (left, right): (Vec<_>, Vec<_>) = ctx
+            .props()
+            .query
+            .items
+            .iter()
+            .zip(1..)
+            .map(|(item, i)| {
+                (
+                    i,
+                    html! {<Item i={i} item={item.metadata.as_ref().unwrap().clone()}/>},
+                )
+            })
+            .partition(|(i, _)| i % 2 == 1);
+        let left = left.into_iter().map(|(_, item)| item);
+        let right = right.into_iter().map(|(_, item)| item);
+        html! {
+          <div>
+            <h1>{"Random Matches"}</h1>
+            <div class="row">
+              <div class="col-6">
+                <iframe id="iframe1" width="100%" height="380" frameborder="0" src={first.iframe}></iframe>
+                <button type="button" class="btn btn-info width">{first.name}</button>
+              </div>
+              <div class="col-6">
+                <iframe id="iframe2" width="100%" height="380" frameborder="0" src={second.iframe}></iframe>
+                <button type="button" class="btn btn-warning width">{second.name}</button>
+              </div>
+            </div>
+            <div class="row">
+              <div class="col-6">
+                <table class="table table-striped">
+                  <thead>
+                    <tr>
+                      <th class="col-1">{"#"}</th>
+                      <th class="col-8">{"Track"}</th>
+                      <th>{"Record"}</th>
+                      <th>{"Score"}</th>
+                    </tr>
+                  </thead>
+                  <tbody>{for left}</tbody>
+                </table>
+              </div>
+              <div class="col-6">
+                <table class="table table-striped">
+                  <thead>
+                    <tr>
+                      <th class="col-1">{"#"}</th>
+                      <th class="col-8">{"Track"}</th>
+                      <th>{"Record"}</th>
+                      <th>{"Score"}</th>
+                    </tr>
+                  </thead>
+                  <tbody>{for right}</tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        }
+    }
+}
+
+#[derive(PartialEq, Properties)]
+pub struct ItemProps {
+    i: i32,
+    item: ItemMetadata,
+}
+
+struct Item;
+
+impl Component for Item {
+    type Message = ();
+    type Properties = ItemProps;
+
+    fn create(_: &Context<Self>) -> Self {
+        Item
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let props = ctx.props();
+        html! {
+          <tr>
+            <th>{props.i}</th>
+            <td>{&props.item.name}</td>
+            <td>{format!("{}-{}", props.item.wins, props.item.losses)}</td>
+            <td>{&props.item.score}</td>
           </tr>
         }
     }
@@ -271,10 +414,10 @@ async fn fetch_lists(auth: &str) -> Result<Vec<List>, JsValue> {
     let resp: Response = resp_value.dyn_into()?;
     let json = JsFuture::from(resp.json()?).await?;
     let lists: Lists = json.into_serde().unwrap();
-    Ok(lists.items)
+    Ok(lists.lists)
 }
 
-async fn fetch_items(auth: &str, id: &str) -> Result<QueryResponse, JsValue> {
+async fn query_items(auth: &str, id: &str) -> Result<ItemQuery, JsValue> {
     let window = web_sys::window().expect("no global `window` exists");
     let request = query(&format!("/api/lists/{}/items", id), "GET", auth).unwrap();
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
