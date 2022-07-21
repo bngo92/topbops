@@ -1,0 +1,43 @@
+[package]
+name = "smashsort-wasm"
+version = "0.1.0"
+authors = ["Bryan Ngo <bngo92@gmail.com>"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+futures = "0"
+getrandom = { version = "0.2.2", features = [ "js" ] }
+rand = "0.8.3"
+serde = { version = "1.0.80", features = ["derive"] }
+wasm-bindgen = { version = "0.2.78", features = ["serde-serialize"]  }
+wasm-bindgen-futures = "0.4.28"
+yew = "0.19"
+
+[dependencies.web-sys]
+version = "0.3.4"
+features = [
+  'console',
+  'Document',
+  'Element',
+  'HtmlAnchorElement',
+  'HtmlCollection',
+  'HtmlElement',
+  'HtmlIFrameElement',
+  'HtmlInputElement',
+  'HtmlSelectElement',
+  'Node',
+  'Location',
+  'HtmlButtonElement',
+  'Headers',
+  'Request',
+  'RequestInit',
+  'RequestMode',
+  'Response',
+  'UrlSearchParams',
+  'Window',
+]
