@@ -1,6 +1,6 @@
 #![feature(async_closure)]
 use rand::prelude::SliceRandom;
-use smashsort::{ItemMetadata, ItemQuery, List, Lists};
+use topbops::{ItemMetadata, ItemQuery, List, Lists};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
@@ -22,7 +22,7 @@ impl Component for App {
           <div>
             <nav class="navbar navbar-dark bg-dark">
               <div id="navbar" class="container-lg">
-                <a id="brand" class="navbar-brand" href="#">{"Smashsort"}</a>
+                <a id="brand" class="navbar-brand" href="#">{"Bops to the Top"}</a>
               </div>
             </nav>
             <div class="container-lg my-md-4">

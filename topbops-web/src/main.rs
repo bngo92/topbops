@@ -13,7 +13,6 @@ use hyper::{Body, Client, Method, Request, Response, Server, StatusCode, Uri};
 use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use smashsort::{ItemMetadata, ItemQuery, List, ListMode, Lists};
 use sqlparser::ast::{
     BinaryOperator, Expr, FunctionArg, FunctionArgExpr, Ident, Select, SelectItem, SetExpr,
     Statement, TableFactor,
@@ -24,6 +23,7 @@ use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
+use topbops::{ItemMetadata, ItemQuery, List, ListMode, Lists};
 #[cfg(feature = "dev")]
 use tokio::fs::File;
 #[cfg(feature = "dev")]
@@ -175,13 +175,13 @@ async fn route(
     } else {
         #[cfg(feature = "dev")]
         if let Some((file, mime)) = match req.uri().path() {
-            "/" => Some((File::open("../smashsort-wasm/www/index.html"), "text/html")),
-            "/smashsort_wasm.js" => Some((
-                File::open("../smashsort-wasm/pkg/smashsort_wasm.js"),
+            "/" => Some((File::open("../topbops-wasm/www/index.html"), "text/html")),
+            "/topbops_wasm.js" => Some((
+                File::open("../topbops-wasm/pkg/topbops_wasm.js"),
                 "application/javascript",
             )),
-            "/smashsort_wasm_bg.wasm" => Some((
-                File::open("../smashsort-wasm/pkg/smashsort_wasm_bg.wasm"),
+            "/topbops_wasm_bg.wasm" => Some((
+                File::open("../topbops-wasm/pkg/topbops_wasm_bg.wasm"),
                 "application/wasm",
             )),
             _ => None,
@@ -284,7 +284,7 @@ async fn login(
         )
         .await?;
     let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let user: smashsort_web::User = serde_json::from_slice(&got)?;
+    let user: topbops_web::User = serde_json::from_slice(&got)?;
 
     let user = User {
         id: Uuid::new_v4().to_hyphenated().to_string(),
@@ -409,7 +409,7 @@ async fn get_list_items(
                 } else {
                     Some(map[iter.next_back().unwrap().as_str().unwrap()].clone())
                 };
-                smashsort::Item {
+                topbops::Item {
                     values: iter
                         .map(|v| match v {
                             Value::String(s) => s.to_owned(),
@@ -569,7 +569,7 @@ async fn import_playlist(
         )
         .await?;
     let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let playlist: smashsort_web::Playlist = serde_json::from_slice(&got)?;
+    let playlist: topbops_web::Playlist = serde_json::from_slice(&got)?;
 
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
@@ -588,7 +588,7 @@ async fn import_playlist(
         )
         .await?;
     let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let mut playlist_items: smashsort_web::PlaylistItems = serde_json::from_slice(&got)?;
+    let mut playlist_items: topbops_web::PlaylistItems = serde_json::from_slice(&got)?;
     let mut list = List {
         id: playlist_id.to_owned(),
         user_id: user_id.clone(),
@@ -678,7 +678,7 @@ async fn import_playlist(
     create_external_list(db, session, list, items, user_id == DEMO_USER).await
 }
 
-pub fn new_spotify_item(track: &smashsort_web::Track) -> ItemMetadata {
+pub fn new_spotify_item(track: &topbops_web::Track) -> ItemMetadata {
     ItemMetadata::new(
         track.id.clone(),
         track.name.clone(),
