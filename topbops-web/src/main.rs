@@ -23,11 +23,11 @@ use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
-use topbops::{ItemMetadata, ItemQuery, List, ListMode, Lists};
 #[cfg(feature = "dev")]
 use tokio::fs::File;
 #[cfg(feature = "dev")]
 use tokio::io::AsyncReadExt;
+use topbops::{ItemMetadata, ItemQuery, List, ListMode, Lists};
 use uuid::Uuid;
 
 const ITEM_FIELDS: [&str; 3] = ["id", "name", "user_score"];
@@ -61,6 +61,8 @@ pub struct Item {
     pub user_id: String,
     pub r#type: String,
     pub name: String,
+    pub iframe: Option<String>,
+    pub rating: Option<i32>,
     pub user_score: i32,
     pub user_wins: i32,
     pub user_losses: i32,
@@ -589,49 +591,10 @@ async fn import_playlist(
         .await?;
     let got = hyper::body::to_bytes(resp.into_body()).await?;
     let mut playlist_items: topbops_web::PlaylistItems = serde_json::from_slice(&got)?;
-    let mut list = List {
-        id: playlist_id.to_owned(),
-        user_id: user_id.clone(),
-        name: playlist.name,
-        items: playlist_items
-            .items
-            .iter()
-            .map(|i| new_spotify_item(&i.track))
-            .collect(),
-        mode: ListMode::External,
-        query: String::from("SELECT name, user_score FROM tracks"),
-    };
     let mut items: Vec<_> = playlist_items
         .items
-        .iter()
-        .map(|i| {
-            let mut metadata = Map::new();
-            metadata.insert(
-                String::from("album"),
-                Value::String(i.track.album.name.clone()),
-            );
-            metadata.insert(
-                String::from("artists"),
-                Value::String(
-                    i.track
-                        .artists
-                        .iter()
-                        .map(|a| a.name.clone())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                ),
-            );
-            Item {
-                id: i.track.id.clone(),
-                r#type: String::from("track"),
-                name: i.track.name.clone(),
-                user_id: user_id.clone(),
-                user_score: 1500,
-                user_wins: 0,
-                user_losses: 0,
-                metadata,
-            }
-        })
+        .into_iter()
+        .map(|i| new_spotify_item(i.track, &user_id))
         .collect();
     while let Some(uri) = playlist_items.next {
         let uri: Uri = uri.parse().unwrap();
@@ -645,48 +608,56 @@ async fn import_playlist(
             .await?;
         let got = hyper::body::to_bytes(resp.into_body()).await?;
         playlist_items = serde_json::from_slice(&got)?;
-        for i in &playlist_items.items {
-            list.items.push(new_spotify_item(&i.track));
-            let mut metadata = Map::new();
-            metadata.insert(
-                String::from("album"),
-                Value::String(i.track.album.name.clone()),
-            );
-            metadata.insert(
-                String::from("artists"),
-                Value::String(
-                    i.track
-                        .artists
-                        .iter()
-                        .map(|a| a.name.clone())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                ),
-            );
-            items.push(Item {
-                id: i.track.id.clone(),
-                r#type: String::from("track"),
-                name: i.track.name.clone(),
-                user_id: user_id.clone(),
-                user_score: 1500,
-                user_wins: 0,
-                user_losses: 0,
-                metadata,
-            });
-        }
+        items.extend(
+            playlist_items
+                .items
+                .into_iter()
+                .map(|i| new_spotify_item(i.track, &user_id)),
+        );
     }
+    let list = List {
+        id: playlist_id.to_owned(),
+        user_id: user_id.clone(),
+        name: playlist.name,
+        items: items
+            .iter()
+            .map(|i| ItemMetadata::new(i.id.clone(), i.name.clone(), i.iframe.clone()))
+            .collect(),
+        mode: ListMode::External,
+        query: String::from("SELECT name, user_score FROM tracks"),
+    };
     create_external_list(db, session, list, items, user_id == DEMO_USER).await
 }
 
-pub fn new_spotify_item(track: &topbops_web::Track) -> ItemMetadata {
-    ItemMetadata::new(
-        track.id.clone(),
-        track.name.clone(),
-        Some(format!(
+pub fn new_spotify_item(track: topbops_web::Track, user_id: &String) -> Item {
+    let mut metadata = Map::new();
+    metadata.insert(String::from("album"), Value::String(track.album.name));
+    metadata.insert(
+        String::from("artists"),
+        Value::String(
+            track
+                .artists
+                .into_iter()
+                .map(|a| a.name)
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+    );
+    Item {
+        iframe: Some(format!(
             "https://open.spotify.com/embed/track/{}?utm_source=generator",
             track.id
         )),
-    )
+        id: track.id,
+        user_id: user_id.clone(),
+        r#type: String::from("track"),
+        name: track.name,
+        rating: None,
+        user_score: 1500,
+        user_wins: 0,
+        user_losses: 0,
+        metadata,
+    }
 }
 
 async fn create_user_list(
