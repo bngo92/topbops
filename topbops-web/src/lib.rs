@@ -1,60 +1,73 @@
+use azure_data_cosmos::prelude::CosmosEntity;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
+
+pub mod spotify;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Playlists {
-    pub items: Vec<Playlist>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Playlist {
-    pub id: String,
-    pub name: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct PlaylistItems {
-    pub items: Vec<Item>,
-    pub next: Option<String>,
+pub struct Token {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Item {
-    pub track: Track,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct AlbumItems {
-    pub items: Vec<AlbumTrack>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Track {
     pub id: String,
+    pub user_id: String,
+    pub r#type: String,
     pub name: String,
-    pub album: Album,
-    pub artists: Vec<Artist>,
-    pub preview_url: Option<String>,
+    pub iframe: Option<String>,
+    pub rating: Option<i32>,
+    pub user_score: i32,
+    pub user_wins: i32,
+    pub user_losses: i32,
+    pub metadata: Map<String, Value>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct AlbumTrack {
-    pub id: String,
-    pub name: String,
-    pub artists: Vec<Artist>,
-    pub preview_url: Option<String>,
+impl<'a> CosmosEntity<'a> for Item {
+    type Entity = &'a str;
+
+    fn partition_key(&'a self) -> Self::Entity {
+        self.user_id.as_ref()
+    }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Album {
-    pub name: String,
+#[allow(clippy::enum_variant_names)]
+#[derive(Debug)]
+pub enum Error {
+    HyperError(hyper::Error),
+    RequestError(hyper::http::Error),
+    JSONError(serde_json::Error),
+    CosmosError(azure_data_cosmos::Error),
+    IOError(std::io::Error),
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Artist {
-    pub name: String,
+impl From<hyper::Error> for Error {
+    fn from(e: hyper::Error) -> Error {
+        Error::HyperError(e)
+    }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct User {
-    pub id: String,
+impl From<hyper::http::Error> for Error {
+    fn from(e: hyper::http::Error) -> Error {
+        Error::RequestError(e)
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(e: serde_json::Error) -> Error {
+        Error::JSONError(e)
+    }
+}
+
+impl From<azure_data_cosmos::Error> for Error {
+    fn from(e: azure_data_cosmos::Error) -> Error {
+        Error::CosmosError(e)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Error {
+        Error::IOError(e)
+    }
 }

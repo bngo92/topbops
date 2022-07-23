@@ -27,16 +27,11 @@ use std::sync::{Arc, RwLock};
 use tokio::fs::File;
 #[cfg(feature = "dev")]
 use tokio::io::AsyncReadExt;
-use topbops::{ItemMetadata, ItemQuery, List, ListMode, Lists};
+use topbops::{ItemQuery, List, ListMode, Lists};
+use topbops_web::{Error, Item, Token};
 use uuid::Uuid;
 
 const ITEM_FIELDS: [&str; 3] = ["id", "name", "user_score"];
-
-#[derive(Debug, Deserialize, Serialize)]
-struct Token {
-    access_token: String,
-    refresh_token: Option<String>,
-}
 
 #[derive(Debug, Deserialize, Serialize)]
 struct User {
@@ -48,28 +43,6 @@ struct User {
 }
 
 impl<'a> CosmosEntity<'a> for User {
-    type Entity = &'a str;
-
-    fn partition_key(&'a self) -> Self::Entity {
-        self.user_id.as_ref()
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Item {
-    pub id: String,
-    pub user_id: String,
-    pub r#type: String,
-    pub name: String,
-    pub iframe: Option<String>,
-    pub rating: Option<i32>,
-    pub user_score: i32,
-    pub user_wins: i32,
-    pub user_losses: i32,
-    pub metadata: Map<String, Value>,
-}
-
-impl<'a> CosmosEntity<'a> for Item {
     type Entity = &'a str;
 
     fn partition_key(&'a self) -> Self::Entity {
@@ -286,7 +259,7 @@ async fn login(
         )
         .await?;
     let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let user: topbops_web::User = serde_json::from_slice(&got)?;
+    let user: topbops_web::spotify::User = serde_json::from_slice(&got)?;
 
     let user = User {
         id: Uuid::new_v4().to_hyphenated().to_string(),
@@ -549,115 +522,18 @@ fn parse_select(s: &str) -> Select {
     }
 }
 
-async fn import_playlist(
+async fn import_list(
     db: DatabaseClient,
     session: Arc<RwLock<Option<ConsistencyLevel>>>,
     user_id: String,
-    playlist_id: &str,
+    r#type: &str,
+    id: &str,
 ) -> Result<Response<Body>, Error> {
-    let token = get_token().await?;
-
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = format!("https://api.spotify.com/v1/playlists/{}", playlist_id)
-        .parse()
-        .unwrap();
-    let resp = client
-        .request(
-            Request::builder()
-                .uri(uri)
-                .header("Authorization", format!("Bearer {}", token.access_token))
-                .body(Body::empty())?,
-        )
-        .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let playlist: topbops_web::Playlist = serde_json::from_slice(&got)?;
-
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = format!(
-        "https://api.spotify.com/v1/playlists/{}/tracks",
-        playlist_id
-    )
-    .parse()
-    .unwrap();
-    let resp = client
-        .request(
-            Request::builder()
-                .uri(uri)
-                .header("Authorization", format!("Bearer {}", token.access_token))
-                .body(Body::empty())?,
-        )
-        .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let mut playlist_items: topbops_web::PlaylistItems = serde_json::from_slice(&got)?;
-    let mut items: Vec<_> = playlist_items
-        .items
-        .into_iter()
-        .map(|i| new_spotify_item(i.track, &user_id))
-        .collect();
-    while let Some(uri) = playlist_items.next {
-        let uri: Uri = uri.parse().unwrap();
-        let resp = client
-            .request(
-                Request::builder()
-                    .uri(uri)
-                    .header("Authorization", format!("Bearer {}", token.access_token))
-                    .body(Body::empty())?,
-            )
-            .await?;
-        let got = hyper::body::to_bytes(resp.into_body()).await?;
-        playlist_items = serde_json::from_slice(&got)?;
-        items.extend(
-            playlist_items
-                .items
-                .into_iter()
-                .map(|i| new_spotify_item(i.track, &user_id)),
-        );
-    }
-    let list = List {
-        id: playlist_id.to_owned(),
-        user_id: user_id.clone(),
-        name: playlist.name,
-        items: items
-            .iter()
-            .map(|i| ItemMetadata::new(i.id.clone(), i.name.clone(), i.iframe.clone()))
-            .collect(),
-        mode: ListMode::External,
-        query: String::from("SELECT name, user_score FROM tracks"),
+    let (list, items) = match r#type {
+        "spotify" => topbops_web::spotify::import_playlist(&user_id, id).await?,
+        _ => todo!(),
     };
     create_external_list(db, session, list, items, user_id == DEMO_USER).await
-}
-
-pub fn new_spotify_item(track: topbops_web::Track, user_id: &String) -> Item {
-    let mut metadata = Map::new();
-    metadata.insert(String::from("album"), Value::String(track.album.name));
-    metadata.insert(
-        String::from("artists"),
-        Value::String(
-            track
-                .artists
-                .into_iter()
-                .map(|a| a.name)
-                .collect::<Vec<_>>()
-                .join(", "),
-        ),
-    );
-    Item {
-        iframe: Some(format!(
-            "https://open.spotify.com/embed/track/{}?utm_source=generator",
-            track.id
-        )),
-        id: track.id,
-        user_id: user_id.clone(),
-        r#type: String::from("track"),
-        name: track.name,
-        rating: None,
-        user_score: 1500,
-        user_wins: 0,
-        user_losses: 0,
-        metadata,
-    }
 }
 
 async fn create_user_list(
@@ -765,30 +641,6 @@ async fn create_external_list(
         .map_err(Error::from)
 }
 
-async fn get_token() -> Result<Token, Error> {
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = "https://accounts.spotify.com/api/token".parse().unwrap();
-    let resp = client
-        .request(
-            Request::builder()
-                .method(Method::POST)
-                .uri(uri)
-                .header(
-                    "Authorization",
-                    &format!(
-                        "Basic {}",
-                        std::env::var("SPOTIFY_TOKEN").expect("SPOTIFY_TOKEN is missing")
-                    ),
-                )
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .body(Body::from("grant_type=client_credentials"))?,
-        )
-        .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    serde_json::from_slice(&got).map_err(Error::from)
-}
-
 #[tokio::main]
 async fn main() {
     // We'll bind to 127.0.0.1:3000
@@ -811,10 +663,11 @@ async fn main() {
     // Reset demo user data during startup in production
     if cfg!(not(feature = "dev")) {
         let demo_user = String::from(DEMO_USER);
-        import_playlist(
+        import_list(
             client.clone().into_database_client("smashsort"),
             Arc::clone(&session),
             demo_user.clone(),
+            "spotify",
             "5jPjYAdQO0MgzHdwSmYPNZ",
         )
         .await
@@ -896,48 +749,6 @@ fn unauthorized() -> Result<Response<Body>, Error> {
 
 fn get_response_builder() -> Builder {
     Response::builder().header("Access-Control-Allow-Origin", HeaderValue::from_static("*"))
-}
-
-#[allow(clippy::enum_variant_names)]
-#[derive(Debug)]
-enum Error {
-    HyperError(hyper::Error),
-    RequestError(hyper::http::Error),
-    JSONError(serde_json::Error),
-    CosmosError(azure_data_cosmos::Error),
-    #[cfg(feature = "dev")]
-    IOError(std::io::Error),
-}
-
-impl From<hyper::Error> for Error {
-    fn from(e: hyper::Error) -> Error {
-        Error::HyperError(e)
-    }
-}
-
-impl From<hyper::http::Error> for Error {
-    fn from(e: hyper::http::Error) -> Error {
-        Error::RequestError(e)
-    }
-}
-
-impl From<serde_json::Error> for Error {
-    fn from(e: serde_json::Error) -> Error {
-        Error::JSONError(e)
-    }
-}
-
-impl From<azure_data_cosmos::Error> for Error {
-    fn from(e: azure_data_cosmos::Error) -> Error {
-        Error::CosmosError(e)
-    }
-}
-
-#[cfg(feature = "dev")]
-impl From<std::io::Error> for Error {
-    fn from(e: std::io::Error) -> Error {
-        Error::IOError(e)
-    }
 }
 
 #[cfg(test)]
