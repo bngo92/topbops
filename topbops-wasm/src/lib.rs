@@ -7,56 +7,30 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, RequestMode, Response};
 use yew::{html, Callback, Component, Context, Html, MouseEvent, Properties};
 
-pub struct App;
-
-impl Component for App {
-    type Message = ();
-    type Properties = ();
-
-    fn create(_: &Context<Self>) -> Self {
-        App
-    }
-
-    fn view(&self, _: &Context<Self>) -> Html {
-        html! {
-          <div>
-            <nav class="navbar navbar-dark bg-dark">
-              <div id="navbar" class="container-lg">
-                <a id="brand" class="navbar-brand" href="#">{"Bops to the Top"}</a>
-              </div>
-            </nav>
-            <div class="container-lg my-md-4">
-              <State/>
-            </div>
-          </div>
-        }
-    }
-}
-
-pub enum StateMsg {
+pub enum Msg {
     FetchHome(String),
     LoadHome(String, Vec<(List, ItemQuery)>),
     LoadRandom(String, ItemQuery),
 }
 
-pub struct State {
+pub struct App {
     current_page: Page,
 }
 
-impl Component for State {
-    type Message = StateMsg;
+impl Component for App {
+    type Message = Msg;
     type Properties = ();
 
     fn create(_: &Context<Self>) -> Self {
-        State {
+        App {
             current_page: Page::Login,
         }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        match &self.current_page {
+        let page = match &self.current_page {
             Page::Login => html! {
-                <Login on_demo_select={ctx.link().callback(|_| StateMsg::FetchHome(String::from("demo")))}/>
+                <Login on_demo_select={ctx.link().callback(|_| Msg::FetchHome(String::from("demo")))}/>
             },
             Page::Home(lists) => {
                 html! {
@@ -68,12 +42,24 @@ impl Component for State {
                     <Random query={query.clone()}/>
                 }
             }
+        };
+        html! {
+          <div>
+            <nav class="navbar navbar-dark bg-dark">
+              <div id="navbar" class="container-lg">
+                <a id="brand" class="navbar-brand" href="#">{"Bops to the Top"}</a>
+              </div>
+            </nav>
+            <div class="container-lg my-md-4">
+              {page}
+            </div>
+          </div>
         }
     }
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
-            StateMsg::FetchHome(user) => {
+            Msg::FetchHome(user) => {
                 ctx.link().send_future(async move {
                     let lists = fetch_lists(&user).await.unwrap();
                     let lists = futures::future::join_all(lists.into_iter().map(|list| async {
@@ -84,11 +70,11 @@ impl Component for State {
                     .into_iter()
                     .collect::<Result<_, JsValue>>()
                     .unwrap();
-                    StateMsg::LoadHome(user, lists)
+                    Msg::LoadHome(user, lists)
                 });
                 false
             }
-            StateMsg::LoadHome(user, lists) => {
+            Msg::LoadHome(user, lists) => {
                 self.current_page = Page::Home(
                     lists
                         .into_iter()
@@ -99,14 +85,14 @@ impl Component for State {
                                 query: query.clone(),
                                 on_go_select: ctx
                                     .link()
-                                    .callback_once(move |_| StateMsg::LoadRandom(user, query)),
+                                    .callback_once(move |_| Msg::LoadRandom(user, query)),
                             }
                         })
                         .collect(),
                 );
                 true
             }
-            StateMsg::LoadRandom(user, query) => {
+            Msg::LoadRandom(user, query) => {
                 self.current_page = Page::Random(query, RandomMode::Match);
                 true
             }
@@ -408,7 +394,6 @@ pub async fn run() -> Result<(), JsValue> {
 
 async fn fetch_lists(auth: &str) -> Result<Vec<List>, JsValue> {
     let window = web_sys::window().expect("no global `window` exists");
-    let document = window.document().expect("should have a document on window");
     let request = query("/api/lists", "GET", auth)?;
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
