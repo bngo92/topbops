@@ -47,7 +47,7 @@ impl Component for App {
           <div>
             <nav class="navbar navbar-dark bg-dark">
               <div id="navbar" class="container-lg">
-                <a id="brand" class="navbar-brand" href="#">{"Bops to the Top"}</a>
+                <a id="brand" class="navbar-brand" href="#" onclick={ctx.link().callback(|_| Msg::FetchHome(String::from("demo")))}>{"Bops to the Top"}</a>
               </div>
             </nav>
             <div class="container-lg my-md-4">
