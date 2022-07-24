@@ -106,6 +106,9 @@ async fn route(
                 (["lists", id, "items"], &Method::GET) => {
                     get_list_items(db, session, user_id, id).await
                 }
+                ([""], &Method::POST) => {
+                    handle_action(db, session, user_id, req.uri().query()).await
+                }
                 (_, _) => get_response_builder()
                     .status(StatusCode::METHOD_NOT_ALLOWED)
                     .body(Body::empty())
@@ -137,6 +140,9 @@ async fn route(
                 (["lists"], &Method::GET) => get_lists(db, session, user_id).await,
                 (["lists", id, "items"], &Method::GET) => {
                     get_list_items(db, session, user_id, id).await
+                }
+                ([""], &Method::POST) => {
+                    handle_action(db, session, user_id, req.uri().query()).await
                 }
                 (_, _) => get_response_builder()
                     .status(StatusCode::METHOD_NOT_ALLOWED)
@@ -538,6 +544,147 @@ async fn import_list(
     create_external_list(db, session, list, items, user_id == DEMO_USER).await
 }
 
+async fn handle_action(
+    db: DatabaseClient,
+    session: Arc<SessionClient>,
+    user_id: String,
+    query: Option<&str>,
+) -> Result<Response<Body>, Error> {
+    if let Some(query) = query.and_then(|q| {
+        q.split('&')
+            .map(|s| s.split_once('='))
+            .collect::<Option<Vec<(&str, &str)>>>()
+    }) {
+        match query[..] {
+            [("action", "update"), ("list", id), ("win", win), ("lose", lose)] => {
+                return handle_stats_update(db, session, user_id, id, win, lose).await;
+            }
+            _ => {}
+        }
+    }
+    get_response_builder()
+        .status(StatusCode::BAD_REQUEST)
+        .body(Body::empty())
+        .map_err(Error::from)
+}
+
+async fn handle_stats_update(
+    db: DatabaseClient,
+    session: Arc<SessionClient>,
+    user_id: String,
+    id: &str,
+    win: &str,
+    lose: &str,
+) -> Result<Response<Body>, Error> {
+    let list_client = db
+        .clone()
+        .collection_client("lists")
+        .document_client(id, &user_id)?;
+    let client = db.clone().collection_client("items");
+    let (Ok(list_response), Ok(mut win_item), Ok(mut lose_item)) = futures::future::join3(
+        list_client.get_document::<List>().into_future(),
+        get_item_doc(client.clone(), &session, user_id.clone(), win),
+        get_item_doc(client.clone(), &session, user_id.clone(), lose),
+    ).await else {
+        return get_response_builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::empty())
+            .map_err(Error::from);
+    };
+
+    let mut list = if let GetDocumentResponse::Found(list) = list_response {
+        list.document.document
+    } else {
+        todo!()
+    };
+    let mut win_metadata = None;
+    let mut lose_metadata = None;
+    for i in &mut list.items {
+        if i.id == win {
+            win_metadata = Some(i);
+        } else if i.id == lose {
+            lose_metadata = Some(i);
+        }
+    }
+    let win_metadata = win_metadata.unwrap();
+    let lose_metadata = lose_metadata.unwrap();
+    update_stats(
+        &mut win_metadata.score,
+        &mut win_metadata.wins,
+        &mut lose_metadata.score,
+        &mut lose_metadata.losses,
+    );
+    update_stats(
+        &mut win_item.user_score,
+        &mut win_item.user_wins,
+        &mut lose_item.user_score,
+        &mut lose_item.user_losses,
+    );
+
+    let win_client = client
+        .clone()
+        .document_client(win_item.id.clone(), &win_item.user_id)?;
+    let lose_client = client.document_client(lose_item.id.clone(), &lose_item.user_id)?;
+    let session_copy = session
+        .session
+        .read()
+        .unwrap()
+        .clone()
+        .expect("session should be set by get_item_docs");
+    futures::future::try_join3(
+        list_client
+            .replace_document(list)
+            .consistency_level(session_copy.clone())
+            .into_future(),
+        win_client
+            .replace_document(win_item)
+            .consistency_level(session_copy.clone())
+            .into_future(),
+        lose_client
+            .replace_document(lose_item)
+            .consistency_level(session_copy)
+            .into_future(),
+    )
+    .await?;
+    get_response_builder()
+        .status(StatusCode::OK)
+        .body(Body::empty())
+        .map_err(Error::from)
+}
+
+async fn get_item_doc(
+    client: CollectionClient,
+    session: &Arc<SessionClient>,
+    user_id: String,
+    id: &str,
+) -> Result<Item, Error> {
+    let session_copy = session.session.read().unwrap().clone().unwrap();
+    if let GetDocumentResponse::Found(item) = client
+        .document_client(id, &user_id)?
+        .get_document::<Item>()
+        .consistency_level(session_copy)
+        .into_future()
+        .await?
+    {
+        Ok(item.document.document)
+    } else {
+        todo!()
+    }
+}
+
+fn update_stats(
+    win_score: &mut i32,
+    win_wins: &mut i32,
+    lose_score: &mut i32,
+    lose_losses: &mut i32,
+) {
+    let diff = (32. / (1. + 10f64.powf((*win_score - *lose_score) as f64 / 400.))) as i32;
+    *win_score += diff;
+    *lose_score -= diff;
+    *win_wins += 1;
+    *lose_losses += 1;
+}
+
 async fn create_user_list(
     db: DatabaseClient,
     session: Arc<SessionClient>,
@@ -797,5 +944,68 @@ mod test {
         };
         crate::transform_query(&mut query, "demo");
         assert_eq!(query.to_string(), "SELECT c.metadata.artists, AVG(c.user_score) FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" GROUP BY c.metadata.artists");
+    }
+
+    #[test]
+    fn test_update_stats() {
+        let mut first_score = 1500;
+        let mut first_wins = 0;
+        let mut first_losses = 0;
+        let mut second_score = 1500;
+        let mut second_wins = 0;
+        let mut second_losses = 0;
+        crate::update_stats(
+            &mut first_score,
+            &mut first_wins,
+            &mut second_score,
+            &mut second_losses,
+        );
+        assert_eq!(
+            (
+                first_score,
+                first_wins,
+                first_losses,
+                second_score,
+                second_wins,
+                second_losses
+            ),
+            (1516, 1, 0, 1484, 0, 1)
+        );
+
+        crate::update_stats(
+            &mut first_score,
+            &mut first_wins,
+            &mut second_score,
+            &mut second_losses,
+        );
+        assert_eq!(
+            (
+                first_score,
+                first_wins,
+                first_losses,
+                second_score,
+                second_wins,
+                second_losses
+            ),
+            (1530, 2, 0, 1470, 0, 2)
+        );
+
+        crate::update_stats(
+            &mut second_score,
+            &mut second_wins,
+            &mut first_score,
+            &mut first_losses,
+        );
+        assert_eq!(
+            (
+                first_score,
+                first_wins,
+                first_losses,
+                second_score,
+                second_wins,
+                second_losses
+            ),
+            (1512, 2, 1, 1488, 1, 2)
+        );
     }
 }
