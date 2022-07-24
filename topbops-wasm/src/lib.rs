@@ -10,7 +10,8 @@ use yew::{html, Callback, Component, Context, Html, MouseEvent, Properties};
 pub enum Msg {
     FetchHome(String),
     LoadHome(String, Vec<(List, ItemQuery)>),
-    LoadRandom(String, ItemQuery),
+    LoadRandom(String, String, ItemQuery),
+    UpdateStats((String, String, String, String)),
 }
 
 pub struct App {
@@ -37,9 +38,25 @@ impl Component for App {
                     <Home lists={lists.clone()}/>
                 }
             }
-            Page::Random(query, _) => {
+            Page::Random(user, list, query, _) => {
+                let mut queued_scores: Vec<_> = query.items.iter().collect();
+                queued_scores.shuffle(&mut rand::thread_rng());
+                let left = queued_scores.pop().unwrap().metadata.clone().unwrap();
+                let right = queued_scores.pop().unwrap().metadata.clone().unwrap();
+                let left_param = (
+                    user.clone(),
+                    list.clone(),
+                    left.id.clone(),
+                    right.id.clone(),
+                );
+                let right_param = (
+                    user.clone(),
+                    list.clone(),
+                    right.id.clone(),
+                    left.id.clone(),
+                );
                 html! {
-                    <Random query={query.clone()}/>
+                    <Random left={left} on_left_select={ctx.link().callback_once(|_| Msg::UpdateStats(left_param))} right={right} on_right_select={ctx.link().callback_once(|_| Msg::UpdateStats(right_param))} query={query.clone()}/>
                 }
             }
         };
@@ -80,21 +97,30 @@ impl Component for App {
                         .into_iter()
                         .map(|(data, query)| {
                             let user = user.clone();
+                            let list = data.id.clone();
                             ListData {
                                 data,
                                 query: query.clone(),
                                 on_go_select: ctx
                                     .link()
-                                    .callback_once(move |_| Msg::LoadRandom(user, query)),
+                                    .callback_once(move |_| Msg::LoadRandom(user, list, query)),
                             }
                         })
                         .collect(),
                 );
                 true
             }
-            Msg::LoadRandom(user, query) => {
-                self.current_page = Page::Random(query, RandomMode::Match);
+            Msg::LoadRandom(user, list, query) => {
+                self.current_page = Page::Random(user, list, query, RandomMode::Match);
                 true
+            }
+            Msg::UpdateStats((user, list, win, lose)) => {
+                ctx.link().send_future(async move {
+                    update_stats(&user, &list, &win, &lose).await.unwrap();
+                    let query = query_items(&user, &list).await.unwrap();
+                    Msg::LoadRandom(user, list, query)
+                });
+                false
             }
         }
     }
@@ -104,7 +130,7 @@ impl Component for App {
 enum Page {
     Login,
     Home(Vec<ListData>),
-    Random(ItemQuery, RandomMode),
+    Random(String, String, ItemQuery, RandomMode),
 }
 
 #[derive(PartialEq)]
@@ -182,7 +208,7 @@ impl Component for Home {
             <form>
               <div class="row">
                 <div class="col-9 pt-1">
-                  <input type="text" id="input" class="col-12" value="https://open.spotify.com/playlist/5jPjYAdQO0MgzHdwSmYPNZ?si=304cfe5d16ce4afd"/>
+                  <input type="text" id="input" class="col-12" value="https://open.spotify.com/playlist/5MztFbRbMpyxbVYuOSfQV9?si=9db089ab25274efa"/>
                 </div>
                 <div class="col-1 pe-2">
                   <button type="button" class="col-12 btn btn-success">{"Save"}</button>
@@ -277,6 +303,10 @@ pub struct ListData {
 
 #[derive(PartialEq, Properties)]
 pub struct RandomProps {
+    left: ItemMetadata,
+    on_left_select: Callback<MouseEvent>,
+    right: ItemMetadata,
+    on_right_select: Callback<MouseEvent>,
     query: ItemQuery,
 }
 
@@ -291,36 +321,37 @@ impl Component for Random {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let mut queued_scores = ctx.props().query.items.clone();
-        queued_scores.shuffle(&mut rand::thread_rng());
-        let first = queued_scores.pop().unwrap().metadata.unwrap();
-        let second = queued_scores.pop().unwrap().metadata.unwrap();
-        let (left, right): (Vec<_>, Vec<_>) = ctx
-            .props()
-            .query
+        let RandomProps {
+            left,
+            right,
+            query,
+            on_left_select,
+            on_right_select,
+        } = ctx.props();
+        let (left_items, right_items): (Vec<_>, Vec<_>) = query
             .items
             .iter()
             .zip(1..)
             .map(|(item, i)| {
                 (
                     i,
-                    html! {<Item i={i} item={item.metadata.as_ref().unwrap().clone()}/>},
+                    html! {<Item i={i} item={item.metadata.clone().unwrap()}/>},
                 )
             })
             .partition(|(i, _)| i % 2 == 1);
-        let left = left.into_iter().map(|(_, item)| item);
-        let right = right.into_iter().map(|(_, item)| item);
+        let left_items = left_items.into_iter().map(|(_, item)| item);
+        let right_items = right_items.into_iter().map(|(_, item)| item);
         html! {
           <div>
             <h1>{"Random Matches"}</h1>
             <div class="row">
               <div class="col-6">
-                <iframe id="iframe1" width="100%" height="380" frameborder="0" src={first.iframe}></iframe>
-                <button type="button" class="btn btn-info width">{first.name}</button>
+                <iframe id="iframe1" width="100%" height="380" frameborder="0" src={left.iframe.clone()}></iframe>
+                <button type="button" class="btn btn-info width" onclick={on_left_select.clone()}>{&left.name}</button>
               </div>
               <div class="col-6">
-                <iframe id="iframe2" width="100%" height="380" frameborder="0" src={second.iframe}></iframe>
-                <button type="button" class="btn btn-warning width">{second.name}</button>
+                <iframe id="iframe2" width="100%" height="380" frameborder="0" src={right.iframe.clone()}></iframe>
+                <button type="button" class="btn btn-warning width" onclick={on_right_select.clone()}>{&right.name}</button>
               </div>
             </div>
             <div class="row">
@@ -334,7 +365,7 @@ impl Component for Random {
                       <th>{"Score"}</th>
                     </tr>
                   </thead>
-                  <tbody>{for left}</tbody>
+                  <tbody>{for left_items}</tbody>
                 </table>
               </div>
               <div class="col-6">
@@ -347,7 +378,7 @@ impl Component for Random {
                       <th>{"Score"}</th>
                     </tr>
                   </thead>
-                  <tbody>{for right}</tbody>
+                  <tbody>{for right_items}</tbody>
                 </table>
               </div>
             </div>
@@ -409,6 +440,20 @@ async fn query_items(auth: &str, id: &str) -> Result<ItemQuery, JsValue> {
     let resp: Response = resp_value.dyn_into()?;
     let json = JsFuture::from(resp.json()?).await?;
     Ok(json.into_serde().unwrap())
+}
+
+async fn update_stats(auth: &str, list: &str, win: &str, lose: &str) -> Result<(), JsValue> {
+    let window = web_sys::window().expect("no global `window` exists");
+    let request = query(
+        &format!(
+            "/api/?action=update&list={}&win={}&lose={}",
+            list, win, lose
+        ),
+        "POST",
+        auth,
+    )?;
+    JsFuture::from(window.fetch_with_request(&request)).await?;
+    Ok(())
 }
 
 fn query(url: &str, method: &str, auth: &str) -> Result<Request, JsValue> {
