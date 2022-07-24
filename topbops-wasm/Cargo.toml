@@ -22,23 +22,10 @@ yew = "0.19"
 [dependencies.web-sys]
 version = "0.3.4"
 features = [
-  'console',
-  'Document',
-  'Element',
-  'HtmlAnchorElement',
-  'HtmlCollection',
-  'HtmlElement',
-  'HtmlIFrameElement',
-  'HtmlInputElement',
   'HtmlSelectElement',
-  'Node',
-  'Location',
-  'HtmlButtonElement',
   'Headers',
   'Request',
   'RequestInit',
   'RequestMode',
   'Response',
-  'UrlSearchParams',
-  'Window',
 ]

@@ -4,18 +4,22 @@ use topbops::{ItemMetadata, ItemQuery, List, Lists};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{Request, RequestInit, RequestMode, Response};
+use web_sys::{HtmlSelectElement, Request, RequestInit, RequestMode, Response};
 use yew::{html, Callback, Component, Context, Html, MouseEvent, Properties};
 
-pub enum Msg {
+enum Msg {
     FetchHome(String),
     LoadHome(String, Vec<(List, ItemQuery)>),
-    LoadRandom(String, String, ItemQuery),
-    UpdateStats((String, String, String, String)),
+    FetchRandom(String, String),
+    LoadRandom(String, String, ItemQuery, RandomMode),
+    UpdateStats((String, String, String, String), RandomMode),
 }
 
-pub struct App {
+struct App {
     current_page: Page,
+    random_queue: Vec<topbops::Item>,
+    left: Option<ItemMetadata>,
+    right: Option<ItemMetadata>,
 }
 
 impl Component for App {
@@ -25,6 +29,9 @@ impl Component for App {
     fn create(_: &Context<Self>) -> Self {
         App {
             current_page: Page::Login,
+            random_queue: Vec::new(),
+            left: None,
+            right: None,
         }
     }
 
@@ -38,11 +45,9 @@ impl Component for App {
                     <Home lists={lists.clone()}/>
                 }
             }
-            Page::Random(user, list, query, _) => {
-                let mut queued_scores: Vec<_> = query.items.iter().collect();
-                queued_scores.shuffle(&mut rand::thread_rng());
-                let left = queued_scores.pop().unwrap().metadata.clone().unwrap();
-                let right = queued_scores.pop().unwrap().metadata.clone().unwrap();
+            Page::Random(user, list, query, mode) => {
+                let left = self.left.clone().unwrap();
+                let right = self.right.clone().unwrap();
                 let left_param = (
                     user.clone(),
                     list.clone(),
@@ -55,8 +60,13 @@ impl Component for App {
                     right.id.clone(),
                     left.id.clone(),
                 );
+                let mode = *mode;
+                let mode_string = match mode {
+                    RandomMode::Match => String::from("Random Matches"),
+                    RandomMode::Round => String::from("Random Rounds"),
+                };
                 html! {
-                    <Random left={left} on_left_select={ctx.link().callback_once(|_| Msg::UpdateStats(left_param))} right={right} on_right_select={ctx.link().callback_once(|_| Msg::UpdateStats(right_param))} query={query.clone()}/>
+                    <Random mode={mode_string} left={left} on_left_select={ctx.link().callback_once(move |_| Msg::UpdateStats(left_param, mode))} right={right} on_right_select={ctx.link().callback_once(move |_| Msg::UpdateStats(right_param, mode))} query={query.clone()}/>
                 }
             }
         };
@@ -100,25 +110,78 @@ impl Component for App {
                             let list = data.id.clone();
                             ListData {
                                 data,
-                                query: query.clone(),
+                                query,
                                 on_go_select: ctx
                                     .link()
-                                    .callback_once(move |_| Msg::LoadRandom(user, list, query)),
+                                    .callback_once(move |_| Msg::FetchRandom(user, list)),
                             }
                         })
                         .collect(),
                 );
                 true
             }
-            Msg::LoadRandom(user, list, query) => {
-                self.current_page = Page::Random(user, list, query, RandomMode::Match);
+            Msg::FetchRandom(user, list) => {
+                let window = web_sys::window().expect("no global `window` exists");
+                let document = window.document().expect("should have a document on window");
+                let mode = document
+                    .get_element_by_id("mode")
+                    .unwrap()
+                    .dyn_into::<HtmlSelectElement>()
+                    .unwrap()
+                    .value();
+                let mode = match mode.as_ref() {
+                    "Random Matches" => RandomMode::Match,
+                    "Random Rounds" => RandomMode::Round,
+                    _ => {
+                        web_sys::console::log_1(&JsValue::from("Invalid mode"));
+                        return false;
+                    }
+                };
+                self.random_queue.clear();
+                ctx.link().send_future(async move {
+                    let query = query_items(&user, &list).await.unwrap();
+                    Msg::LoadRandom(user, list, query, mode)
+                });
+                false
+            }
+            Msg::LoadRandom(user, list, query, mode) => {
+                self.current_page = Page::Random(user, list, query.clone(), mode);
+                match mode {
+                    RandomMode::Round => {
+                        match self.random_queue.len() {
+                            // Reload the queue if it's empty
+                            0 => {
+                                let mut items = query.items.clone();
+                                items.shuffle(&mut rand::thread_rng());
+                                self.random_queue.extend(items);
+                            }
+                            // Always queue the last song next before reloading
+                            1 => {
+                                let last = self.random_queue.pop().unwrap();
+                                let mut items = query.items.clone();
+                                items.shuffle(&mut rand::thread_rng());
+                                self.random_queue.extend(items);
+                                self.random_queue.push(last);
+                            }
+                            _ => {}
+                        }
+                        self.left = self.random_queue.pop().unwrap().metadata.clone();
+                        self.right = self.random_queue.pop().unwrap().metadata.clone();
+                    }
+                    RandomMode::Match => {
+                        let mut queued_scores: Vec<_> = query.items.iter().collect();
+                        queued_scores.shuffle(&mut rand::thread_rng());
+                        self.left = queued_scores.pop().unwrap().metadata.clone();
+                        self.right = queued_scores.pop().unwrap().metadata.clone();
+                    }
+                }
                 true
             }
-            Msg::UpdateStats((user, list, win, lose)) => {
+            Msg::UpdateStats((user, list, win, lose), mode) => {
                 ctx.link().send_future(async move {
                     update_stats(&user, &list, &win, &lose).await.unwrap();
                     let query = query_items(&user, &list).await.unwrap();
-                    Msg::LoadRandom(user, list, query)
+                    Msg::LoadRandom(user, list, query, mode)
                 });
                 false
             }
@@ -133,7 +196,7 @@ enum Page {
     Random(String, String, ItemQuery, RandomMode),
 }
 
-#[derive(PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 enum RandomMode {
     Match,
     Round,
@@ -193,8 +256,8 @@ impl Component for Home {
               <label class="col-2 col-form-label text-end align-self-end">
                 <strong>{"Sort Mode:"}</strong>
               </label>
-              <div id="mode" class="col-2 align-self-end">
-                <select class="form-select">
+              <div class="col-2 align-self-end">
+                <select id="mode" class="form-select">
                   <option>{"Random Matches"}</option>
                   <option>{"Random Rounds"}</option>
                 </select>
@@ -303,6 +366,7 @@ pub struct ListData {
 
 #[derive(PartialEq, Properties)]
 pub struct RandomProps {
+    mode: String,
     left: ItemMetadata,
     on_left_select: Callback<MouseEvent>,
     right: ItemMetadata,
@@ -322,6 +386,7 @@ impl Component for Random {
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         let RandomProps {
+            mode,
             left,
             right,
             query,
@@ -343,7 +408,7 @@ impl Component for Random {
         let right_items = right_items.into_iter().map(|(_, item)| item);
         html! {
           <div>
-            <h1>{"Random Matches"}</h1>
+            <h1>{mode}</h1>
             <div class="row">
               <div class="col-6">
                 <iframe id="iframe1" width="100%" height="380" frameborder="0" src={left.iframe.clone()}></iframe>
