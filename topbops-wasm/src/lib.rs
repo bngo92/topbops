@@ -74,7 +74,7 @@ impl Component for App {
           <div>
             <nav class="navbar navbar-dark bg-dark">
               <div id="navbar" class="container-lg">
-                <a id="brand" class="navbar-brand" href="#" onclick={ctx.link().callback(|_| Msg::FetchHome(String::from("demo")))}>{"Bops to the Top"}</a>
+                <a id="brand" class="navbar-brand" href="_blank" onclick={ctx.link().callback(|_| Msg::FetchHome(String::from("demo")))}>{"Bops to the Top"}</a>
               </div>
             </nav>
             <div class="container-lg my-md-4">
@@ -151,22 +151,22 @@ impl Component for App {
                         match self.random_queue.len() {
                             // Reload the queue if it's empty
                             0 => {
-                                let mut items = query.items.clone();
+                                let mut items = query.items;
                                 items.shuffle(&mut rand::thread_rng());
                                 self.random_queue.extend(items);
                             }
                             // Always queue the last song next before reloading
                             1 => {
                                 let last = self.random_queue.pop().unwrap();
-                                let mut items = query.items.clone();
+                                let mut items = query.items;
                                 items.shuffle(&mut rand::thread_rng());
                                 self.random_queue.extend(items);
                                 self.random_queue.push(last);
                             }
                             _ => {}
                         }
-                        self.left = self.random_queue.pop().unwrap().metadata.clone();
-                        self.right = self.random_queue.pop().unwrap().metadata.clone();
+                        self.left = self.random_queue.pop().unwrap().metadata;
+                        self.right = self.random_queue.pop().unwrap().metadata;
                     }
                     RandomMode::Match => {
                         let mut queued_scores: Vec<_> = query.items.iter().collect();
@@ -330,7 +330,7 @@ impl Component for Widget {
     }
 }
 
-#[derive(PartialEq, Properties)]
+#[derive(Eq, PartialEq, Properties)]
 pub struct RowProps {
     i: i32,
     values: Vec<String>,

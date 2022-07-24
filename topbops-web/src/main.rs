@@ -193,8 +193,8 @@ async fn login(
 ) -> Result<(String, String), Error> {
     let db = db.collection_client("users");
     let query = Query::new(format!("SELECT * FROM c WHERE c.auth = \"{}\"", auth));
-    let session_copy = session.session.read().unwrap().clone();
     // TODO: debug why session token isn't working here
+    //let session_copy = session.session.read().unwrap().clone();
     let (mut resp, session) = /*if let Some(session) = session_copy {
         println!("{:?}", session);
         (
