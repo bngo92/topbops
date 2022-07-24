@@ -24,11 +24,11 @@ pub struct Item {
     pub metadata: Map<String, Value>,
 }
 
-impl<'a> CosmosEntity<'a> for Item {
-    type Entity = &'a str;
+impl CosmosEntity for Item {
+    type Entity = String;
 
-    fn partition_key(&'a self) -> Self::Entity {
-        self.user_id.as_ref()
+    fn partition_key(&self) -> Self::Entity {
+        self.user_id.clone()
     }
 }
 
@@ -38,7 +38,7 @@ pub enum Error {
     HyperError(hyper::Error),
     RequestError(hyper::http::Error),
     JSONError(serde_json::Error),
-    CosmosError(azure_data_cosmos::Error),
+    CosmosError(azure_core::error::Error),
     IOError(std::io::Error),
 }
 
@@ -60,8 +60,8 @@ impl From<serde_json::Error> for Error {
     }
 }
 
-impl From<azure_data_cosmos::Error> for Error {
-    fn from(e: azure_data_cosmos::Error) -> Error {
+impl From<azure_core::error::Error> for Error {
+    fn from(e: azure_core::error::Error) -> Error {
         Error::CosmosError(e)
     }
 }

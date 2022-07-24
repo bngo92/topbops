@@ -1,9 +1,7 @@
 #![feature(async_closure, box_patterns, let_else)]
-use azure_core::Context;
 use azure_data_cosmos::prelude::{
     AuthorizationToken, CollectionClient, ConsistencyLevel, CosmosClient, CosmosEntity,
-    CosmosOptions, CreateDocumentOptions, DatabaseClient, DeleteDocumentOptions,
-    GetDocumentOptions, GetDocumentResponse, Query, ReplaceDocumentOptions,
+    DatabaseClient, GetDocumentResponse, Query,
 };
 use futures::{StreamExt, TryStreamExt};
 use hyper::header::HeaderValue;
@@ -11,6 +9,7 @@ use hyper::http::response::Builder;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Client, Method, Request, Response, Server, StatusCode, Uri};
 use hyper_tls::HttpsConnector;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlparser::ast::{
@@ -42,11 +41,11 @@ struct User {
     refresh_token: String,
 }
 
-impl<'a> CosmosEntity<'a> for User {
-    type Entity = &'a str;
+impl CosmosEntity for User {
+    type Entity = String;
 
-    fn partition_key(&'a self) -> Self::Entity {
-        self.user_id.as_ref()
+    fn partition_key(&self) -> Self::Entity {
+        self.user_id.clone()
     }
 }
 
@@ -55,7 +54,7 @@ const DEMO_USER: &str = "demo";
 async fn handle(
     db: CosmosClient,
     req: Request<Body>,
-    session: Arc<RwLock<Option<ConsistencyLevel>>>,
+    session: Arc<SessionClient>,
 ) -> Result<Response<Body>, Infallible> {
     Ok(match route(db, req, session).await {
         Err(e) => {
@@ -72,9 +71,9 @@ async fn handle(
 async fn route(
     db: CosmosClient,
     req: Request<Body>,
-    session: Arc<RwLock<Option<ConsistencyLevel>>>,
+    session: Arc<SessionClient>,
 ) -> Result<Response<Body>, Error> {
-    let db = db.into_database_client("smashsort");
+    let db = db.database_client("topbops");
     eprintln!("{}", req.uri().path());
     if let Some(path) = req.uri().path().strip_prefix("/api/") {
         let path: Vec<_> = path.split('/').collect();
@@ -182,16 +181,15 @@ async fn route(
 
 async fn login(
     db: DatabaseClient,
-    session: &Arc<RwLock<Option<ConsistencyLevel>>>,
+    session: &Arc<SessionClient>,
     auth: &str,
     origin: &str,
 ) -> Result<(String, String), Error> {
-    let db = db.into_collection_client("users");
-    let query = format!("SELECT * FROM c WHERE c.auth = \"{}\"", auth);
-    let query = Query::new(&query);
-    let session_copy = session.read().unwrap().clone();
+    let db = db.collection_client("users");
+    let query = Query::new(format!("SELECT * FROM c WHERE c.auth = \"{}\"", auth));
+    let session_copy = session.session.read().unwrap().clone();
     // TODO: debug why session token isn't working here
-    let (resp, session) = /*if let Some(session) = session_copy {
+    let (mut resp, session) = /*if let Some(session) = session_copy {
         println!("{:?}", session);
         (
             db.query_documents()
@@ -204,22 +202,18 @@ async fn login(
         )
     } else */{
         let resp = db
-            .query_documents()
+            .query_documents(query)
             .query_cross_partition(true)
             .parallelize_cross_partition_query(true)
-            .execute(&query)
-            .await?;
+            .into_stream::<User>()
+            .next()
+            .await
+            .expect("response from database")?;
         let token = ConsistencyLevel::Session(resp.session_token.clone());
-        *session.write().unwrap() = Some(token.clone());
+        *session.session.write().unwrap() = Some(token.clone());
         (resp, token)
     };
-    if let Some(user) = resp
-        .into_documents()?
-        .results
-        .into_iter()
-        .map(|r| -> User { r.result })
-        .next()
-    {
+    if let Some((user, _)) = resp.results.pop() {
         return Ok((user.user_id, user.access_token));
     }
     let https = HttpsConnector::new();
@@ -259,53 +253,33 @@ async fn login(
         )
         .await?;
     let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let user: topbops_web::spotify::User = serde_json::from_slice(&got)?;
+    let spotify_user: topbops_web::spotify::User = serde_json::from_slice(&got)?;
 
     let user = User {
         id: Uuid::new_v4().to_hyphenated().to_string(),
-        user_id: user.id,
+        user_id: spotify_user.id.clone(),
         auth: auth.to_owned(),
         access_token: token.access_token.clone(),
         refresh_token: token
             .refresh_token
             .expect("Spotify should return refresh token"),
     };
-    db.create_document(
-        Context::new(),
-        &user,
-        CreateDocumentOptions::new().consistency_level(session),
-    )
-    .await?;
-    Ok((user.user_id, user.access_token))
+    db.create_document(user)
+        .consistency_level(session)
+        .into_future()
+        .await?;
+    Ok((spotify_user.id, token.access_token))
 }
 
 async fn get_lists(
     db: DatabaseClient,
-    session: Arc<RwLock<Option<ConsistencyLevel>>>,
+    session: Arc<SessionClient>,
     user_id: String,
 ) -> Result<Response<Body>, Error> {
-    let db = db.into_collection_client("lists");
+    let db = db.collection_client("lists");
     let query = format!("SELECT * FROM c WHERE c.user_id = \"{}\"", user_id);
-    let query = Query::new(&query);
-    let session_copy = session.read().unwrap().clone();
-    let resp = if let Some(session) = session_copy {
-        println!("{:?}", session);
-        db.query_documents()
-            .consistency_level(session)
-            .execute(&query)
-            .await?
-    } else {
-        let resp = db.query_documents().execute(&query).await?;
-        *session.write().unwrap() = Some(ConsistencyLevel::Session(resp.session_token.clone()));
-        resp
-    };
     let lists = Lists {
-        lists: resp
-            .into_documents()?
-            .results
-            .into_iter()
-            .map(|r| r.result)
-            .collect(),
+        lists: session.query_documents(db, query).await?,
     };
     get_response_builder()
         .body(Body::from(serde_json::to_string(&lists)?))
@@ -314,17 +288,16 @@ async fn get_lists(
 
 async fn get_list_items(
     db: DatabaseClient,
-    session: Arc<RwLock<Option<ConsistencyLevel>>>,
+    session: Arc<SessionClient>,
     user_id: String,
     id: &str,
 ) -> Result<Response<Body>, Error> {
     let client = db
         .clone()
-        .into_collection_client("lists")
-        .into_document_client(id, &user_id)?;
-    let list = if let GetDocumentResponse::Found(list) = client
-        .get_document::<List>(Context::new(), GetDocumentOptions::new())
-        .await?
+        .collection_client("lists")
+        .document_client(id, &user_id)?;
+    let list = if let GetDocumentResponse::Found(list) =
+        client.get_document::<List>().into_future().await?
     {
         list.document.document
     } else {
@@ -352,23 +325,10 @@ async fn get_list_items(
         }
         query
     };
-    let db = db.into_collection_client("items");
+    let db = db.collection_client("items");
     let mut query = parse_select(&original_query);
     transform_query(&mut query, &user_id);
-    let query = query.to_string();
-    let session_copy = session.read().unwrap().clone();
-    let resp = if let Some(session) = session_copy {
-        println!("{:?}", session);
-        db.query_documents()
-            .consistency_level(session)
-            .execute(&query)
-            .await?
-    } else {
-        let resp = db.query_documents().execute(&Query::new(&query)).await?;
-        *session.write().unwrap() = Some(ConsistencyLevel::Session(resp.session_token.clone()));
-        resp
-    };
-    let values: Vec<Map<String, Value>> = resp.into_raw().results;
+    let values: Vec<Map<String, Value>> = session.query_documents(db, query.to_string()).await?;
     let response = ItemQuery {
         fields: parse_select(&original_query)
             .projection
@@ -522,9 +482,51 @@ fn parse_select(s: &str) -> Select {
     }
 }
 
+struct SessionClient {
+    session: Arc<RwLock<Option<ConsistencyLevel>>>,
+}
+
+impl SessionClient {
+    async fn query_documents<T: DeserializeOwned + Send + Sync>(
+        &self,
+        db: CollectionClient,
+        query: String,
+    ) -> Result<Vec<T>, Error> {
+        let session_copy = self.session.read().unwrap().clone();
+        let (stream, results) = if let Some(session) = session_copy {
+            println!("{:?}", session);
+            let mut stream = db
+                .query_documents(Query::new(query))
+                .consistency_level(session)
+                .into_stream();
+            let resp = stream.try_next().await?.map(|r| r.results);
+            (stream, resp)
+        } else {
+            let mut stream = db.query_documents(Query::new(query)).into_stream();
+            let resp = stream.try_next().await?.map(|r| {
+                *self.session.write().unwrap() = Some(ConsistencyLevel::Session(r.session_token));
+                r.results
+            });
+            (stream, resp)
+        };
+        Ok(results
+            .into_iter()
+            .chain(
+                stream
+                    .try_collect::<Vec<_>>()
+                    .await?
+                    .into_iter()
+                    .map(|r| r.results),
+            )
+            .flatten()
+            .map(|(d, _)| d)
+            .collect())
+    }
+}
+
 async fn import_list(
     db: DatabaseClient,
-    session: Arc<RwLock<Option<ConsistencyLevel>>>,
+    session: Arc<SessionClient>,
     user_id: String,
     r#type: &str,
     id: &str,
@@ -538,96 +540,74 @@ async fn import_list(
 
 async fn create_user_list(
     db: DatabaseClient,
-    session: Arc<RwLock<Option<ConsistencyLevel>>>,
+    session: Arc<SessionClient>,
     list: List,
     is_upsert: bool,
 ) -> Result<(), Error> {
-    let list_client = db.clone().into_collection_client("lists");
-    let session_copy = session.read().unwrap().clone();
-    let session = if let Some(session) = session_copy {
+    let list_client = db.clone().collection_client("lists");
+    let session_copy = session.session.read().unwrap().clone();
+    if let Some(session) = session_copy {
         list_client
-            .create_document(
-                Context::new(),
-                &list,
-                CreateDocumentOptions::new()
-                    .is_upsert(true)
-                    .consistency_level(session.clone()),
-            )
+            .create_document(list)
+            .is_upsert(true)
+            .consistency_level(session.clone())
+            .into_future()
             .await?;
-        session
     } else {
         let resp = list_client
-            .create_document(
-                Context::new(),
-                &list,
-                CreateDocumentOptions::new().is_upsert(true),
-            )
+            .create_document(list)
+            .is_upsert(true)
+            .into_future()
             .await
             .unwrap();
-        let session_copy = ConsistencyLevel::Session(resp.session_token);
-        *session.write().unwrap() = Some(session_copy.clone());
-        session_copy
+        *session.session.write().unwrap() = Some(ConsistencyLevel::Session(resp.session_token));
     };
     Ok(())
 }
 
 async fn create_external_list(
     db: DatabaseClient,
-    session: Arc<RwLock<Option<ConsistencyLevel>>>,
+    session: Arc<SessionClient>,
     list: List,
     items: Vec<Item>,
     // Used to reset demo user data
     is_upsert: bool,
 ) -> Result<Response<Body>, Error> {
-    let list_client = db.clone().into_collection_client("lists");
-    let session_copy = session.read().unwrap().clone();
+    let list_client = db.clone().collection_client("lists");
+    let session_copy = session.session.read().unwrap().clone();
     let session = if let Some(session) = session_copy {
         list_client
-            .create_document(
-                Context::new(),
-                &list,
-                CreateDocumentOptions::new()
-                    .is_upsert(true)
-                    .consistency_level(session.clone()),
-            )
+            .create_document(list)
+            .is_upsert(true)
+            .consistency_level(session.clone())
+            .into_future()
             .await?;
         session
     } else {
         let resp = list_client
-            .create_document(
-                Context::new(),
-                &list,
-                CreateDocumentOptions::new().is_upsert(true),
-            )
+            .create_document(list)
+            .is_upsert(true)
+            .into_future()
             .await
             .unwrap();
         let session_copy = ConsistencyLevel::Session(resp.session_token);
-        *session.write().unwrap() = Some(session_copy.clone());
+        *session.session.write().unwrap() = Some(session_copy.clone());
         session_copy
     };
-    let items_client = db.clone().into_collection_client("items");
+    let items_client = db.clone().collection_client("items");
     let items_client = &items_client;
     let session = &session;
-    futures::stream::iter(items.iter().map(async move |item| {
+    futures::stream::iter(items.into_iter().map(async move |item| {
         items_client
-            .create_document(
-                Context::new(),
-                item,
-                CreateDocumentOptions::new()
-                    .is_upsert(is_upsert)
-                    .consistency_level(session.clone()),
-            )
+            .create_document(item)
+            .is_upsert(is_upsert)
+            .consistency_level(session.clone())
+            .into_future()
             .await
             .map(|_| ())
             .or_else(|e| {
-                if let azure_data_cosmos::Error::Core(azure_core::Error::Policy(ref e)) = e {
-                    if let Some(azure_core::HttpError::StatusCode {
-                        status: StatusCode::CONFLICT,
-                        ..
-                    }) = e.downcast_ref::<azure_core::HttpError>()
-                    {
-                        return Ok(());
-                    }
+                if let azure_core::StatusCode::Conflict = e.as_http_error().unwrap().status() {
+                    return Ok(());
                 }
                 Err(e)
             })
@@ -653,28 +633,26 @@ async fn main() {
     let account = std::env::var("COSMOS_ACCOUNT").expect("Set env variable COSMOS_ACCOUNT first!");
     let authorization_token =
         AuthorizationToken::primary_from_base64(&master_key).expect("cosmos config");
-    let client = CosmosClient::new(
-        account.clone(),
-        authorization_token,
-        CosmosOptions::default(),
-    );
-    let session = Arc::new(RwLock::new(None));
+    let client = CosmosClient::new(account.clone(), authorization_token);
+    let session = Arc::new(SessionClient {
+        session: Arc::new(RwLock::new(None)),
+    });
 
     // Reset demo user data during startup in production
     if cfg!(not(feature = "dev")) {
         let demo_user = String::from(DEMO_USER);
         import_list(
-            client.clone().into_database_client("smashsort"),
+            client.clone().database_client("topbops"),
             Arc::clone(&session),
             demo_user.clone(),
             "spotify",
-            "5jPjYAdQO0MgzHdwSmYPNZ",
+            "5MztFbRbMpyxbVYuOSfQV9",
         )
         .await
         .unwrap();
         // Generate IDs using random but constant UUIDs
         create_user_list(
-            client.clone().into_database_client("smashsort"),
+            client.clone().database_client("topbops"),
             Arc::clone(&session),
             List {
                 id: String::from("4539f893-8471-4e23-b815-cd7c8b722016"),
@@ -689,7 +667,7 @@ async fn main() {
         .await
         .unwrap();
         create_user_list(
-            client.clone().into_database_client("smashsort"),
+            client.clone().database_client("topbops"),
             Arc::clone(&session),
             List {
                 id: String::from("3c16df67-582d-449a-9862-0540f516d6b5"),
@@ -704,7 +682,7 @@ async fn main() {
         .await
         .unwrap();
         create_user_list(
-            client.clone().into_database_client("smashsort"),
+            client.clone().database_client("topbops"),
             Arc::clone(&session),
             List {
                 id: String::from("a425903e-d12f-43eb-8a53-dbfad3325fd5"),

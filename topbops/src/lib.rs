@@ -1,3 +1,4 @@
+#[cfg(feature = "azure")]
 use azure_data_cosmos::prelude::CosmosEntity;
 use serde::{Deserialize, Serialize};
 
@@ -48,11 +49,12 @@ pub enum ListMode {
     External,
 }
 
-impl<'a> CosmosEntity<'a> for List {
-    type Entity = &'a str;
+#[cfg(feature = "azure")]
+impl CosmosEntity for List {
+    type Entity = String;
 
-    fn partition_key(&'a self) -> Self::Entity {
-        self.user_id.as_ref()
+    fn partition_key(&self) -> Self::Entity {
+        self.user_id.clone()
     }
 }
 
