@@ -7,6 +7,8 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlSelectElement, Request, RequestInit, RequestMode, Response};
 use yew::{html, Callback, Component, Context, Html, MouseEvent, Properties};
 
+pub mod tournament;
+
 enum Msg {
     FetchHome(String),
     LoadHome(String, Vec<(List, ItemQuery)>),
