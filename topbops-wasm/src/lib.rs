@@ -1,5 +1,6 @@
 #![feature(async_closure)]
 use crate::random::Random;
+use crate::tournament::Tournament;
 use rand::prelude::SliceRandom;
 use topbops::{ItemMetadata, ItemQuery, List, Lists};
 use wasm_bindgen::prelude::*;
@@ -15,8 +16,8 @@ enum Msg {
     FetchHome(String),
     LoadHome(String, Vec<(List, ItemQuery)>),
     FetchRandom(String, String),
-    LoadRandom(String, String, ItemQuery, RandomMode),
-    UpdateStats((String, String, String, String), RandomMode),
+    LoadRandom(String, String, ItemQuery, Mode),
+    UpdateStats((String, String, String, String), Mode),
 }
 
 struct App {
@@ -49,6 +50,17 @@ impl Component for App {
                     <Home lists={lists.clone()}/>
                 }
             }
+            Page::Random(_, _, query, Mode::Tournament) => {
+                let v: Vec<_> = query
+                    .items
+                    .iter()
+                    .map(|i| i.metadata.as_ref().unwrap().name.clone())
+                    .collect();
+                let v = tournament::generate_tournament(v, String::new());
+                html! {
+                    <Tournament data={v}/>
+                }
+            }
             Page::Random(user, list, query, mode) => {
                 let left = self.left.clone().unwrap();
                 let right = self.right.clone().unwrap();
@@ -66,8 +78,9 @@ impl Component for App {
                 );
                 let mode = *mode;
                 let mode_string = match mode {
-                    RandomMode::Match => String::from("Random Matches"),
-                    RandomMode::Round => String::from("Random Rounds"),
+                    Mode::Match => String::from("Random Matches"),
+                    Mode::Round => String::from("Random Rounds"),
+                    Mode::Tournament => String::from("Tournament"),
                 };
                 html! {
                     <Random mode={mode_string} left={left} on_left_select={ctx.link().callback_once(move |_| Msg::UpdateStats(left_param, mode))} right={right} on_right_select={ctx.link().callback_once(move |_| Msg::UpdateStats(right_param, mode))} query={query.clone()}/>
@@ -134,8 +147,9 @@ impl Component for App {
                     .unwrap()
                     .value();
                 let mode = match mode.as_ref() {
-                    "Random Matches" => RandomMode::Match,
-                    "Random Rounds" => RandomMode::Round,
+                    "Random Matches" => Mode::Match,
+                    "Random Rounds" => Mode::Round,
+                    "Tournament" => Mode::Tournament,
                     _ => {
                         web_sys::console::log_1(&JsValue::from("Invalid mode"));
                         return false;
@@ -151,7 +165,7 @@ impl Component for App {
             Msg::LoadRandom(user, list, query, mode) => {
                 self.current_page = Page::Random(user, list, query.clone(), mode);
                 match mode {
-                    RandomMode::Round => {
+                    Mode::Round => {
                         match self.random_queue.len() {
                             // Reload the queue if it's empty
                             0 => {
@@ -172,12 +186,13 @@ impl Component for App {
                         self.left = self.random_queue.pop().unwrap().metadata;
                         self.right = self.random_queue.pop().unwrap().metadata;
                     }
-                    RandomMode::Match => {
+                    Mode::Match => {
                         let mut queued_scores: Vec<_> = query.items.iter().collect();
                         queued_scores.shuffle(&mut rand::thread_rng());
                         self.left = queued_scores.pop().unwrap().metadata.clone();
                         self.right = queued_scores.pop().unwrap().metadata.clone();
                     }
+                    Mode::Tournament => {}
                 }
                 true
             }
@@ -197,13 +212,14 @@ impl Component for App {
 enum Page {
     Login,
     Home(Vec<ListData>),
-    Random(String, String, ItemQuery, RandomMode),
+    Random(String, String, ItemQuery, Mode),
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum RandomMode {
+enum Mode {
     Match,
     Round,
+    Tournament,
 }
 
 #[derive(PartialEq, Properties)]
@@ -264,6 +280,7 @@ impl Component for Home {
                 <select id="mode" class="form-select">
                   <option>{"Random Matches"}</option>
                   <option>{"Random Rounds"}</option>
+                  <option>{"Tournament"}</option>
                 </select>
               </div>
             </div>

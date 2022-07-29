@@ -1,3 +1,5 @@
+use yew::{html, Component, Context, Html, Properties};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Node<T> {
     pub item: T,
@@ -142,4 +144,57 @@ pub fn generate_tournament<T: Clone>(v: Vec<T>, default: T) -> Vec<Option<Node<T
         });
     }
     next
+}
+
+#[derive(Eq, PartialEq, Properties)]
+pub struct TournamentProps {
+    pub data: Vec<Option<Node<String>>>,
+}
+
+pub struct Tournament;
+
+impl Component for Tournament {
+    type Message = ();
+    type Properties = TournamentProps;
+
+    fn create(_: &Context<Self>) -> Self {
+        Tournament
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        ctx.props()
+            .data
+            .iter()
+            .enumerate()
+            .map(|(i, item)| {
+                let class = if i == 31 {
+                    Some("col-10")
+                } else if i % 16 == 15 {
+                    Some("col-8")
+                } else if i % 8 == 7 {
+                    Some("col-6")
+                } else if i % 4 == 3 {
+                    Some("col-4")
+                } else if i % 2 == 1 {
+                    Some("col-2")
+                } else {
+                    None
+                };
+                html! {
+                    if let Some(item) = item {
+                        <div class="row">
+                            if let Some(class) = class {
+                                <div class={class}></div>
+                            }
+                            <div class="col-2">
+                                <button type="button" class="btn btn-warning truncate w-100" style="height: 38px" disabled={item.disabled}>{item.item.clone()}</button>
+                            </div>
+                        </div>
+                    } else {
+                        <div style="height: 38px"></div>
+                    }
+                }
+            })
+            .collect()
+    }
 }
