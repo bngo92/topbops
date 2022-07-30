@@ -87,8 +87,8 @@ pub struct TournamentData<T: Clone> {
 }
 
 impl<T: Clone> TournamentData<T> {
-    pub fn new(v: Vec<T>, default: T) -> TournamentData<T> {
-        let depth = (v.len() as f64).log2().ceil() as u32;
+    pub fn new(items: Vec<T>, default: T) -> TournamentData<T> {
+        let depth = (items.len() as f64).log2().ceil() as u32;
 
         // Build arrays of steps between items with ascending seeds
         // Steps for the next level can be calculated from the previous level
@@ -136,13 +136,13 @@ impl<T: Clone> TournamentData<T> {
         .collect();
 
         // Create leaf nodes in the first two layers
-        let len = (1 << depth) - v.len();
+        let len = (1 << depth) - items.len();
         let iter = std::iter::once(0)
             .chain(Interleave::new(next_top.into_iter(), top.into_iter()))
             .chain(std::iter::once(-2))
             .chain(Interleave::new(next_bottom.into_iter(), bottom.into_iter()));
         let mut current = 0;
-        for (i, (item, step)) in v.into_iter().zip(iter).enumerate() {
+        for (i, (item, step)) in items.into_iter().zip(iter).enumerate() {
             current += step;
             let index = if len > i {
                 if current % 4 == 0 {
@@ -217,10 +217,9 @@ impl Component for Tournament {
     fn create(ctx: &Context<Self>) -> Self {
         let id = ctx.props().id.clone();
         ctx.link().send_future(async move {
-            let lists = crate::fetch_lists("demo").await.unwrap();
-            let list = lists.into_iter().find(|l| l.id == id).unwrap();
-            let v: Vec<_> = list.items.iter().map(|i| i.name.clone()).collect();
-            Msg::Load(TournamentData::new(v, String::new()))
+            let list = crate::fetch_list("demo", &id).await.unwrap();
+            let items = list.items.into_iter().map(|i| i.name).collect();
+            Msg::Load(TournamentData::new(items, String::new()))
         });
         Tournament {
             state: TournamentData { data: Vec::new() },

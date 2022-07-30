@@ -424,6 +424,15 @@ async fn fetch_lists(auth: &str) -> Result<Vec<List>, JsValue> {
     Ok(lists.lists)
 }
 
+async fn fetch_list(auth: &str, id: &str) -> Result<List, JsValue> {
+    let window = web_sys::window().expect("no global `window` exists");
+    let request = query(&format!("/api/lists/{}", id), "GET", auth)?;
+    let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
+    let resp: Response = resp_value.dyn_into()?;
+    let json = JsFuture::from(resp.json()?).await?;
+    Ok(json.into_serde().unwrap())
+}
+
 async fn query_items(auth: &str, id: &str) -> Result<ItemQuery, JsValue> {
     let window = web_sys::window().expect("no global `window` exists");
     let request = query(&format!("/api/lists/{}/items", id), "GET", auth).unwrap();
