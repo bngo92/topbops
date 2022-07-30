@@ -8,6 +8,9 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlSelectElement, Request, RequestInit, RequestMode, Response};
 use yew::{html, Callback, Component, Context, Html, MouseEvent, Properties};
+use yew_router::history::History;
+use yew_router::prelude::Link;
+use yew_router::scope_ext::RouterScopeExt;
 use yew_router::{BrowserRouter, Routable, Switch};
 
 mod random;
@@ -16,25 +19,22 @@ pub mod tournament;
 #[derive(Clone, Routable, PartialEq)]
 enum Route {
     #[at("/")]
+    Login,
+    #[at("/home")]
     Home,
+    #[at("/lists/:id/match")]
+    Match { id: String },
     #[at("/lists/:id/tournament")]
     Tournament { id: String },
 }
 
 fn switch(routes: &Route) -> Html {
     match routes {
-        Route::Home => html! { <Landing/> },
+        Route::Login => html! { <Login/> },
+        Route::Home => html! { <Home/> },
+        Route::Match { id } => html! { <Match id={id.clone()}/> },
         Route::Tournament { id } => html! {
-          <div>
-            <nav class="navbar navbar-dark bg-dark">
-              <div id="navbar" class="container-lg">
-                <a id="brand" class="navbar-brand" href="_blank">{"Bops to the Top"}</a>
-              </div>
-            </nav>
-            <div class="container-lg my-md-4">
-              <Tournament id={id.clone()}/>
-            </div>
-          </div>
+            <Tournament id={id.clone()}/>
         },
     }
 }
@@ -42,7 +42,7 @@ fn switch(routes: &Route) -> Html {
 struct App;
 
 impl Component for App {
-    type Message = ();
+    type Message = Msg;
     type Properties = ();
 
     fn create(_: &Context<Self>) -> Self {
@@ -51,172 +51,101 @@ impl Component for App {
 
     fn view(&self, _: &Context<Self>) -> Html {
         html! {
-            <BrowserRouter>
-                <Switch<Route> render={Switch::render(switch)} />
-            </BrowserRouter>
+            <div>
+                <nav class="navbar navbar-dark bg-dark">
+                    <div id="navbar" class="container-lg">
+                        <Link<Route> classes="navbar-brand" to={Route::Home}>{"Bops to the Top"}</Link<Route>>
+                    </div>
+                </nav>
+                <div class="container-lg my-md-4">
+                    <BrowserRouter>
+                        <Switch<Route> render={Switch::render(switch)} />
+                    </BrowserRouter>
+                </div>
+            </div>
         }
     }
 }
 
 enum Msg {
-    FetchHome(String),
-    LoadHome(String, Vec<(List, ItemQuery)>),
-    FetchRandom(String, String),
-    LoadRandom(String, String, ItemQuery, Mode),
+    LoadRandom(ItemQuery, Mode),
     UpdateStats((String, String, String, String), Mode),
 }
 
-struct Landing {
-    current_page: Page,
+#[derive(Clone, PartialEq, Properties)]
+struct MatchProps {
+    id: String,
+}
+
+struct Match {
     random_queue: Vec<topbops::Item>,
     left: Option<ItemMetadata>,
     right: Option<ItemMetadata>,
+    query: Option<ItemQuery>,
 }
 
-impl Component for Landing {
+impl Component for Match {
     type Message = Msg;
-    type Properties = ();
+    type Properties = MatchProps;
 
-    fn create(_: &Context<Self>) -> Self {
-        Landing {
-            current_page: Page::Login,
+    fn create(ctx: &Context<Self>) -> Self {
+        let mode = Mode::Match;
+        let id = ctx.props().id.clone();
+        ctx.link().send_future(async move {
+            let user = String::from("demo");
+            let query = query_items(&user, &id).await.unwrap();
+            Msg::LoadRandom(query, mode)
+        });
+        Match {
             random_queue: Vec::new(),
             left: None,
             right: None,
+            query: None,
         }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let page = match &self.current_page {
-            Page::Login => html! {
-                <Login on_demo_select={ctx.link().callback(|_| Msg::FetchHome(String::from("demo")))}/>
-            },
-            Page::Home(lists) => {
-                html! {
-                    <Home lists={lists.clone()}/>
-                }
+        if let Some(query) = &self.query {
+            let user = String::from("demo");
+            let list = &ctx.props().id;
+            let left = self.left.clone().unwrap();
+            let right = self.right.clone().unwrap();
+            let left_param = (
+                user.clone(),
+                list.clone(),
+                left.id.clone(),
+                right.id.clone(),
+            );
+            let right_param = (user, list.clone(), right.id.clone(), left.id.clone());
+            let mode = Mode::Match;
+            let mode_string = match mode {
+                Mode::Match => String::from("Random Matches"),
+                Mode::Round => String::from("Random Rounds"),
+            };
+            html! {
+                <Random mode={mode_string} left={left} on_left_select={ctx.link().callback_once(move |_| Msg::UpdateStats(left_param, mode))} right={right} on_right_select={ctx.link().callback_once(move |_| Msg::UpdateStats(right_param, mode))} query={query.clone()}/>
             }
-            Page::Random(_, list, _, Mode::Tournament) => {
-                html! {
-                    <Tournament id={list.clone()}/>
-                }
-            }
-            Page::Random(user, list, query, mode) => {
-                let left = self.left.clone().unwrap();
-                let right = self.right.clone().unwrap();
-                let left_param = (
-                    user.clone(),
-                    list.clone(),
-                    left.id.clone(),
-                    right.id.clone(),
-                );
-                let right_param = (
-                    user.clone(),
-                    list.clone(),
-                    right.id.clone(),
-                    left.id.clone(),
-                );
-                let mode = *mode;
-                let mode_string = match mode {
-                    Mode::Match => String::from("Random Matches"),
-                    Mode::Round => String::from("Random Rounds"),
-                    Mode::Tournament => String::from("Tournament"),
-                };
-                html! {
-                    <Random mode={mode_string} left={left} on_left_select={ctx.link().callback_once(move |_| Msg::UpdateStats(left_param, mode))} right={right} on_right_select={ctx.link().callback_once(move |_| Msg::UpdateStats(right_param, mode))} query={query.clone()}/>
-                }
-            }
-        };
-        html! {
-          <div>
-            <nav class="navbar navbar-dark bg-dark">
-              <div id="navbar" class="container-lg">
-                <a id="brand" class="navbar-brand" href="_blank" onclick={ctx.link().callback(|_| Msg::FetchHome(String::from("demo")))}>{"Bops to the Top"}</a>
-              </div>
-            </nav>
-            <div class="container-lg my-md-4">
-              {page}
-            </div>
-          </div>
+        } else {
+            html! {}
         }
     }
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
-            Msg::FetchHome(user) => {
-                ctx.link().send_future(async move {
-                    let lists = fetch_lists(&user).await.unwrap();
-                    let lists = futures::future::join_all(lists.into_iter().map(|list| async {
-                        let query = query_items(&user, &list.id).await?;
-                        Ok((list, query))
-                    }))
-                    .await
-                    .into_iter()
-                    .collect::<Result<_, JsValue>>()
-                    .unwrap();
-                    Msg::LoadHome(user, lists)
-                });
-                false
-            }
-            Msg::LoadHome(user, lists) => {
-                self.current_page = Page::Home(
-                    lists
-                        .into_iter()
-                        .map(|(data, query)| {
-                            let user = user.clone();
-                            let list = data.id.clone();
-                            ListData {
-                                data,
-                                query,
-                                on_go_select: ctx
-                                    .link()
-                                    .callback_once(move |_| Msg::FetchRandom(user, list)),
-                            }
-                        })
-                        .collect(),
-                );
-                true
-            }
-            Msg::FetchRandom(user, list) => {
-                let window = web_sys::window().expect("no global `window` exists");
-                let document = window.document().expect("should have a document on window");
-                let mode = document
-                    .get_element_by_id("mode")
-                    .unwrap()
-                    .dyn_into::<HtmlSelectElement>()
-                    .unwrap()
-                    .value();
-                let mode = match mode.as_ref() {
-                    "Random Matches" => Mode::Match,
-                    "Random Rounds" => Mode::Round,
-                    "Tournament" => Mode::Tournament,
-                    _ => {
-                        web_sys::console::log_1(&JsValue::from("Invalid mode"));
-                        return false;
-                    }
-                };
-                self.random_queue.clear();
-                ctx.link().send_future(async move {
-                    let query = query_items(&user, &list).await.unwrap();
-                    Msg::LoadRandom(user, list, query, mode)
-                });
-                false
-            }
-            Msg::LoadRandom(user, list, query, mode) => {
-                self.current_page = Page::Random(user, list, query.clone(), mode);
+            Msg::LoadRandom(query, mode) => {
                 match mode {
                     Mode::Round => {
                         match self.random_queue.len() {
                             // Reload the queue if it's empty
                             0 => {
-                                let mut items = query.items;
+                                let mut items = query.items.clone();
                                 items.shuffle(&mut rand::thread_rng());
                                 self.random_queue.extend(items);
                             }
                             // Always queue the last song next before reloading
                             1 => {
                                 let last = self.random_queue.pop().unwrap();
-                                let mut items = query.items;
+                                let mut items = query.items.clone();
                                 items.shuffle(&mut rand::thread_rng());
                                 self.random_queue.extend(items);
                                 self.random_queue.push(last);
@@ -232,15 +161,15 @@ impl Component for Landing {
                         self.left = queued_scores.pop().unwrap().metadata.clone();
                         self.right = queued_scores.pop().unwrap().metadata.clone();
                     }
-                    Mode::Tournament => {}
                 }
+                self.query = Some(query);
                 true
             }
             Msg::UpdateStats((user, list, win, lose), mode) => {
                 ctx.link().send_future(async move {
                     update_stats(&user, &list, &win, &lose).await.unwrap();
                     let query = query_items(&user, &list).await.unwrap();
-                    Msg::LoadRandom(user, list, query, mode)
+                    Msg::LoadRandom(query, mode)
                 });
                 false
             }
@@ -248,65 +177,99 @@ impl Component for Landing {
     }
 }
 
-#[derive(PartialEq)]
-enum Page {
-    Login,
-    Home(Vec<ListData>),
-    Random(String, String, ItemQuery, Mode),
-}
-
 #[derive(Clone, Copy, PartialEq)]
 enum Mode {
     Match,
     Round,
-    Tournament,
-}
-
-#[derive(PartialEq, Properties)]
-pub struct LoginProps {
-    on_demo_select: Callback<MouseEvent>,
 }
 
 pub struct Login;
 
 impl Component for Login {
     type Message = ();
-    type Properties = LoginProps;
+    type Properties = ();
 
     fn create(_: &Context<Self>) -> Self {
         Login
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
+        let history = ctx.link().history().unwrap();
+        let onclick = Callback::once(move |_| history.push(Route::Home));
         html! {
           <div>
             <div class="row justify-content-center">
-              <button type="button" id="login" class="col-2 btn btn-success">{"Login with Spotify"}</button>
+              <button type="button" class="col-2 btn btn-success">{"Login with Spotify"}</button>
             </div>
             <div class="row justify-content-center">
-              <button type="button" id="demo" class="col-2 btn btn-outline-success" onclick={ctx.props().on_demo_select.clone()}>{"Demo"}</button>
+              <button type="button" class="col-2 btn btn-outline-success" {onclick}>{"Demo"}</button>
             </div>
           </div>
         }
     }
 }
 
-#[derive(PartialEq, Properties)]
-pub struct HomeProps {
+pub enum HomeMsg {
+    Load(Vec<ListData>),
+}
+
+pub struct Home {
     lists: Vec<ListData>,
 }
 
-pub struct Home;
-
 impl Component for Home {
-    type Message = ();
-    type Properties = HomeProps;
+    type Message = HomeMsg;
+    type Properties = ();
 
-    fn create(_: &Context<Self>) -> Self {
-        Home
+    fn create(ctx: &Context<Self>) -> Self {
+        let history = ctx.link().history().unwrap();
+        ctx.link().send_future(async move {
+            let user = "demo";
+            let lists = fetch_lists(&user).await.unwrap();
+            let lists = futures::future::join_all(lists.into_iter().map(|list| async {
+                let query = query_items(&user, &list.id).await?;
+                let history = history.clone();
+                let id = list.id.clone();
+                let onclick = Callback::once(move |_| {
+                    let window = web_sys::window().expect("no global `window` exists");
+                    let document = window.document().expect("should have a document on window");
+                    let mode = document
+                        .get_element_by_id("mode")
+                        .unwrap()
+                        .dyn_into::<HtmlSelectElement>()
+                        .unwrap()
+                        .value();
+                    match mode.as_ref() {
+                        "Random Matches" => {
+                            history.push(Route::Match { id });
+                        }
+                        "Random Rounds" => {
+                            history.push(Route::Match { id });
+                        }
+                        "Tournament" => {
+                            history.push(Route::Tournament { id });
+                        }
+                        _ => {
+                            web_sys::console::log_1(&JsValue::from("Invalid mode"));
+                        }
+                    };
+                });
+                Ok(ListData {
+                    data: list,
+                    query,
+                    on_go_select: onclick,
+                })
+            }))
+            .await
+            .into_iter()
+            .collect::<Result<_, JsValue>>()
+            .unwrap();
+            HomeMsg::Load(lists)
+        });
+        Home { lists: Vec::new() }
     }
 
-    fn view(&self, ctx: &Context<Self>) -> Html {
+    fn view(&self, _: &Context<Self>) -> Html {
         html! {
           <div class="container-lg my-md-4">
             <div class="row">
@@ -325,7 +288,7 @@ impl Component for Home {
               </div>
             </div>
             <div class="row">
-              {ctx.props().lists.iter().map(|l| html! {<Widget list={l.clone()}/>}).collect::<Vec<_>>()}
+              {self.lists.iter().map(|l| html! {<Widget list={l.clone()}/>}).collect::<Vec<_>>()}
             </div>
             <h1>{"My Spotify Playlists"}</h1>
             <div></div>
@@ -341,6 +304,12 @@ impl Component for Home {
             </form>
           </div>
         }
+    }
+
+    fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
+        let HomeMsg::Load(lists) = msg;
+        self.lists = lists;
+        true
     }
 }
 
