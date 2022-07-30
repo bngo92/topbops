@@ -1,15 +1,14 @@
 #![feature(async_closure, let_else)]
-use crate::random::Random;
+use crate::random::Match;
 use crate::tournament::Tournament;
-use rand::prelude::SliceRandom;
 use std::collections::HashMap;
-use topbops::{ItemMetadata, ItemQuery, List, Lists};
+use topbops::{ItemQuery, List, Lists};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlSelectElement, Request, RequestInit, RequestMode, Response};
 use yew::{html, Callback, Component, Context, Html, MouseEvent, Properties};
-use yew_router::history::{History, Location};
+use yew_router::history::History;
 use yew_router::prelude::Link;
 use yew_router::scope_ext::RouterScopeExt;
 use yew_router::{BrowserRouter, Routable, Switch};
@@ -43,7 +42,7 @@ fn switch(routes: &Route) -> Html {
 struct App;
 
 impl Component for App {
-    type Message = Msg;
+    type Message = ();
     type Properties = ();
 
     fn create(_: &Context<Self>) -> Self {
@@ -66,129 +65,6 @@ impl Component for App {
             </div>
         }
     }
-}
-
-enum Msg {
-    LoadRandom(ItemQuery),
-    UpdateStats((String, String, String, String)),
-}
-
-#[derive(Clone, PartialEq, Properties)]
-struct MatchProps {
-    id: String,
-}
-
-struct Match {
-    mode: Mode,
-    random_queue: Vec<topbops::Item>,
-    left: Option<ItemMetadata>,
-    right: Option<ItemMetadata>,
-    query: Option<ItemQuery>,
-}
-
-impl Component for Match {
-    type Message = Msg;
-    type Properties = MatchProps;
-
-    fn create(ctx: &Context<Self>) -> Self {
-        let query = ctx
-            .link()
-            .location()
-            .unwrap()
-            .query::<HashMap<String, String>>()
-            .unwrap_or_default();
-        let mode = match query.get("mode").map_or("", String::as_str) {
-            "rounds" => Mode::Round,
-            _ => Mode::Match,
-        };
-        let id = ctx.props().id.clone();
-        ctx.link().send_future(async move {
-            let user = String::from("demo");
-            let query = query_items(&user, &id).await.unwrap();
-            Msg::LoadRandom(query)
-        });
-        Match {
-            mode,
-            random_queue: Vec::new(),
-            left: None,
-            right: None,
-            query: None,
-        }
-    }
-
-    fn view(&self, ctx: &Context<Self>) -> Html {
-        let Some(query) = &self.query else { return html! {}; };
-        let mode = match self.mode {
-            Mode::Match => String::from("Random Matches"),
-            Mode::Round => String::from("Random Rounds"),
-        };
-        let user = String::from("demo");
-        let list = &ctx.props().id;
-        let left = self.left.clone().unwrap();
-        let right = self.right.clone().unwrap();
-        let left_param = (
-            user.clone(),
-            list.clone(),
-            left.id.clone(),
-            right.id.clone(),
-        );
-        let right_param = (user, list.clone(), right.id.clone(), left.id.clone());
-        html! {
-            <Random mode={mode} left={left} on_left_select={ctx.link().callback_once(move |_| Msg::UpdateStats(left_param))} right={right} on_right_select={ctx.link().callback_once(move |_| Msg::UpdateStats(right_param))} query={query.clone()}/>
-        }
-    }
-
-    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
-        match msg {
-            Msg::LoadRandom(query) => {
-                match self.mode {
-                    Mode::Round => {
-                        match self.random_queue.len() {
-                            // Reload the queue if it's empty
-                            0 => {
-                                let mut items = query.items.clone();
-                                items.shuffle(&mut rand::thread_rng());
-                                self.random_queue.extend(items);
-                            }
-                            // Always queue the last song next before reloading
-                            1 => {
-                                let last = self.random_queue.pop().unwrap();
-                                let mut items = query.items.clone();
-                                items.shuffle(&mut rand::thread_rng());
-                                self.random_queue.extend(items);
-                                self.random_queue.push(last);
-                            }
-                            _ => {}
-                        }
-                        self.left = self.random_queue.pop().unwrap().metadata;
-                        self.right = self.random_queue.pop().unwrap().metadata;
-                    }
-                    Mode::Match => {
-                        let mut queued_scores: Vec<_> = query.items.iter().collect();
-                        queued_scores.shuffle(&mut rand::thread_rng());
-                        self.left = queued_scores.pop().unwrap().metadata.clone();
-                        self.right = queued_scores.pop().unwrap().metadata.clone();
-                    }
-                }
-                self.query = Some(query);
-                true
-            }
-            Msg::UpdateStats((user, list, win, lose)) => {
-                ctx.link().send_future(async move {
-                    update_stats(&user, &list, &win, &lose).await.unwrap();
-                    let query = query_items(&user, &list).await.unwrap();
-                    Msg::LoadRandom(query)
-                });
-                false
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum Mode {
-    Match,
-    Round,
 }
 
 pub struct Login;
