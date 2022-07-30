@@ -1,6 +1,6 @@
-#![feature(async_closure)]
+#![feature(async_closure, let_else)]
 use crate::random::Random;
-use crate::tournament::Tournament;
+use crate::tournament::{Tournament, TournamentData};
 use rand::prelude::SliceRandom;
 use topbops::{ItemMetadata, ItemQuery, List, Lists};
 use wasm_bindgen::prelude::*;
@@ -56,7 +56,7 @@ impl Component for App {
                     .iter()
                     .map(|i| i.metadata.as_ref().unwrap().name.clone())
                     .collect();
-                let v = tournament::generate_tournament(v, String::new());
+                let v = TournamentData::new(v, String::new());
                 html! {
                     <Tournament data={v}/>
                 }
