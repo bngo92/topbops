@@ -83,11 +83,11 @@ impl<I: Iterator, J: Iterator<Item = I::Item>> Iterator for Interleave<I, J> {
 /// 2
 #[derive(Clone, Eq, PartialEq)]
 pub struct TournamentData<T: Clone> {
-    data: Vec<Option<Node<T>>>,
+    pub data: Vec<Option<Node<T>>>,
 }
 
 impl<T: Clone> TournamentData<T> {
-    pub fn new(v: Vec<T>, default: T) -> Vec<Option<Node<T>>> {
+    pub fn new(v: Vec<T>, default: T) -> TournamentData<T> {
         let depth = (v.len() as f64).log2().ceil() as u32;
 
         // Build arrays of steps between items with ascending seeds
@@ -121,7 +121,7 @@ impl<T: Clone> TournamentData<T> {
         // All nodes with even indexes are leaf nodes
         // The tree is otherwise complete (all other levels are filled) so create nodes at odd
         // indexes
-        let mut next: Vec<_> = [
+        let mut data: Vec<_> = [
             None,
             Some(Node {
                 item: default,
@@ -153,7 +153,7 @@ impl<T: Clone> TournamentData<T> {
             } else {
                 current
             };
-            next[index as usize] = Some(Node {
+            data[index as usize] = Some(Node {
                 item,
                 disabled: false,
                 depth: usize::MAX,
@@ -162,22 +162,22 @@ impl<T: Clone> TournamentData<T> {
         }
 
         // Iterate over the final set of nodes and assign depth and pair values
-        for i in 0..next.len() {
-            if let Some(item) = next[i].clone() {
+        for i in 0..data.len() {
+            if let Some(item) = data[i].clone() {
                 // This block is only entered once for each node pair
                 if item.depth == usize::MAX {
                     let depth = i.trailing_ones() as usize;
-                    next[i].as_mut().unwrap().depth = depth;
+                    data[i].as_mut().unwrap().depth = depth;
                     let pair = i + (2 << depth);
-                    if pair < next.len() {
-                        next[i].as_mut().unwrap().pair = pair;
-                        next[pair].as_mut().unwrap().depth = depth;
-                        next[pair].as_mut().unwrap().pair = i;
+                    if pair < data.len() {
+                        data[i].as_mut().unwrap().pair = pair;
+                        data[pair].as_mut().unwrap().depth = depth;
+                        data[pair].as_mut().unwrap().pair = i;
                     }
                 }
             }
         }
-        next
+        TournamentData { data }
     }
 
     /// Assign the node with the index i to win their round.
@@ -197,12 +197,13 @@ impl<T: Clone> TournamentData<T> {
 }
 
 pub enum Msg {
+    Load(TournamentData<String>),
     Update(usize),
 }
 
 #[derive(Eq, PartialEq, Properties)]
 pub struct TournamentProps {
-    pub data: Vec<Option<Node<String>>>,
+    pub id: String,
 }
 
 pub struct Tournament {
@@ -214,10 +215,15 @@ impl Component for Tournament {
     type Properties = TournamentProps;
 
     fn create(ctx: &Context<Self>) -> Self {
+        let id = ctx.props().id.clone();
+        ctx.link().send_future(async move {
+            let lists = crate::fetch_lists("demo").await.unwrap();
+            let list = lists.into_iter().find(|l| l.id == id).unwrap();
+            let v: Vec<_> = list.items.iter().map(|i| i.name.clone()).collect();
+            Msg::Load(TournamentData::new(v, String::new()))
+        });
         Tournament {
-            state: TournamentData {
-                data: ctx.props().data.clone(),
-            },
+            state: TournamentData { data: Vec::new() },
         }
     }
 
@@ -228,8 +234,14 @@ impl Component for Tournament {
     }
 
     fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
-        let Msg::Update(i) = msg;
-        self.state.update(i);
+        match msg {
+            Msg::Load(data) => {
+                self.state = data;
+            }
+            Msg::Update(i) => {
+                self.state.update(i);
+            }
+        }
         true
     }
 }

@@ -197,6 +197,7 @@ fn test_generate_tournament() {
         let input = (1..input + 1).collect();
         assert_eq!(
             topbops_wasm::tournament::TournamentData::new(input, 0)
+                .data
                 .into_iter()
                 .map(|n| n.map(|Node { item, disabled, .. }| (item, disabled)))
                 .collect::<Vec<_>>(),

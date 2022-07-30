@@ -1,6 +1,6 @@
 #![feature(async_closure, let_else)]
 use crate::random::Random;
-use crate::tournament::{Tournament, TournamentData};
+use crate::tournament::Tournament;
 use rand::prelude::SliceRandom;
 use topbops::{ItemMetadata, ItemQuery, List, Lists};
 use wasm_bindgen::prelude::*;
@@ -8,9 +8,55 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlSelectElement, Request, RequestInit, RequestMode, Response};
 use yew::{html, Callback, Component, Context, Html, MouseEvent, Properties};
+use yew_router::{BrowserRouter, Routable, Switch};
 
 mod random;
 pub mod tournament;
+
+#[derive(Clone, Routable, PartialEq)]
+enum Route {
+    #[at("/")]
+    Home,
+    #[at("/lists/:id/tournament")]
+    Tournament { id: String },
+}
+
+fn switch(routes: &Route) -> Html {
+    match routes {
+        Route::Home => html! { <Landing/> },
+        Route::Tournament { id } => html! {
+          <div>
+            <nav class="navbar navbar-dark bg-dark">
+              <div id="navbar" class="container-lg">
+                <a id="brand" class="navbar-brand" href="_blank">{"Bops to the Top"}</a>
+              </div>
+            </nav>
+            <div class="container-lg my-md-4">
+              <Tournament id={id.clone()}/>
+            </div>
+          </div>
+        },
+    }
+}
+
+struct App;
+
+impl Component for App {
+    type Message = ();
+    type Properties = ();
+
+    fn create(_: &Context<Self>) -> Self {
+        App
+    }
+
+    fn view(&self, _: &Context<Self>) -> Html {
+        html! {
+            <BrowserRouter>
+                <Switch<Route> render={Switch::render(switch)} />
+            </BrowserRouter>
+        }
+    }
+}
 
 enum Msg {
     FetchHome(String),
@@ -20,19 +66,19 @@ enum Msg {
     UpdateStats((String, String, String, String), Mode),
 }
 
-struct App {
+struct Landing {
     current_page: Page,
     random_queue: Vec<topbops::Item>,
     left: Option<ItemMetadata>,
     right: Option<ItemMetadata>,
 }
 
-impl Component for App {
+impl Component for Landing {
     type Message = Msg;
     type Properties = ();
 
     fn create(_: &Context<Self>) -> Self {
-        App {
+        Landing {
             current_page: Page::Login,
             random_queue: Vec::new(),
             left: None,
@@ -50,15 +96,9 @@ impl Component for App {
                     <Home lists={lists.clone()}/>
                 }
             }
-            Page::Random(_, _, query, Mode::Tournament) => {
-                let v: Vec<_> = query
-                    .items
-                    .iter()
-                    .map(|i| i.metadata.as_ref().unwrap().name.clone())
-                    .collect();
-                let v = TournamentData::new(v, String::new());
+            Page::Random(_, list, _, Mode::Tournament) => {
                 html! {
-                    <Tournament data={v}/>
+                    <Tournament id={list.clone()}/>
                 }
             }
             Page::Random(user, list, query, mode) => {

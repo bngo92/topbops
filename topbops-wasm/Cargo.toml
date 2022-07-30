@@ -18,6 +18,7 @@ topbops = { path = "../topbops/" }
 wasm-bindgen = { version = "0.2.78", features = ["serde-serialize"]  }
 wasm-bindgen-futures = "0.4.28"
 yew = "0.19"
+yew-router = "0.16"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.0"
