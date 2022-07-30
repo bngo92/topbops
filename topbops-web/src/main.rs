@@ -103,6 +103,7 @@ async fn route(
             let user_id = String::from(DEMO_USER);
             match (&path[..], req.method()) {
                 (["lists"], &Method::GET) => get_lists(db, session, user_id).await,
+                (["lists", id], &Method::GET) => get_list(db, session, user_id, id).await,
                 (["lists", id, "items"], &Method::GET) => {
                     get_list_items(db, session, user_id, id).await
                 }
@@ -138,6 +139,7 @@ async fn route(
                     .body(Body::empty())
                     .map_err(Error::from),
                 (["lists"], &Method::GET) => get_lists(db, session, user_id).await,
+                (["lists", id], &Method::GET) => get_list(db, session, user_id, id).await,
                 (["lists", id, "items"], &Method::GET) => {
                     get_list_items(db, session, user_id, id).await
                 }
@@ -155,7 +157,6 @@ async fn route(
     } else {
         #[cfg(feature = "dev")]
         if let Some((file, mime)) = match req.uri().path() {
-            "/" => Some((File::open("../topbops-wasm/www/index.html"), "text/html")),
             "/topbops_wasm.js" => Some((
                 File::open("../topbops-wasm/pkg/topbops_wasm.js"),
                 "application/javascript",
@@ -164,7 +165,7 @@ async fn route(
                 File::open("../topbops-wasm/pkg/topbops_wasm_bg.wasm"),
                 "application/wasm",
             )),
-            _ => None,
+            _ => Some((File::open("../topbops-wasm/www/index.html"), "text/html")),
         } {
             let mut contents = Vec::new();
             file.await?.read_to_end(&mut contents).await?;
@@ -292,23 +293,25 @@ async fn get_lists(
         .map_err(Error::from)
 }
 
+async fn get_list(
+    db: DatabaseClient,
+    session: Arc<SessionClient>,
+    user_id: String,
+    id: &str,
+) -> Result<Response<Body>, Error> {
+    let list = get_list_doc(&db, &session, &user_id, &id).await?;
+    get_response_builder()
+        .body(Body::from(serde_json::to_string(&list)?))
+        .map_err(Error::from)
+}
+
 async fn get_list_items(
     db: DatabaseClient,
     session: Arc<SessionClient>,
     user_id: String,
     id: &str,
 ) -> Result<Response<Body>, Error> {
-    let client = db
-        .clone()
-        .collection_client("lists")
-        .document_client(id, &user_id)?;
-    let list = if let GetDocumentResponse::Found(list) =
-        client.get_document::<List>().into_future().await?
-    {
-        list.document.document
-    } else {
-        todo!()
-    };
+    let list = get_list_doc(&db, &session, &user_id, id).await?;
 
     let mut map = HashMap::new();
     let original_query = if let ListMode::User = list.mode {
@@ -366,6 +369,23 @@ async fn get_list_items(
     get_response_builder()
         .body(Body::from(serde_json::to_string(&response)?))
         .map_err(Error::from)
+}
+
+async fn get_list_doc(
+    db: &DatabaseClient,
+    _: &Arc<SessionClient>,
+    user_id: &str,
+    id: &str,
+) -> Result<List, Error> {
+    let client = db
+        .clone()
+        .collection_client("lists")
+        .document_client(id, &user_id)?;
+    if let GetDocumentResponse::Found(list) = client.get_document::<List>().into_future().await? {
+        Ok(list.document.document)
+    } else {
+        todo!()
+    }
 }
 
 fn transform_query(query: &mut Select, user_id: &str) {
