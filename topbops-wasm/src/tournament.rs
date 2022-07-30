@@ -1,4 +1,8 @@
+use rand::prelude::SliceRandom;
+use std::collections::HashMap;
 use yew::{html, Callback, Component, Context, Html, Properties};
+use yew_router::history::Location;
+use yew_router::scope_ext::RouterScopeExt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Node<T: Clone> {
@@ -215,10 +219,21 @@ impl Component for Tournament {
     type Properties = TournamentProps;
 
     fn create(ctx: &Context<Self>) -> Self {
+        let query = ctx
+            .link()
+            .location()
+            .unwrap()
+            .query::<HashMap<String, String>>()
+            .unwrap_or_default();
+        let random = matches!(query.get("mode").map_or("", String::as_str), "random");
         let id = ctx.props().id.clone();
         ctx.link().send_future(async move {
             let list = crate::fetch_list("demo", &id).await.unwrap();
-            let items = list.items.into_iter().map(|i| i.name).collect();
+            let mut items: Vec<_> = list.items.into_iter().map(|i| i.name).collect();
+            // TODO: order by score
+            if random {
+                items.shuffle(&mut rand::thread_rng());
+            }
             Msg::Load(TournamentData::new(items, String::new()))
         });
         Tournament {

@@ -138,6 +138,14 @@ impl Component for Home {
                         "Tournament" => {
                             history.push(Route::Tournament { id });
                         }
+                        "Random Tournament" => {
+                            history
+                                .push_with_query(
+                                    Route::Tournament { id },
+                                    [("mode", "random")].into_iter().collect::<HashMap<_, _>>(),
+                                )
+                                .unwrap();
+                        }
                         _ => {
                             web_sys::console::log_1(&JsValue::from("Invalid mode"));
                         }
@@ -173,6 +181,7 @@ impl Component for Home {
                   <option>{"Random Matches"}</option>
                   <option>{"Random Rounds"}</option>
                   <option>{"Tournament"}</option>
+                  <option>{"Random Tournament"}</option>
                 </select>
               </div>
             </div>
