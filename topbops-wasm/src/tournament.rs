@@ -1,5 +1,6 @@
 use rand::prelude::SliceRandom;
 use std::collections::HashMap;
+use topbops::List;
 use yew::{html, Callback, Component, Context, Html, Properties};
 use yew_router::history::Location;
 use yew_router::scope_ext::RouterScopeExt;
@@ -87,6 +88,7 @@ impl<I: Iterator, J: Iterator<Item = I::Item>> Iterator for Interleave<I, J> {
 /// 2
 #[derive(Clone, Eq, PartialEq)]
 pub struct TournamentData<T: Clone> {
+    initial_data: Vec<Option<Node<T>>>,
     pub data: Vec<Option<Node<T>>>,
 }
 
@@ -181,7 +183,10 @@ impl<T: Clone> TournamentData<T> {
                 }
             }
         }
-        TournamentData { data }
+        TournamentData {
+            initial_data: data.clone(),
+            data,
+        }
     }
 
     /// Assign the node with the index i to win their round.
@@ -201,8 +206,9 @@ impl<T: Clone> TournamentData<T> {
 }
 
 pub enum Msg {
-    Load(TournamentData<String>),
+    Load(List, bool),
     Update(usize),
+    Reset,
 }
 
 #[derive(Eq, PartialEq, Properties)]
@@ -211,7 +217,9 @@ pub struct TournamentProps {
 }
 
 pub struct Tournament {
+    title: String,
     state: TournamentData<String>,
+    iframe: Option<String>,
 }
 
 impl Component for Tournament {
@@ -229,31 +237,63 @@ impl Component for Tournament {
         let id = ctx.props().id.clone();
         ctx.link().send_future(async move {
             let list = crate::fetch_list("demo", &id).await.unwrap();
-            let mut items: Vec<_> = list.items.into_iter().map(|i| i.name).collect();
-            // TODO: order by score
-            if random {
-                items.shuffle(&mut rand::thread_rng());
-            }
-            Msg::Load(TournamentData::new(items, String::new()))
+            Msg::Load(list, random)
         });
         Tournament {
-            state: TournamentData { data: Vec::new() },
+            title: String::new(),
+            state: TournamentData {
+                initial_data: Vec::new(),
+                data: Vec::new(),
+            },
+            iframe: None,
         }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
+        let onclick = ctx.link().callback(|_| Msg::Reset).clone();
         html! {
-            <TournamentBracket data={self.state.clone()} on_click_select={ctx.link().callback(Msg::Update)}/>
+            if !self.title.is_empty() {
+                <div class="row">
+                    <div class="col-10">
+                        <h1>{self.title.clone()}</h1>
+                    </div>
+                    <div class="col-2 align-self-center">
+                        <button type="button" class="btn btn-danger w-100 mb-1" {onclick}>{"Reset"}</button>
+                    </div>
+                </div>
+                <TournamentBracket data={self.state.clone()} on_click_select={ctx.link().callback(Msg::Update)}/>
+                if let Some(src) = self.iframe.clone() {
+                    <div class="row">
+                        <div class="col-8 offset-2">
+                            <iframe width="100%" height="380" frameborder="0" {src}></iframe>
+                        </div>
+                    </div>
+                }
+            }
         }
     }
 
     fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
-            Msg::Load(data) => {
-                self.state = data;
+            Msg::Load(list, random) => {
+                let mut items: Vec<_> = list.items.into_iter().map(|i| i.name).collect();
+                // TODO: order by score
+                if random {
+                    items.shuffle(&mut rand::thread_rng());
+                }
+                self.title = if random {
+                    format!("{} - Random Tournament", list.name)
+                } else {
+                    format!("{} - Tournament", list.name)
+                };
+                self.state = TournamentData::new(items, String::new());
+                self.iframe = list.iframe;
             }
             Msg::Update(i) => {
                 self.state.update(i);
+            }
+            Msg::Reset => {
+                self.state.data = self.state.initial_data.clone();
             }
         }
         true
@@ -277,38 +317,35 @@ impl Component for TournamentBracket {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        ctx.props()
+        let props = ctx.props();
+        props
             .data
             .data
             .iter()
             .enumerate()
             .map(|(i, item)| {
-                let class = if let Some(item) = item {
-                    match item.depth {
-                        5 => Some("col-10"),
-                        4 => Some("col-8"),
-                        3 => Some("col-6"),
-                        2 => Some("col-4"),
-                        1 => Some("col-2"),
-                        _ => None,
-                    }
-                } else {
-                    None
-                };
-                let on_click = ctx.props().on_click_select.clone();
-                html! {
-                    if let Some(item) = item {
+                if let Some(item) = item {
+                    let class = match item.depth {
+                        5 => "col-2 offset-10",
+                        4 => "col-2 offset-8",
+                        3 => "col-2 offset-6",
+                        2 => "col-2 offset-4",
+                        1 => "col-2 offset-2",
+                        _ => "col-2",
+                    };
+                    let onclick = props.on_click_select.clone();
+                    let onclick = Callback::from(move |_| onclick.emit(i));
+                    let title = item.item.clone();
+                    let disabled = item.disabled;
+                    html! {
                         <div class="row">
-                            if let Some(class) = class {
-                                <div class={class}></div>
-                            }
-                            <div class="col-2">
-                                <button type="button" class="btn btn-warning truncate w-100" style="height: 38px" title={item.item.clone()} disabled={item.disabled} onclick={Callback::from(move |_| on_click.emit(i))}>{item.item.clone()}</button>
+                            <div {class}>
+                                <button type="button" class="btn btn-warning truncate w-100" style="height: 38px" {title} {disabled} {onclick}>{item.item.clone()}</button>
                             </div>
                         </div>
-                    } else {
-                        <div style="height: 38px"></div>
                     }
+                } else {
+                    html! { <div style="height: 38px"></div> }
                 }
             })
             .collect()
