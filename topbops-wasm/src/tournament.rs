@@ -253,8 +253,8 @@ impl Component for Tournament {
         let onclick = ctx.link().callback(|_| Msg::Reset).clone();
         html! {
             if !self.title.is_empty() {
-                <div class="row">
-                    <div class="col-10">
+                <div class="row min-width">
+                    <div class="col-12 col-lg-10">
                         <h1>{self.title.clone()}</h1>
                     </div>
                     <div class="col-2 align-self-center">
@@ -264,7 +264,7 @@ impl Component for Tournament {
                 <TournamentBracket data={self.state.clone()} on_click_select={ctx.link().callback(Msg::Update)}/>
                 if let Some(src) = self.iframe.clone() {
                     <div class="row">
-                        <div class="col-8 offset-2">
+                        <div class="col-12 col-md-8 offset-md-2">
                             <iframe width="100%" height="380" frameborder="0" {src}></iframe>
                         </div>
                     </div>
@@ -338,7 +338,7 @@ impl Component for TournamentBracket {
                     let title = item.item.clone();
                     let disabled = item.disabled;
                     html! {
-                        <div class="row">
+                        <div class="row min-width">
                             <div {class}>
                                 <button type="button" class="btn btn-warning truncate w-100" style="height: 38px" {title} {disabled} {onclick}>{item.item.clone()}</button>
                             </div>

@@ -183,11 +183,11 @@ impl Component for Random {
             <div class="row">
               <div class="col-6">
                 <iframe id="iframe1" width="100%" height="380" frameborder="0" src={left.iframe.clone()}></iframe>
-                <button type="button" class="btn btn-info width" onclick={on_left_select.clone()}>{&left.name}</button>
+                <button type="button" class="btn btn-info w-100" onclick={on_left_select.clone()}>{&left.name}</button>
               </div>
               <div class="col-6">
                 <iframe id="iframe2" width="100%" height="380" frameborder="0" src={right.iframe.clone()}></iframe>
-                <button type="button" class="btn btn-warning width" onclick={on_right_select.clone()}>{&right.name}</button>
+                <button type="button" class="btn btn-warning w-100" onclick={on_right_select.clone()}>{&right.name}</button>
               </div>
             </div>
             <div class="row">
