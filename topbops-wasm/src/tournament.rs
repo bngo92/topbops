@@ -253,18 +253,22 @@ impl Component for Tournament {
         let onclick = ctx.link().callback(|_| Msg::Reset).clone();
         html! {
             if !self.title.is_empty() {
-                <div class="row min-width">
-                    <div class="col-12 col-lg-10">
+                <div class="row">
+                    <div class="col-10">
                         <h1>{self.title.clone()}</h1>
                     </div>
-                    <div class="col-2 align-self-center">
+                    <div class="col-2 align-self-center" style="min-width: 169.33px">
                         <button type="button" class="btn btn-danger w-100 mb-1" {onclick}>{"Reset"}</button>
                     </div>
                 </div>
-                <TournamentBracket data={self.state.clone()} on_click_select={ctx.link().callback(Msg::Update)}/>
+                <div class="overflow-scroll">
+                    <div style="min-width: 992px">
+                        <TournamentBracket data={self.state.clone()} on_click_select={ctx.link().callback(Msg::Update)}/>
+                    </div>
+                </div>
                 if let Some(src) = self.iframe.clone() {
                     <div class="row">
-                        <div class="col-12 col-md-8 offset-md-2">
+                        <div class="col-12 col-lg-10 col-xl-8">
                             <iframe width="100%" height="380" frameborder="0" {src}></iframe>
                         </div>
                     </div>
@@ -338,9 +342,9 @@ impl Component for TournamentBracket {
                     let title = item.item.clone();
                     let disabled = item.disabled;
                     html! {
-                        <div class="row min-width">
+                        <div class="row">
                             <div {class}>
-                                <button type="button" class="btn btn-warning truncate w-100" style="height: 38px" {title} {disabled} {onclick}>{item.item.clone()}</button>
+                                <button type="button" class="btn btn-warning text-truncate w-100" style="height: 38px" {title} {disabled} {onclick}>{item.item.clone()}</button>
                             </div>
                         </div>
                     }
