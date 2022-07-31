@@ -165,10 +165,10 @@ impl Component for Home {
             <div></div>
             <form>
               <div class="row">
-                <div class="col-9 pt-1">
+                <div class="col-12 col-md-8 col-lg-9 pt-1">
                   <input type="text" id="input" class="col-12" value={default_import}/>
                 </div>
-                <div class="col-1 pe-2">
+                <div class="col-2 col-lg-1 pe-2">
                   <button type="button" class="col-12 btn btn-success">{"Save"}</button>
                 </div>
               </div>
@@ -203,7 +203,7 @@ impl Component for Widget {
         let list = &ctx.props().list;
         let go = list.on_go_select.clone();
         html! {
-          <div class="col-6">
+          <div class="col-12 col-md-6">
             <div class="row">
               <div class="col-8">
                 <h2>{&list.data.name}</h2>
