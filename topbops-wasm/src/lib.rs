@@ -19,8 +19,6 @@ pub mod tournament;
 #[derive(Clone, Routable, PartialEq)]
 enum Route {
     #[at("/")]
-    Login,
-    #[at("/home")]
     Home,
     #[at("/lists/:id/match")]
     Match { id: String },
@@ -30,7 +28,6 @@ enum Route {
 
 fn switch(routes: &Route) -> Html {
     match routes {
-        Route::Login => html! { <Login/> },
         Route::Home => html! { <Home/> },
         Route::Match { id } => html! { <Match id={id.clone()}/> },
         Route::Tournament { id } => html! {
@@ -52,43 +49,17 @@ impl Component for App {
     fn view(&self, _: &Context<Self>) -> Html {
         html! {
             <div>
-                <nav class="navbar navbar-dark bg-dark">
-                    <div id="navbar" class="container-lg">
-                        <Link<Route> classes="navbar-brand" to={Route::Home}>{"Bops to the Top"}</Link<Route>>
-                    </div>
-                </nav>
-                <div class="container-lg my-md-4">
-                    <BrowserRouter>
+                <BrowserRouter>
+                    <nav class="navbar navbar-dark bg-dark">
+                        <div id="navbar" class="container-lg">
+                            <Link<Route> classes="navbar-brand" to={Route::Home}>{"Bops to the Top"}</Link<Route>>
+                        </div>
+                    </nav>
+                    <div class="container-lg my-md-4">
                         <Switch<Route> render={Switch::render(switch)} />
-                    </BrowserRouter>
-                </div>
+                    </div>
+                </BrowserRouter>
             </div>
-        }
-    }
-}
-
-pub struct Login;
-
-impl Component for Login {
-    type Message = ();
-    type Properties = ();
-
-    fn create(_: &Context<Self>) -> Self {
-        Login
-    }
-
-    fn view(&self, ctx: &Context<Self>) -> Html {
-        let history = ctx.link().history().unwrap();
-        let onclick = Callback::once(move |_| history.push(Route::Home));
-        html! {
-          <div>
-            <div class="row justify-content-center">
-              <button type="button" class="col-2 btn btn-success">{"Login with Spotify"}</button>
-            </div>
-            <div class="row justify-content-center">
-              <button type="button" class="col-2 btn btn-outline-success" {onclick}>{"Demo"}</button>
-            </div>
-          </div>
         }
     }
 }
@@ -114,7 +85,7 @@ impl Component for Home {
                 let query = query_items(&user, &list.id).await?;
                 let history = history.clone();
                 let id = list.id.clone();
-                let onclick = Callback::once(move |_| {
+                let on_go_select = Callback::once(move |_| {
                     let window = web_sys::window().expect("no global `window` exists");
                     let document = window.document().expect("should have a document on window");
                     let mode = document
@@ -154,7 +125,7 @@ impl Component for Home {
                 Ok(ListData {
                     data: list,
                     query,
-                    on_go_select: onclick,
+                    on_go_select,
                 })
             }))
             .await
@@ -167,8 +138,10 @@ impl Component for Home {
     }
 
     fn view(&self, _: &Context<Self>) -> Html {
+        let default_import =
+            "https://open.spotify.com/playlist/5MztFbRbMpyxbVYuOSfQV9?si=9db089ab25274efa";
         html! {
-          <div class="container-lg my-md-4">
+          <div>
             <div class="row">
               <div class="col-8">
                 <h1>{"Home"}</h1>
@@ -178,22 +151,22 @@ impl Component for Home {
               </label>
               <div class="col-2 align-self-end">
                 <select id="mode" class="form-select">
+                  <option>{"Tournament"}</option>
+                  <option selected=true>{"Random Tournament"}</option>
                   <option>{"Random Matches"}</option>
                   <option>{"Random Rounds"}</option>
-                  <option>{"Tournament"}</option>
-                  <option>{"Random Tournament"}</option>
                 </select>
               </div>
             </div>
             <div class="row">
-              {self.lists.iter().map(|l| html! {<Widget list={l.clone()}/>}).collect::<Vec<_>>()}
+              {for self.lists.iter().map(|l| html! {<Widget list={l.clone()}/>})}
             </div>
             <h1>{"My Spotify Playlists"}</h1>
             <div></div>
             <form>
               <div class="row">
                 <div class="col-9 pt-1">
-                  <input type="text" id="input" class="col-12" value="https://open.spotify.com/playlist/5MztFbRbMpyxbVYuOSfQV9?si=9db089ab25274efa"/>
+                  <input type="text" id="input" class="col-12" value={default_import}/>
                 </div>
                 <div class="col-1 pe-2">
                   <button type="button" class="col-12 btn btn-success">{"Save"}</button>
@@ -228,6 +201,7 @@ impl Component for Widget {
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         let list = &ctx.props().list;
+        let go = list.on_go_select.clone();
         html! {
           <div class="col-6">
             <div class="row">
@@ -235,7 +209,7 @@ impl Component for Widget {
                 <h2>{&list.data.name}</h2>
               </div>
               <div class="col-2">
-                <button type="button" class="btn btn-success col-12" onclick={list.on_go_select.clone()}>{"Go"}</button>
+                <button type="button" class="btn btn-success col-12" onclick={go}>{"Go"}</button>
               </div>
               <div class="col-2">
                 <button type="button" class="btn btn-danger col-12">{"Unsave"}</button>
