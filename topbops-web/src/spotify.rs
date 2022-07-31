@@ -132,6 +132,10 @@ pub async fn import_playlist(
         id: playlist_id.to_owned(),
         user_id: user_id.clone(),
         name: playlist.name,
+        iframe: Some(format!(
+            "https://open.spotify.com/embed/playlist/{}?utm_source=generator",
+            playlist_id
+        )),
         items: items
             .iter()
             .map(|i| ItemMetadata::new(i.id.clone(), i.name.clone(), i.iframe.clone()))

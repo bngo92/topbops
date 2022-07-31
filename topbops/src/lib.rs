@@ -12,6 +12,7 @@ pub struct List {
     pub id: String,
     pub user_id: String,
     pub name: String,
+    pub iframe: Option<String>,
     pub items: Vec<ItemMetadata>,
     pub mode: ListMode,
     // For external lists, query is only used to select fields (not filter)
