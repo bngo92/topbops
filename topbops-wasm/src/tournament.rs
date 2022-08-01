@@ -250,7 +250,7 @@ impl Component for Tournament {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let onclick = ctx.link().callback(|_| Msg::Reset).clone();
+        let onclick = ctx.link().callback(|_| Msg::Reset);
         html! {
             if !self.title.is_empty() {
                 <div class="row">
