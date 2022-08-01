@@ -13,6 +13,7 @@ use yew_router::prelude::Link;
 use yew_router::scope_ext::RouterScopeExt;
 use yew_router::{BrowserRouter, Routable, Switch};
 
+mod base;
 mod random;
 pub mod tournament;
 
