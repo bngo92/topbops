@@ -1,4 +1,4 @@
-use topbops::ItemMetadata;
+use topbops::{ItemMetadata, ItemQuery};
 use yew::{html, Callback, Component, Context, Html, MouseEvent, Properties};
 
 pub enum IframeCompareMsg {
@@ -71,5 +71,114 @@ impl Component for IframeCompare {
     fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
         self.flag = msg;
         true
+    }
+}
+
+#[derive(PartialEq, Properties)]
+pub struct TableProps {
+    pub query: ItemQuery,
+}
+
+pub struct ResponsiveTable;
+
+impl Component for ResponsiveTable {
+    type Message = ();
+    type Properties = TableProps;
+
+    fn create(_: &Context<Self>) -> Self {
+        ResponsiveTable
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let items: Vec<_> = ctx
+            .props()
+            .query
+            .items
+            .iter()
+            .map(|item| item.metadata.clone().unwrap())
+            .collect();
+        let (left_items, right_items): (Vec<_>, Vec<_>) = items
+            .iter()
+            .zip(1..)
+            .map(|(item, i)| (i, html! {<Item i={i} item={item.clone()}/>}))
+            .partition(|(i, _)| i % 2 == 1);
+        let items = items
+            .into_iter()
+            .zip(1..)
+            .map(|(item, i)| html! {<Item i={i} item={item}/>});
+        let left_items = left_items.into_iter().map(|(_, item)| item);
+        let right_items = right_items.into_iter().map(|(_, item)| item);
+        html! {
+            <div class="row">
+              <div class="col-md-6 d-none d-lg-block">
+                <table class="table table-striped">
+                  <thead>
+                    <tr>
+                      <th class="col-1">{"#"}</th>
+                      <th class="col-8">{"Track"}</th>
+                      <th>{"Record"}</th>
+                      <th>{"Score"}</th>
+                    </tr>
+                  </thead>
+                  <tbody>{for left_items}</tbody>
+                </table>
+              </div>
+              <div class="col-md-6 d-none d-lg-block">
+                <table class="table table-striped">
+                  <thead>
+                    <tr>
+                      <th class="col-1">{"#"}</th>
+                      <th class="col-8">{"Track"}</th>
+                      <th>{"Record"}</th>
+                      <th>{"Score"}</th>
+                    </tr>
+                  </thead>
+                  <tbody>{for right_items}</tbody>
+                </table>
+              </div>
+              <div class="col-12 d-lg-none">
+                <table class="table table-striped">
+                  <thead>
+                    <tr>
+                      <th class="col-1">{"#"}</th>
+                      <th class="col-8">{"Track"}</th>
+                      <th>{"Record"}</th>
+                      <th>{"Score"}</th>
+                    </tr>
+                  </thead>
+                  <tbody>{for items}</tbody>
+                </table>
+              </div>
+            </div>
+        }
+    }
+}
+
+#[derive(PartialEq, Properties)]
+struct ItemProps {
+    i: i32,
+    item: ItemMetadata,
+}
+
+struct Item;
+
+impl Component for Item {
+    type Message = ();
+    type Properties = ItemProps;
+
+    fn create(_: &Context<Self>) -> Self {
+        Item
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let props = ctx.props();
+        html! {
+          <tr>
+            <th>{props.i}</th>
+            <td>{&props.item.name}</td>
+            <td>{format!("{}-{}", props.item.wins, props.item.losses)}</td>
+            <td>{&props.item.score}</td>
+          </tr>
+        }
     }
 }
