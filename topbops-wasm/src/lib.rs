@@ -7,7 +7,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlSelectElement, Request, RequestInit, RequestMode, Response};
-use yew::{html, Callback, Component, Context, Html, MouseEvent, Properties};
+use yew::{html, Callback, Component, Context, Html, MouseEvent, NodeRef, Properties};
 use yew_router::history::History;
 use yew_router::prelude::Link;
 use yew_router::scope_ext::RouterScopeExt;
@@ -71,6 +71,7 @@ pub enum HomeMsg {
 
 pub struct Home {
     lists: Vec<ListData>,
+    select_ref: NodeRef,
 }
 
 impl Component for Home {
@@ -79,22 +80,18 @@ impl Component for Home {
 
     fn create(ctx: &Context<Self>) -> Self {
         let history = ctx.link().history().unwrap();
+        let select_ref = NodeRef::default();
+        let select_ref_copy = select_ref.clone();
         ctx.link().send_future(async move {
             let user = "demo";
             let lists = fetch_lists(&user).await.unwrap();
             let lists = futures::future::join_all(lists.into_iter().map(|list| async {
                 let query = query_items(&user, &list.id).await?;
+                let select_ref = select_ref_copy.clone();
                 let history = history.clone();
                 let id = list.id.clone();
                 let on_go_select = Callback::once(move |_| {
-                    let window = web_sys::window().expect("no global `window` exists");
-                    let document = window.document().expect("should have a document on window");
-                    let mode = document
-                        .get_element_by_id("mode")
-                        .unwrap()
-                        .dyn_into::<HtmlSelectElement>()
-                        .unwrap()
-                        .value();
+                    let mode = select_ref.cast::<HtmlSelectElement>().unwrap().value();
                     match mode.as_ref() {
                         "Random Matches" => {
                             history.push(Route::Match { id });
@@ -135,7 +132,10 @@ impl Component for Home {
             .unwrap();
             HomeMsg::Load(lists)
         });
-        Home { lists: Vec::new() }
+        Home {
+            lists: Vec::new(),
+            select_ref,
+        }
     }
 
     fn view(&self, _: &Context<Self>) -> Html {
@@ -151,7 +151,7 @@ impl Component for Home {
                 <strong>{"Sort Mode:"}</strong>
               </label>
               <div class="col-2 align-self-end">
-                <select id="mode" class="form-select">
+                <select ref={self.select_ref.clone()} class="form-select">
                   <option>{"Tournament"}</option>
                   <option selected=true>{"Random Tournament"}</option>
                   <option>{"Random Matches"}</option>
