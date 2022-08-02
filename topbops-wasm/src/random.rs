@@ -2,7 +2,7 @@ use crate::base::IframeCompare;
 use rand::prelude::SliceRandom;
 use std::collections::HashMap;
 use topbops::{ItemMetadata, ItemQuery};
-use yew::{html, Callback, Component, Context, Html, MouseEvent, Properties};
+use yew::{html, Component, Context, Html, Properties};
 use yew_router::history::Location;
 use yew_router::scope_ext::RouterScopeExt;
 
@@ -77,9 +77,19 @@ impl Component for Match {
             left.id.clone(),
             right.id.clone(),
         );
+        let on_left_select = ctx
+            .link()
+            .callback_once(move |_| Msg::UpdateStats(left_param));
         let right_param = (user, list.clone(), right.id.clone(), left.id.clone());
+        let on_right_select = ctx
+            .link()
+            .callback_once(move |_| Msg::UpdateStats(right_param));
         html! {
-            <Random mode={mode} left={left} on_left_select={ctx.link().callback_once(move |_| Msg::UpdateStats(left_param))} right={right} on_right_select={ctx.link().callback_once(move |_| Msg::UpdateStats(right_param))} query={query}/>
+            <div>
+                <h1>{mode}</h1>
+                <IframeCompare left={left} {on_left_select} right={right} {on_right_select}/>
+                <ResponsiveTable query={query}/>
+            </div>
         }
     }
 
@@ -137,35 +147,24 @@ impl Component for Match {
 }
 
 #[derive(PartialEq, Properties)]
-struct RandomProps {
-    mode: String,
-    left: ItemMetadata,
-    on_left_select: Callback<MouseEvent>,
-    right: ItemMetadata,
-    on_right_select: Callback<MouseEvent>,
+struct TableProps {
     query: ItemQuery,
 }
 
-struct Random;
+struct ResponsiveTable;
 
-impl Component for Random {
+impl Component for ResponsiveTable {
     type Message = ();
-    type Properties = RandomProps;
+    type Properties = TableProps;
 
     fn create(_: &Context<Self>) -> Self {
-        Random
+        ResponsiveTable
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let RandomProps {
-            mode,
-            left,
-            right,
-            query,
-            on_left_select,
-            on_right_select,
-        } = ctx.props();
-        let items: Vec<_> = query
+        let items: Vec<_> = ctx
+            .props()
+            .query
             .items
             .iter()
             .map(|item| item.metadata.clone().unwrap())
@@ -182,9 +181,6 @@ impl Component for Random {
         let left_items = left_items.into_iter().map(|(_, item)| item);
         let right_items = right_items.into_iter().map(|(_, item)| item);
         html! {
-          <div>
-            <h1>{mode}</h1>
-            <IframeCompare left={left.clone()} {on_left_select} right={right.clone()} {on_right_select}/>
             <div class="row">
               <div class="col-md-6 d-none d-lg-block">
                 <table class="table table-striped">
@@ -226,7 +222,6 @@ impl Component for Random {
                 </table>
               </div>
             </div>
-          </div>
         }
     }
 }
