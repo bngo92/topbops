@@ -155,12 +155,12 @@ impl Component for ResponsiveTable {
 }
 
 #[derive(PartialEq, Properties)]
-struct ItemProps {
-    i: i32,
-    item: ItemMetadata,
+pub struct ItemProps {
+    pub i: i32,
+    pub item: ItemMetadata,
 }
 
-struct Item;
+pub struct Item;
 
 impl Component for Item {
     type Message = ();
