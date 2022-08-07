@@ -1,4 +1,5 @@
 #![feature(async_closure, let_else)]
+use crate::edit::Edit;
 use crate::random::Match;
 use crate::tournament::Tournament;
 use std::collections::HashMap;
@@ -14,6 +15,7 @@ use yew_router::scope_ext::RouterScopeExt;
 use yew_router::{BrowserRouter, Routable, Switch};
 
 mod base;
+mod edit;
 mod random;
 pub mod tournament;
 
@@ -21,6 +23,8 @@ pub mod tournament;
 enum Route {
     #[at("/")]
     Home,
+    #[at("/lists/:id")]
+    Edit { id: String },
     #[at("/lists/:id/match")]
     Match { id: String },
     #[at("/lists/:id/tournament")]
@@ -30,6 +34,7 @@ enum Route {
 fn switch(routes: &Route) -> Html {
     match routes {
         Route::Home => html! { <Home/> },
+        Route::Edit { id } => html! { <Edit id={id.clone()}/> },
         Route::Match { id } => html! { <Match id={id.clone()}/> },
         Route::Tournament { id } => html! {
             <Tournament id={id.clone()}/>
@@ -88,16 +93,16 @@ impl Component for Home {
             let lists = futures::future::join_all(lists.into_iter().map(|list| async {
                 let query = query_items(&user, &list.id).await?;
                 let select_ref = select_ref_copy.clone();
-                let history = history.clone();
+                let history_copy = history.clone();
                 let id = list.id.clone();
                 let on_go_select = Callback::once(move |_| {
                     let mode = select_ref.cast::<HtmlSelectElement>().unwrap().value();
                     match mode.as_ref() {
                         "Random Matches" => {
-                            history.push(Route::Match { id });
+                            history_copy.push(Route::Match { id });
                         }
                         "Random Rounds" => {
-                            history
+                            history_copy
                                 .push_with_query(
                                     Route::Match { id },
                                     [("mode", "rounds")].into_iter().collect::<HashMap<_, _>>(),
@@ -105,10 +110,10 @@ impl Component for Home {
                                 .unwrap();
                         }
                         "Tournament" => {
-                            history.push(Route::Tournament { id });
+                            history_copy.push(Route::Tournament { id });
                         }
                         "Random Tournament" => {
-                            history
+                            history_copy
                                 .push_with_query(
                                     Route::Tournament { id },
                                     [("mode", "random")].into_iter().collect::<HashMap<_, _>>(),
@@ -120,10 +125,14 @@ impl Component for Home {
                         }
                     };
                 });
+                let history = history.clone();
+                let id = list.id.clone();
+                let on_edit_select = Callback::once(move |_| history.push(Route::Edit { id }));
                 Ok(ListData {
                     data: list,
                     query,
                     on_go_select,
+                    on_edit_select,
                 })
             }))
             .await
@@ -203,6 +212,7 @@ impl Component for Widget {
     fn view(&self, ctx: &Context<Self>) -> Html {
         let list = &ctx.props().list;
         let go = list.on_go_select.clone();
+        let edit = list.on_edit_select.clone();
         html! {
           <div class="col-12 col-md-6">
             <div class="row">
@@ -213,7 +223,7 @@ impl Component for Widget {
                 <button type="button" class="btn btn-success col-12" onclick={go}>{"Go"}</button>
               </div>
               <div class="col-2">
-                <button type="button" class="btn btn-danger col-12">{"Unsave"}</button>
+                <button type="button" class="btn btn-warning col-12" onclick={edit}>{"Edit"}</button>
               </div>
             </div>
             <table class="table table-striped">
@@ -265,6 +275,7 @@ pub struct ListData {
     data: List,
     query: ItemQuery,
     on_go_select: Callback<MouseEvent>,
+    on_edit_select: Callback<MouseEvent>,
 }
 
 // Called by our JS entry point to run the example
