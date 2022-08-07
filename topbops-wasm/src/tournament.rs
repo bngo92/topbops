@@ -313,36 +313,40 @@ impl Component for Tournament {
             ),
             TournamentState::Match => {
                 let select = if winner.name.is_empty() {
-                    let callback = ctx.link().callback(Msg::Update);
-                    let (left, on_left_select, right, on_right_select) = fields
-                        .data
-                        .data
-                        .iter()
-                        .enumerate()
-                        .find_map(|(i, item)| {
-                            item.as_ref().and_then(|item| {
+                    // TODO: save last position instead of always starting from the beginning
+                    let mut start_i = 0;
+                    let mut step = 2;
+                    let mut found = None;
+                    'found: while start_i != fields.data.data.len() / 2 {
+                        let mut i = start_i;
+                        while i < fields.data.data.len() {
+                            if let Some(item) = &fields.data.data[i] {
                                 if !item.disabled {
                                     let pair = fields.data.data[item.pair].as_ref().unwrap();
                                     if !pair.disabled {
-                                        let left_callback = callback.clone();
+                                        let left_callback = ctx.link().callback(Msg::Update);
                                         let on_left_select =
                                             Callback::from(move |_| left_callback.emit(i));
-                                        let right_callback = callback.clone();
+                                        let right_callback = ctx.link().callback(Msg::Update);
                                         let pair_i = item.pair;
                                         let on_right_select =
                                             Callback::from(move |_| right_callback.emit(pair_i));
-                                        return Some((
+                                        found = Some((
                                             item.item.clone(),
                                             on_left_select,
                                             pair.item.clone(),
                                             on_right_select,
                                         ));
+                                        break 'found;
                                     }
                                 }
-                                None
-                            })
-                        })
-                        .unwrap();
+                            }
+                            i += step;
+                        }
+                        start_i += step / 2;
+                        step *= 2;
+                    }
+                    let (left, on_left_select, right, on_right_select) = found.unwrap();
                     html! {<IframeCompare {left} {on_left_select} {right} {on_right_select}/>}
                 } else {
                     html! {
