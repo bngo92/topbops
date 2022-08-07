@@ -30,7 +30,7 @@ use topbops::{ItemQuery, List, ListMode, Lists};
 use topbops_web::{Error, Item, Token};
 use uuid::Uuid;
 
-const ITEM_FIELDS: [&str; 3] = ["id", "name", "user_score"];
+const ITEM_FIELDS: [&str; 4] = ["id", "name", "user_score", "rating"];
 
 #[derive(Debug, Deserialize, Serialize)]
 struct User {
@@ -329,6 +329,8 @@ async fn get_list_items(
         );
         let i = query.find("FROM").unwrap();
         query.insert_str(i - 1, ", id ");
+        // TODO: need a first class way to get rating
+        query.insert_str(i - 1, ", rating ");
         for i in list.items {
             map.insert(i.id.clone(), i);
         }
@@ -358,6 +360,7 @@ async fn get_list_items(
                         .map(|v| match v {
                             Value::String(s) => s.to_owned(),
                             Value::Number(n) => n.to_string(),
+                            Value::Null => Value::Null.to_string(),
                             _ => todo!(),
                         })
                         .collect(),
