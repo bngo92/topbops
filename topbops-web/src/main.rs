@@ -91,13 +91,38 @@ async fn route(
                 .body(Body::empty())
                 .map_err(Error::from);
         }
-        let Some(auth) = req.headers().get("Authorization") else {
-            return unauthorized()};
-        let Some((_, auth)) = auth.to_str().expect("auth to be ASCII").split_once(' ') else {
+        // TODO: fix rerender on logout
+        if let (["logout"], &Method::GET) = (&path[..], req.method()) {
             return get_response_builder()
-                .status(StatusCode::BAD_REQUEST)
+                .header(
+                    "Access-Control-Allow-Headers",
+                    HeaderValue::from_static("Authorization"),
+                )
+                .header("Set-Cookie", "session=; Max-Age=0; Path=/; HttpOnly")
+                .header("Set-Cookie", "user=; Max-Age=0; Path=/")
+                .header("Location", "/")
+                .status(StatusCode::FOUND)
                 .body(Body::empty())
                 .map_err(Error::from);
+        }
+        let cookies: HashMap<_, _> = req.headers().get("Cookie").map_or_else(HashMap::new, |c| {
+            c.to_str()
+                .expect("cookie to be ASCII")
+                .split(';')
+                .filter_map(|c| c.split_once('='))
+                .collect()
+        });
+        let auth = if let Some(auth) = cookies.get("session") {
+            auth
+        } else {
+            let query: HashMap<_, _> = req.uri().query().map_or_else(HashMap::new, |q| {
+                q.split('&').filter_map(|p| p.split_once('=')).collect()
+            });
+            if let Some(code) = query.get("code") {
+                code
+            } else {
+                "demo"
+            }
         };
         if auth == "demo" {
             let user_id = String::from(DEMO_USER);
@@ -116,26 +141,27 @@ async fn route(
                     .map_err(Error::from),
             }
         } else if let Ok((user_id, access_token)) = login(db.clone(), &session, auth, {
-            let uri: Uri = req.headers()["Referer"]
-                .to_str()
-                .expect("Referer to be ASCII")
-                .parse()
-                .expect("referer URI");
-            &format!(
-                "{}://{}",
-                uri.scheme().expect("scheme"),
-                uri.authority().expect("authority")
-            )
+            let host = req.headers()["Host"].to_str().expect("Host to be ASCII");
+            &format!("http://{}{}", host, req.uri().path())
         })
         .await
         {
             match (&path[..], req.method()) {
-                (["login"], &Method::POST) => get_response_builder()
+                (["login"], &Method::GET) => get_response_builder()
                     .header(
                         "Access-Control-Allow-Headers",
                         HeaderValue::from_static("Authorization"),
                     )
-                    .status(StatusCode::OK)
+                    .header("Location", "/")
+                    .header(
+                        "Set-Cookie",
+                        &format!("session={}; Max-Age=31536000; Path=/; HttpOnly", auth),
+                    )
+                    .header(
+                        "Set-Cookie",
+                        &format!("user={}; Max-Age=31536000; Path=/", user_id),
+                    )
+                    .status(StatusCode::FOUND)
                     .body(Body::empty())
                     .map_err(Error::from),
                 (["lists"], &Method::GET) => get_lists(db, session, user_id).await,
@@ -299,7 +325,7 @@ async fn get_list(
     user_id: String,
     id: &str,
 ) -> Result<Response<Body>, Error> {
-    let list = get_list_doc(&db, &session, &user_id, &id).await?;
+    let list = get_list_doc(&db, &session, &user_id, id).await?;
     get_response_builder()
         .body(Body::from(serde_json::to_string(&list)?))
         .map_err(Error::from)
