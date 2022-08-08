@@ -264,10 +264,8 @@ impl Component for Tournament {
         let random = matches!(query.get("mode").map_or("", String::as_str), "random");
         let id = ctx.props().id.clone();
         ctx.link().send_future(async move {
-            let user = "demo";
             let (list, query) =
-                futures::future::join(crate::fetch_list(user, &id), crate::query_items(user, &id))
-                    .await;
+                futures::future::join(crate::fetch_list(&id), crate::query_items(&id)).await;
             Msg::Load(random, list.unwrap(), query.unwrap())
         });
         Tournament {

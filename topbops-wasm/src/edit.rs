@@ -27,10 +27,8 @@ impl Component for Edit {
     fn create(ctx: &Context<Self>) -> Self {
         let id = ctx.props().id.clone();
         ctx.link().send_future(async move {
-            let user = "demo";
             let (list, query) =
-                futures::future::join(crate::fetch_list(user, &id), crate::query_items(user, &id))
-                    .await;
+                futures::future::join(crate::fetch_list(&id), crate::query_items(&id)).await;
             Msg::Load(list.unwrap(), query.unwrap())
         });
         Edit {

@@ -7,7 +7,7 @@ use topbops::{ItemQuery, List, Lists};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{HtmlSelectElement, Request, RequestInit, RequestMode, Response};
+use web_sys::{HtmlDocument, HtmlSelectElement, Request, RequestInit, RequestMode, Response};
 use yew::{html, Callback, Component, Context, Html, MouseEvent, NodeRef, Properties};
 use yew_router::history::History;
 use yew_router::prelude::Link;
@@ -42,6 +42,11 @@ fn switch(routes: &Route) -> Html {
     }
 }
 
+/*enum Msg {
+    Logout,
+    Reload,
+}*/
+
 struct App;
 
 impl Component for App {
@@ -53,12 +58,33 @@ impl Component for App {
     }
 
     fn view(&self, _: &Context<Self>) -> Html {
+        let window = web_sys::window().expect("no global `window` exists");
+        let location = window.location();
+        let document = window.document().expect("should have a document on window");
+        let html_document = document.dyn_into::<HtmlDocument>().unwrap();
+        let cookie = html_document.cookie();
+        let cookies: HashMap<_, _> = cookie
+            .as_ref()
+            .unwrap()
+            .split(';')
+            .filter_map(|c| c.trim().split_once('='))
+            .collect();
+        //let onclick = ctx.link().callback(|_| Msg::Logout);
         html! {
             <div>
                 <BrowserRouter>
                     <nav class="navbar navbar-dark bg-dark">
                         <div id="navbar" class="container-lg">
                             <Link<Route> classes="navbar-brand" to={Route::Home}>{"Bops to the Top"}</Link<Route>>
+                            <ul class="navbar-nav">
+                                <li class="nav-item">
+                                    if let Some(user) = cookies.get("user") {
+                                        <a class="nav-link" href="/api/logout">{format!("{} Logout", user)}</a>
+                                    } else {
+                                        <a class="nav-link" href={format!("https://accounts.spotify.com/authorize?client_id=ee3d1b4f8d80477ea48743a511ef3018&redirect_uri={}/api/login&response_type=code", location.origin().unwrap().as_str())}>{"Login"}</a>
+                                    }
+                                </li>
+                            </ul>
                         </div>
                     </nav>
                     <div class="container-lg my-md-4">
@@ -68,6 +94,23 @@ impl Component for App {
             </div>
         }
     }
+
+    /*fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
+        match msg {
+            Msg::Logout => {
+                ctx.link().clone().send_future(async move {
+                    let window = web_sys::window().expect("no global `window` exists");
+                    let request = query("/api/logout", "POST").unwrap();
+                    JsFuture::from(window.fetch_with_request(&request))
+                        .await
+                        .unwrap();
+                    Msg::Reload
+                });
+                false
+            }
+            Msg::Reload => true,
+        }
+    }*/
 }
 
 pub enum HomeMsg {
@@ -88,10 +131,9 @@ impl Component for Home {
         let select_ref = NodeRef::default();
         let select_ref_copy = select_ref.clone();
         ctx.link().send_future(async move {
-            let user = "demo";
-            let lists = fetch_lists(&user).await.unwrap();
+            let lists = fetch_lists().await.unwrap();
             let lists = futures::future::join_all(lists.into_iter().map(|list| async {
-                let query = query_items(&user, &list.id).await?;
+                let query = query_items(&list.id).await?;
                 let select_ref = select_ref_copy.clone();
                 let history_copy = history.clone();
                 let id = list.id.clone();
@@ -285,9 +327,9 @@ pub async fn run() -> Result<(), JsValue> {
     Ok(())
 }
 
-async fn fetch_lists(auth: &str) -> Result<Vec<List>, JsValue> {
+async fn fetch_lists() -> Result<Vec<List>, JsValue> {
     let window = web_sys::window().expect("no global `window` exists");
-    let request = query("/api/lists", "GET", auth)?;
+    let request = query("/api/lists", "GET")?;
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
     let json = JsFuture::from(resp.json()?).await?;
@@ -295,25 +337,25 @@ async fn fetch_lists(auth: &str) -> Result<Vec<List>, JsValue> {
     Ok(lists.lists)
 }
 
-async fn fetch_list(auth: &str, id: &str) -> Result<List, JsValue> {
+async fn fetch_list(id: &str) -> Result<List, JsValue> {
     let window = web_sys::window().expect("no global `window` exists");
-    let request = query(&format!("/api/lists/{}", id), "GET", auth)?;
+    let request = query(&format!("/api/lists/{}", id), "GET")?;
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
     let json = JsFuture::from(resp.json()?).await?;
     Ok(json.into_serde().unwrap())
 }
 
-async fn query_items(auth: &str, id: &str) -> Result<ItemQuery, JsValue> {
+async fn query_items(id: &str) -> Result<ItemQuery, JsValue> {
     let window = web_sys::window().expect("no global `window` exists");
-    let request = query(&format!("/api/lists/{}/items", id), "GET", auth).unwrap();
+    let request = query(&format!("/api/lists/{}/items", id), "GET").unwrap();
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
     let json = JsFuture::from(resp.json()?).await?;
     Ok(json.into_serde().unwrap())
 }
 
-async fn update_stats(auth: &str, list: &str, win: &str, lose: &str) -> Result<(), JsValue> {
+async fn update_stats(list: &str, win: &str, lose: &str) -> Result<(), JsValue> {
     let window = web_sys::window().expect("no global `window` exists");
     let request = query(
         &format!(
@@ -321,19 +363,14 @@ async fn update_stats(auth: &str, list: &str, win: &str, lose: &str) -> Result<(
             list, win, lose
         ),
         "POST",
-        auth,
     )?;
     JsFuture::from(window.fetch_with_request(&request)).await?;
     Ok(())
 }
 
-fn query(url: &str, method: &str, auth: &str) -> Result<Request, JsValue> {
+fn query(url: &str, method: &str) -> Result<Request, JsValue> {
     let mut opts = RequestInit::new();
     opts.method(method);
     opts.mode(RequestMode::Cors);
-    let request = Request::new_with_str_and_init(url, &opts)?;
-    request
-        .headers()
-        .set("Authorization", &format!("Basic {}", auth))?;
-    Ok(request)
+    Request::new_with_str_and_init(url, &opts)
 }
