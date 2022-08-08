@@ -142,7 +142,14 @@ async fn route(
             }
         } else if let Ok((user_id, access_token)) = login(db.clone(), &session, auth, {
             let host = req.headers()["Host"].to_str().expect("Host to be ASCII");
-            &format!("http://{}{}", host, req.uri().path())
+            #[cfg(feature = "dev")]
+            {
+                &format!("http://{}{}", host, req.uri().path())
+            }
+            #[cfg(not(feature = "dev"))]
+            {
+                &format!("https://{}{}", host, req.uri().path())
+            }
         })
         .await
         {
