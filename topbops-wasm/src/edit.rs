@@ -1,14 +1,19 @@
+use serde_json::Value;
 use std::collections::HashMap;
-use topbops::{ItemQuery, List};
-use yew::{html, Component, Context, Html, Properties};
+use topbops::{ItemMetadata, ItemQuery, List};
+use wasm_bindgen::JsValue;
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{HtmlSelectElement, Request, RequestInit, RequestMode};
+use yew::{html, Component, Context, Html, NodeRef, Properties};
 
 enum EditState {
     Fetching,
-    Success(List, ItemQuery),
+    Success(List, Vec<(ItemMetadata, String, NodeRef)>),
 }
 
 pub enum Msg {
     Load(List, ItemQuery),
+    Save(Vec<(ItemMetadata, String, NodeRef)>),
 }
 
 #[derive(Eq, PartialEq, Properties)]
@@ -36,45 +41,40 @@ impl Component for Edit {
         }
     }
 
-    fn view(&self, _: &Context<Self>) -> Html {
+    fn view(&self, ctx: &Context<Self>) -> Html {
         match &self.state {
             EditState::Fetching => html! {},
-            EditState::Success(list, query) => {
-                let mut map = HashMap::new();
-                for row in &query.items {
-                    map.insert(
-                        &row.metadata.as_ref().unwrap().id,
-                        row.values.last().unwrap(),
-                    );
-                }
-                let html = list.items.iter().map(|item| {
-                    let i = map[&item.id];
+            EditState::Success(list, items) => {
+                let html = items.iter().map(|(item, rating, select_ref)| {
                     html! {
                         <div class="row">
                             <label class="col-12 col-lg-8 col-xl-7 col-form-label">{&item.name}</label>
                             <div class="col-3 col-lg-2 col-xl-1">
-                                <select class="form-select" disabled=true>
-                                    <option selected={i == "null"}></option>
-                                    <option selected={i == "0"}>{"0"}</option>
-                                    <option selected={i == "1"}>{"1"}</option>
-                                    <option selected={i == "2"}>{"2"}</option>
-                                    <option selected={i == "3"}>{"3"}</option>
-                                    <option selected={i == "4"}>{"4"}</option>
-                                    <option selected={i == "5"}>{"5"}</option>
-                                    <option selected={i == "6"}>{"6"}</option>
-                                    <option selected={i == "7"}>{"7"}</option>
-                                    <option selected={i == "8"}>{"8"}</option>
-                                    <option selected={i == "9"}>{"9"}</option>
-                                    <option selected={i == "10"}>{"10"}</option>
+                                <select ref={select_ref} class="form-select" disabled={crate::get_user().is_none()}>
+                                    <option selected={rating == "null"}></option>
+                                    <option selected={rating == "0"}>{"0"}</option>
+                                    <option selected={rating == "1"}>{"1"}</option>
+                                    <option selected={rating == "2"}>{"2"}</option>
+                                    <option selected={rating == "3"}>{"3"}</option>
+                                    <option selected={rating == "4"}>{"4"}</option>
+                                    <option selected={rating == "5"}>{"5"}</option>
+                                    <option selected={rating == "6"}>{"6"}</option>
+                                    <option selected={rating == "7"}>{"7"}</option>
+                                    <option selected={rating == "8"}>{"8"}</option>
+                                    <option selected={rating == "9"}>{"9"}</option>
+                                    <option selected={rating == "10"}>{"10"}</option>
                                 </select>
                             </div>
                         </div>
                     }
                 });
+                let items = items.clone();
+                let save = ctx.link().callback(move |_| Msg::Save(items.clone()));
                 html! {
                     <div>
                         <h1>{&list.name}</h1>
                         {for html}
+                        <button type="button" class="col-2 btn btn-success" onclick={save}>{"Save"}</button>
                         if let Some(src) = list.iframe.clone() {
                             <div class="row">
                                 <div class="col-12 col-lg-10 col-xl-8">
@@ -88,9 +88,68 @@ impl Component for Edit {
         }
     }
 
-    fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
-        let Msg::Load(list, query) = msg;
-        self.state = EditState::Success(list, query);
-        true
+    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
+        match msg {
+            Msg::Load(list, query) => {
+                let items = query
+                    .items
+                    .into_iter()
+                    .map(|mut i| {
+                        (
+                            i.metadata.unwrap(),
+                            i.values.pop().unwrap(),
+                            NodeRef::default(),
+                        )
+                    })
+                    .collect();
+                self.state = EditState::Success(list, items);
+                true
+            }
+            Msg::Save(items) => {
+                let updates: HashMap<_, HashMap<_, Value>> = items
+                    .into_iter()
+                    .filter_map(|(item, rating, select_ref)| {
+                        let mut value = select_ref.cast::<HtmlSelectElement>().unwrap().value();
+                        if value.is_empty() {
+                            value = String::from("null");
+                        }
+                        if value == rating {
+                            None
+                        } else {
+                            Some((
+                                item.id,
+                                [(
+                                    String::from("rating"),
+                                    serde_json::from_str(&value).unwrap(),
+                                )]
+                                .into_iter()
+                                .collect(),
+                            ))
+                        }
+                    })
+                    .collect();
+                if !updates.is_empty() {
+                    let window = web_sys::window().expect("no global `window` exists");
+                    let mut opts = RequestInit::new();
+                    opts.method("POST");
+                    opts.mode(RequestMode::Cors);
+                    let updates = JsValue::from_str(&serde_json::to_string(&updates).unwrap());
+                    opts.body(Some(&updates));
+                    let request =
+                        Request::new_with_str_and_init("/api/?action=updateItems", &opts).unwrap();
+                    request
+                        .headers()
+                        .set("Content-Type", "application/json")
+                        .unwrap();
+                    ctx.link().send_future_batch(async move {
+                        JsFuture::from(window.fetch_with_request(&request))
+                            .await
+                            .unwrap();
+                        Vec::new()
+                    });
+                }
+                false
+            }
+        }
     }
 }
