@@ -2,6 +2,7 @@
 use crate::edit::Edit;
 use crate::random::Match;
 use crate::tournament::Tournament;
+use regex::Regex;
 use std::collections::HashMap;
 use topbops::{ItemQuery, List, Lists};
 use wasm_bindgen::prelude::*;
@@ -9,7 +10,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlDocument, HtmlSelectElement, Request, RequestInit, RequestMode, Response};
 use yew::{html, Callback, Component, Context, Html, MouseEvent, NodeRef, Properties};
-use yew_router::history::History;
+use yew_router::history::{AnyHistory, History};
 use yew_router::prelude::Link;
 use yew_router::scope_ext::RouterScopeExt;
 use yew_router::{BrowserRouter, Routable, Switch};
@@ -60,15 +61,6 @@ impl Component for App {
     fn view(&self, _: &Context<Self>) -> Html {
         let window = web_sys::window().expect("no global `window` exists");
         let location = window.location();
-        let document = window.document().expect("should have a document on window");
-        let html_document = document.dyn_into::<HtmlDocument>().unwrap();
-        let cookie = html_document.cookie();
-        let cookies: HashMap<_, _> = cookie
-            .as_ref()
-            .unwrap()
-            .split(';')
-            .filter_map(|c| c.trim().split_once('='))
-            .collect();
         //let onclick = ctx.link().callback(|_| Msg::Logout);
         html! {
             <div>
@@ -78,7 +70,7 @@ impl Component for App {
                             <Link<Route> classes="navbar-brand" to={Route::Home}>{"Bops to the Top"}</Link<Route>>
                             <ul class="navbar-nav">
                                 <li class="nav-item">
-                                    if let Some(user) = cookies.get("user") {
+                                    if let Some(user) = get_user() {
                                         <a class="nav-link" href="/api/logout">{format!("{} Logout", user)}</a>
                                     } else {
                                         <a class="nav-link" href={format!("https://accounts.spotify.com/authorize?client_id=ee3d1b4f8d80477ea48743a511ef3018&redirect_uri={}/api/login&response_type=code", location.origin().unwrap().as_str())}>{"Login"}</a>
@@ -115,11 +107,13 @@ impl Component for App {
 
 pub enum HomeMsg {
     Load(Vec<ListData>),
+    Import,
 }
 
 pub struct Home {
     lists: Vec<ListData>,
     select_ref: NodeRef,
+    import_ref: NodeRef,
 }
 
 impl Component for Home {
@@ -129,69 +123,19 @@ impl Component for Home {
     fn create(ctx: &Context<Self>) -> Self {
         let history = ctx.link().history().unwrap();
         let select_ref = NodeRef::default();
-        let select_ref_copy = select_ref.clone();
-        ctx.link().send_future(async move {
-            let lists = fetch_lists().await.unwrap();
-            let lists = futures::future::join_all(lists.into_iter().map(|list| async {
-                let query = query_items(&list.id).await?;
-                let select_ref = select_ref_copy.clone();
-                let history_copy = history.clone();
-                let id = list.id.clone();
-                let on_go_select = Callback::once(move |_| {
-                    let mode = select_ref.cast::<HtmlSelectElement>().unwrap().value();
-                    match mode.as_ref() {
-                        "Random Matches" => {
-                            history_copy.push(Route::Match { id });
-                        }
-                        "Random Rounds" => {
-                            history_copy
-                                .push_with_query(
-                                    Route::Match { id },
-                                    [("mode", "rounds")].into_iter().collect::<HashMap<_, _>>(),
-                                )
-                                .unwrap();
-                        }
-                        "Tournament" => {
-                            history_copy.push(Route::Tournament { id });
-                        }
-                        "Random Tournament" => {
-                            history_copy
-                                .push_with_query(
-                                    Route::Tournament { id },
-                                    [("mode", "random")].into_iter().collect::<HashMap<_, _>>(),
-                                )
-                                .unwrap();
-                        }
-                        _ => {
-                            web_sys::console::log_1(&JsValue::from("Invalid mode"));
-                        }
-                    };
-                });
-                let history = history.clone();
-                let id = list.id.clone();
-                let on_edit_select = Callback::once(move |_| history.push(Route::Edit { id }));
-                Ok(ListData {
-                    data: list,
-                    query,
-                    on_go_select,
-                    on_edit_select,
-                })
-            }))
-            .await
-            .into_iter()
-            .collect::<Result<_, JsValue>>()
-            .unwrap();
-            HomeMsg::Load(lists)
-        });
+        ctx.link()
+            .send_future(Home::fetch_lists(select_ref.clone(), history));
         Home {
             lists: Vec::new(),
             select_ref,
+            import_ref: NodeRef::default(),
         }
     }
 
-    fn view(&self, _: &Context<Self>) -> Html {
+    fn view(&self, ctx: &Context<Self>) -> Html {
         let default_import =
             "https://open.spotify.com/playlist/5MztFbRbMpyxbVYuOSfQV9?si=9db089ab25274efa";
+        let import = ctx.link().callback(|_| HomeMsg::Import);
         html! {
           <div>
             <div class="row">
@@ -218,10 +162,10 @@ impl Component for Home {
             <form>
               <div class="row">
                 <div class="col-12 col-md-8 col-lg-9 pt-1">
-                  <input type="text" id="input" class="col-12" value={default_import}/>
+                  <input ref={self.import_ref.clone()} type="text" id="input" class="col-12" value={default_import}/>
                 </div>
                 <div class="col-2 col-lg-1 pe-2">
-                  <button type="button" class="col-12 btn btn-success">{"Save"}</button>
+                  <button type="button" class="col-12 btn btn-success" onclick={import}>{"Save"}</button>
                 </div>
               </div>
             </form>
@@ -229,10 +173,91 @@ impl Component for Home {
         }
     }
 
-    fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
-        let HomeMsg::Load(lists) = msg;
-        self.lists = lists;
-        true
+    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
+        match msg {
+            HomeMsg::Load(lists) => {
+                self.lists = lists;
+                true
+            }
+            HomeMsg::Import => {
+                let history = ctx.link().history().unwrap();
+                let input = self.import_ref.cast::<HtmlSelectElement>().unwrap().value();
+                let playlist_re =
+                    Regex::new(r"https://open.spotify.com/playlist/([[:alnum:]]*)").unwrap();
+                let album_re =
+                    Regex::new(r"https://open.spotify.com/album/([[:alnum:]]*)").unwrap();
+                // TODO: handle bad input
+                let id = if let Some(input) = playlist_re.captures_iter(&input).next() {
+                    format!("spotify:playlist:{}", &input[1])
+                } else if let Some(input) = album_re.captures_iter(&input).next() {
+                    format!("spotify:album:{}", &input[1])
+                } else {
+                    return false;
+                };
+                let select_ref = self.select_ref.clone();
+                ctx.link().send_future(async move {
+                    import_list(&id).await.unwrap();
+                    Home::fetch_lists(select_ref, history).await
+                });
+                false
+            }
+        }
+    }
+}
+
+impl Home {
+    async fn fetch_lists(select_ref: NodeRef, history: AnyHistory) -> HomeMsg {
+        let lists = fetch_lists().await.unwrap();
+        let lists = futures::future::join_all(lists.into_iter().map(|list| async {
+            let query = query_items(&list.id).await?;
+            let select_ref = select_ref.clone();
+            let history_copy = history.clone();
+            let id = list.id.clone();
+            let on_go_select = Callback::once(move |_| {
+                let mode = select_ref.cast::<HtmlSelectElement>().unwrap().value();
+                match mode.as_ref() {
+                    "Random Matches" => {
+                        history_copy.push(Route::Match { id });
+                    }
+                    "Random Rounds" => {
+                        history_copy
+                            .push_with_query(
+                                Route::Match { id },
+                                [("mode", "rounds")].into_iter().collect::<HashMap<_, _>>(),
+                            )
+                            .unwrap();
+                    }
+                    "Tournament" => {
+                        history_copy.push(Route::Tournament { id });
+                    }
+                    "Random Tournament" => {
+                        history_copy
+                            .push_with_query(
+                                Route::Tournament { id },
+                                [("mode", "random")].into_iter().collect::<HashMap<_, _>>(),
+                            )
+                            .unwrap();
+                    }
+                    _ => {
+                        web_sys::console::log_1(&JsValue::from("Invalid mode"));
+                    }
+                };
+            });
+            let history = history.clone();
+            let id = list.id.clone();
+            let on_edit_select = Callback::once(move |_| history.push(Route::Edit { id }));
+            Ok(ListData {
+                data: list,
+                query,
+                on_go_select,
+                on_edit_select,
+            })
+        }))
+        .await
+        .into_iter()
+        .collect::<Result<_, JsValue>>()
+        .unwrap();
+        HomeMsg::Load(lists)
     }
 }
 
@@ -368,9 +393,30 @@ async fn update_stats(list: &str, win: &str, lose: &str) -> Result<(), JsValue> 
     Ok(())
 }
 
+async fn import_list(id: &str) -> Result<(), JsValue> {
+    let window = web_sys::window().expect("no global `window` exists");
+    let request = query(&format!("/api/?action=import&id={}", id), "POST")?;
+    JsFuture::from(window.fetch_with_request(&request)).await?;
+    Ok(())
+}
+
 fn query(url: &str, method: &str) -> Result<Request, JsValue> {
     let mut opts = RequestInit::new();
     opts.method(method);
     opts.mode(RequestMode::Cors);
     Request::new_with_str_and_init(url, &opts)
+}
+
+fn get_user() -> Option<String> {
+    let window = web_sys::window().expect("no global `window` exists");
+    let document = window.document().expect("should have a document on window");
+    let html_document = document.dyn_into::<HtmlDocument>().unwrap();
+    let cookie = html_document.cookie();
+    let cookies: HashMap<_, _> = cookie
+        .as_ref()
+        .unwrap()
+        .split(';')
+        .filter_map(|c| c.trim().split_once('='))
+        .collect();
+    cookies.get("user").map(ToString::to_string)
 }
