@@ -132,9 +132,7 @@ async fn route(
                 (["lists", id, "items"], &Method::GET) => {
                     get_list_items(db, session, user_id, id).await
                 }
-                ([""], &Method::POST) => {
-                    handle_action(db, session, user_id, req.uri().query()).await
-                }
+                ([""], &Method::POST) => handle_action(db, session, user_id, req).await,
                 (_, _) => get_response_builder()
                     .status(StatusCode::METHOD_NOT_ALLOWED)
                     .body(Body::empty())
@@ -176,9 +174,7 @@ async fn route(
                 (["lists", id, "items"], &Method::GET) => {
                     get_list_items(db, session, user_id, id).await
                 }
-                ([""], &Method::POST) => {
-                    handle_action(db, session, user_id, req.uri().query()).await
-                }
+                ([""], &Method::POST) => handle_action(db, session, user_id, req).await,
                 (_, _) => get_response_builder()
                     .status(StatusCode::METHOD_NOT_ALLOWED)
                     .body(Body::empty())
@@ -590,8 +586,9 @@ async fn handle_action(
     db: DatabaseClient,
     session: Arc<SessionClient>,
     user_id: String,
-    query: Option<&str>,
+    req: Request<Body>,
 ) -> Result<Response<Body>, Error> {
+    let query = req.uri().query();
     if let Some(query) = query.and_then(|q| {
         q.split('&')
             .map(|s| s.split_once('='))
@@ -603,6 +600,9 @@ async fn handle_action(
             }
             [("action", "import"), ("id", id)] => {
                 return import_list(db, session, user_id, id).await;
+            }
+            [("action", "updateItems")] => {
+                return update_items(db, session, user_id, req).await;
             }
             _ => {}
         }
@@ -823,6 +823,47 @@ async fn create_external_list(
     .await?;
     get_response_builder()
         .status(StatusCode::CREATED)
+        .body(Body::empty())
+        .map_err(Error::from)
+}
+
+async fn update_items(
+    db: DatabaseClient,
+    session: Arc<SessionClient>,
+    user_id: String,
+    req: Request<Body>,
+) -> Result<Response<Body>, Error> {
+    let body = &hyper::body::to_bytes(req.into_body()).await?;
+    let updates: HashMap<String, HashMap<String, Value>> = serde_json::from_slice(body)?;
+    let client = db.collection_client("items");
+    let client = &client;
+    let session = &session;
+    let user_id = &user_id;
+    futures::stream::iter(updates.into_iter().map(async move |(id, update)| {
+        let mut item = get_item_doc(client.clone(), session, user_id.clone(), &id).await?;
+        for (k, v) in update {
+            match k.as_str() {
+                "rating" => {
+                    item.rating = serde_json::from_value(v)?;
+                }
+                _ => {}
+            }
+        }
+        let session_copy = session.session.read().unwrap().clone().unwrap();
+        client
+            .clone()
+            .document_client(id, &user_id)?
+            .replace_document::<Item>(item)
+            .consistency_level(session_copy)
+            .into_future()
+            .await?;
+        Ok::<_, Error>(())
+    }))
+    .buffered(5)
+    .try_collect::<()>()
+    .await?;
+    get_response_builder()
+        .status(StatusCode::NO_CONTENT)
         .body(Body::empty())
         .map_err(Error::from)
 }
