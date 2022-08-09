@@ -42,6 +42,7 @@ impl Component for Edit {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
+        let disabled = crate::get_user().is_none();
         match &self.state {
             EditState::Fetching => html! {},
             EditState::Success(list, items) => {
@@ -50,7 +51,7 @@ impl Component for Edit {
                         <div class="row">
                             <label class="col-12 col-lg-8 col-xl-7 col-form-label">{&item.name}</label>
                             <div class="col-3 col-lg-2 col-xl-1">
-                                <select ref={select_ref} class="form-select" disabled={crate::get_user().is_none()}>
+                                <select ref={select_ref} class="form-select" {disabled}>
                                     <option selected={rating == "null"}></option>
                                     <option selected={rating == "0"}>{"0"}</option>
                                     <option selected={rating == "1"}>{"1"}</option>
@@ -74,7 +75,7 @@ impl Component for Edit {
                     <div>
                         <h1>{&list.name}</h1>
                         {for html}
-                        <button type="button" class="col-2 btn btn-success" onclick={save}>{"Save"}</button>
+                        <button type="button" class="col-2 btn btn-success" onclick={save} {disabled}>{"Save"}</button>
                         if let Some(src) = list.iframe.clone() {
                             <div class="row">
                                 <div class="col-12 col-lg-10 col-xl-8">

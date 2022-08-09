@@ -4,7 +4,7 @@ use crate::random::Match;
 use crate::tournament::Tournament;
 use regex::Regex;
 use std::collections::HashMap;
-use topbops::{ItemQuery, List, Lists};
+use topbops::{ItemQuery, List, ListMode, Lists};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
@@ -66,7 +66,7 @@ impl Component for App {
             <div>
                 <BrowserRouter>
                     <nav class="navbar navbar-dark bg-dark">
-                        <div id="navbar" class="container-lg">
+                        <div class="container-lg">
                             <Link<Route> classes="navbar-brand" to={Route::Home}>{"Bops to the Top"}</Link<Route>>
                             <ul class="navbar-nav">
                                 <li class="nav-item">
@@ -133,8 +133,12 @@ impl Component for Home {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let default_import =
-            "https://open.spotify.com/playlist/5MztFbRbMpyxbVYuOSfQV9?si=9db089ab25274efa";
+        let disabled = get_user().is_none();
+        let default_import = if disabled {
+            "Not supported in demo"
+        } else {
+            "https://open.spotify.com/playlist/5MztFbRbMpyxbVYuOSfQV9?si=9db089ab25274efa"
+        };
         let import = ctx.link().callback(|_| HomeMsg::Import);
         html! {
           <div>
@@ -162,10 +166,10 @@ impl Component for Home {
             <form>
               <div class="row">
                 <div class="col-12 col-md-8 col-lg-9 pt-1">
-                  <input ref={self.import_ref.clone()} type="text" id="input" class="col-12" value={default_import}/>
+                  <input ref={self.import_ref.clone()} type="text" class="col-12" value={default_import} {disabled}/>
                 </div>
                 <div class="col-2 col-lg-1 pe-2">
-                  <button type="button" class="col-12 btn btn-success" onclick={import}>{"Save"}</button>
+                  <button type="button" class="col-12 btn btn-success" onclick={import} {disabled}>{"Save"}</button>
                 </div>
               </div>
             </form>
@@ -280,6 +284,8 @@ impl Component for Widget {
         let list = &ctx.props().list;
         let go = list.on_go_select.clone();
         let edit = list.on_edit_select.clone();
+        // TODO: support user list actions
+        let disabled = matches!(list.data.mode, ListMode::User);
         html! {
           <div class="col-12 col-md-6">
             <div class="row">
@@ -287,10 +293,10 @@ impl Component for Widget {
                 <h2>{&list.data.name}</h2>
               </div>
               <div class="col-2">
-                <button type="button" class="btn btn-success col-12" onclick={go}>{"Go"}</button>
+                <button type="button" class="btn btn-success col-12" onclick={go} {disabled}>{"Go"}</button>
               </div>
               <div class="col-2">
-                <button type="button" class="btn btn-warning col-12" onclick={edit}>{"Edit"}</button>
+                <button type="button" class="btn btn-warning col-12" onclick={edit} {disabled}>{"Edit"}</button>
               </div>
             </div>
             <table class="table table-striped">
