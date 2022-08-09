@@ -703,9 +703,8 @@ async fn import_list(
     user_id: String,
     id: &str,
 ) -> Result<Response<Body>, Error> {
-    // TODO: support albums
     let (list, items) = match id.split_once(':') {
-        Some(("spotify", rest)) => topbops_web::spotify::import_playlist(&user_id, rest).await?,
+        Some(("spotify", id)) => topbops_web::spotify::import(&user_id, id).await?,
         _ => todo!(),
     };
     create_external_list(db, session, list, items, user_id == DEMO_USER).await

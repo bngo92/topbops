@@ -64,12 +64,19 @@ pub struct User {
     pub id: String,
 }
 
+pub async fn import(user_id: &String, id: &str) -> Result<(List, Vec<super::Item>), Error> {
+    match id.split_once(':') {
+        Some(("playlist", id)) => import_playlist(user_id, id).await,
+        Some(("album", id)) => import_album(user_id, id).await,
+        _ => todo!(),
+    }
+}
+
 pub async fn import_playlist(
     user_id: &String,
     playlist_id: &str,
 ) -> Result<(List, Vec<super::Item>), Error> {
     let token = get_token().await?;
-    let playlist_id = playlist_id.split_once(':').unwrap().1;
 
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
@@ -108,7 +115,7 @@ pub async fn import_playlist(
     let mut items: Vec<_> = playlist_items
         .items
         .into_iter()
-        .map(|i| new_spotify_item(i.track, user_id))
+        .map(|i| new_spotify_item(i.track, &user_id))
         .collect();
     while let Some(uri) = playlist_items.next {
         let uri: Uri = uri.parse().unwrap();
@@ -126,7 +133,7 @@ pub async fn import_playlist(
             playlist_items
                 .items
                 .into_iter()
-                .map(|i| new_spotify_item(i.track, user_id)),
+                .map(|i| new_spotify_item(i.track, &user_id)),
         );
     }
     let list = List {
@@ -136,6 +143,63 @@ pub async fn import_playlist(
         iframe: Some(format!(
             "https://open.spotify.com/embed/playlist/{}?utm_source=generator",
             playlist_id
+        )),
+        items: items
+            .iter()
+            .map(|i| ItemMetadata::new(i.id.clone(), i.name.clone(), i.iframe.clone()))
+            .collect(),
+        mode: ListMode::External,
+        query: String::from("SELECT name, user_score FROM tracks"),
+    };
+    Ok((list, items))
+}
+
+pub async fn import_album(user_id: &String, id: &str) -> Result<(List, Vec<super::Item>), Error> {
+    let token = get_token().await?;
+
+    let https = HttpsConnector::new();
+    let client = Client::builder().build::<_, hyper::Body>(https);
+    let uri: Uri = format!("https://api.spotify.com/v1/albums/{}", id)
+        .parse()
+        .unwrap();
+    let resp = client
+        .request(
+            Request::builder()
+                .uri(uri)
+                .header("Authorization", format!("Bearer {}", token.access_token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    let got = hyper::body::to_bytes(resp.into_body()).await?;
+    let album: Album = serde_json::from_slice(&got)?;
+
+    let https = HttpsConnector::new();
+    let client = Client::builder().build::<_, hyper::Body>(https);
+    let uri: Uri = format!("https://api.spotify.com/v1/albums/{}/tracks", id)
+        .parse()
+        .unwrap();
+    let resp = client
+        .request(
+            Request::builder()
+                .uri(uri)
+                .header("Authorization", format!("Bearer {}", token.access_token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    let got = hyper::body::to_bytes(resp.into_body()).await?;
+    let album_items: AlbumItems = serde_json::from_slice(&got)?;
+    let items: Vec<_> = album_items
+        .items
+        .into_iter()
+        .map(|i| new_spotify_album_item(album.name.clone(), i, &user_id))
+        .collect();
+    let list = List {
+        id: id.to_owned(),
+        user_id: user_id.clone(),
+        name: album.name,
+        iframe: Some(format!(
+            "https://open.spotify.com/embed/album/{}?utm_source=generator",
+            id
         )),
         items: items
             .iter()
@@ -174,6 +238,37 @@ async fn get_token() -> Result<super::Token, Error> {
 fn new_spotify_item(track: Track, user_id: &String) -> super::Item {
     let mut metadata = Map::new();
     metadata.insert(String::from("album"), Value::String(track.album.name));
+    metadata.insert(
+        String::from("artists"),
+        Value::String(
+            track
+                .artists
+                .into_iter()
+                .map(|a| a.name)
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+    );
+    super::Item {
+        iframe: Some(format!(
+            "https://open.spotify.com/embed/track/{}?utm_source=generator",
+            track.id
+        )),
+        id: track.id,
+        user_id: user_id.clone(),
+        r#type: String::from("track"),
+        name: track.name,
+        rating: None,
+        user_score: 1500,
+        user_wins: 0,
+        user_losses: 0,
+        metadata,
+    }
+}
+
+fn new_spotify_album_item(name: String, track: AlbumTrack, user_id: &String) -> super::Item {
+    let mut metadata = Map::new();
+    metadata.insert(String::from("album"), Value::String(name));
     metadata.insert(
         String::from("artists"),
         Value::String(
