@@ -1,0 +1,30 @@
+# topbops
+## topbops-web
+```
+COSMOS_MASTER_KEY= COSMOS_ACCOUNT= SPOTIFY_TOKEN= cargo +nightly run --features dev
+```
+## topbops-wasm
+```
+rustup run nightly wasm-pack build --target web
+```
+## TODO
+### P0
+- [ ] Move tournament component to use grids
+- [ ] Fix tournament list view
+- [ ] Add search page
+- [ ] Support custom queries for lists
+- [ ] Support hiding items
+- [ ] Support deleting lists
+### P1
+- [ ] Support user lists
+- [ ] Add dedicated import page
+- [ ] Add documentation
+- [ ] Support resetting items
+### P2
+- [ ] Add sort mode
+- [ ] Revisit data model
+- [ ] Fix sort mode responsiveness
+- [ ] Add spinners
+- [ ] Add Google auth
+- [ ] Improve error handling
+- [ ] Add sharing
