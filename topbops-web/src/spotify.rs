@@ -69,6 +69,7 @@ pub async fn import_playlist(
     playlist_id: &str,
 ) -> Result<(List, Vec<super::Item>), Error> {
     let token = get_token().await?;
+    let playlist_id = playlist_id.split_once(':').unwrap().1;
 
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);

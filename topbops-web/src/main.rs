@@ -586,20 +586,6 @@ impl SessionClient {
     }
 }
 
-async fn import_list(
-    db: DatabaseClient,
-    session: Arc<SessionClient>,
-    user_id: String,
-    r#type: &str,
-    id: &str,
-) -> Result<Response<Body>, Error> {
-    let (list, items) = match r#type {
-        "spotify" => topbops_web::spotify::import_playlist(&user_id, id).await?,
-        _ => todo!(),
-    };
-    create_external_list(db, session, list, items, user_id == DEMO_USER).await
-}
-
 async fn handle_action(
     db: DatabaseClient,
     session: Arc<SessionClient>,
@@ -614,6 +600,9 @@ async fn handle_action(
         match query[..] {
             [("action", "update"), ("list", id), ("win", win), ("lose", lose)] => {
                 return handle_stats_update(db, session, user_id, id, win, lose).await;
+            }
+            [("action", "import"), ("id", id)] => {
+                return import_list(db, session, user_id, id).await;
             }
             _ => {}
         }
@@ -706,6 +695,20 @@ async fn handle_stats_update(
         .status(StatusCode::OK)
         .body(Body::empty())
         .map_err(Error::from)
+}
+
+async fn import_list(
+    db: DatabaseClient,
+    session: Arc<SessionClient>,
+    user_id: String,
+    id: &str,
+) -> Result<Response<Body>, Error> {
+    // TODO: support albums
+    let (list, items) = match id.split_once(':') {
+        Some(("spotify", rest)) => topbops_web::spotify::import_playlist(&user_id, rest).await?,
+        _ => todo!(),
+    };
+    create_external_list(db, session, list, items, user_id == DEMO_USER).await
 }
 
 async fn get_item_doc(
@@ -848,8 +851,7 @@ async fn main() {
             client.clone().database_client("topbops"),
             Arc::clone(&session),
             demo_user.clone(),
-            "spotify",
-            "5MztFbRbMpyxbVYuOSfQV9",
+            "spotify:playlist:5MztFbRbMpyxbVYuOSfQV9",
         )
         .await
         .unwrap();
