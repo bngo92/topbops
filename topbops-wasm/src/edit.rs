@@ -74,8 +74,12 @@ impl Component for Edit {
                 html! {
                     <div>
                         <h1>{&list.name}</h1>
-                        {for html}
-                        <button type="button" class="col-2 btn btn-success" onclick={save} {disabled}>{"Save"}</button>
+                        <form>
+                            {for html}
+                            <div class="col-12 mb-3">
+                                <button type="button" class="btn btn-success" onclick={save} {disabled}>{"Save"}</button>
+                            </div>
+                        </form>
                         if let Some(src) = list.iframe.clone() {
                             <div class="row">
                                 <div class="col-12 col-lg-10 col-xl-8">
