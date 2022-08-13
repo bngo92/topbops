@@ -1,6 +1,7 @@
 #![feature(async_closure, let_else)]
 use crate::edit::Edit;
 use crate::random::Match;
+use crate::search::Search;
 use crate::tournament::Tournament;
 use regex::Regex;
 use std::collections::HashMap;
@@ -18,6 +19,7 @@ use yew_router::{BrowserRouter, Routable, Switch};
 mod base;
 mod edit;
 mod random;
+mod search;
 pub mod tournament;
 
 #[derive(Clone, Routable, PartialEq)]
@@ -30,6 +32,8 @@ enum Route {
     Match { id: String },
     #[at("/lists/:id/tournament")]
     Tournament { id: String },
+    #[at("/search")]
+    Search,
 }
 
 fn switch(routes: &Route) -> Html {
@@ -40,6 +44,7 @@ fn switch(routes: &Route) -> Html {
         Route::Tournament { id } => html! {
             <Tournament id={id.clone()}/>
         },
+        Route::Search => html! { <Search/> },
     }
 }
 
@@ -62,12 +67,23 @@ impl Component for App {
         let window = web_sys::window().expect("no global `window` exists");
         let location = window.location();
         //let onclick = ctx.link().callback(|_| Msg::Logout);
+        // TODO: make anchors active if active
+        let search = /*if location.pathname().unwrap() == "/search" {
+            "nav-link active"
+        } else */{
+            "nav-link"
+        };
         html! {
             <div>
                 <BrowserRouter>
-                    <nav class="navbar navbar-dark bg-dark">
+                    <nav class="navbar navbar-expand navbar-dark bg-dark">
                         <div class="container-lg">
                             <Link<Route> classes="navbar-brand" to={Route::Home}>{"Bops to the Top"}</Link<Route>>
+                            <ul class="navbar-nav me-auto">
+                                <li class="nav-item">
+                                    <Link<Route> classes={search} to={Route::Search}>{"Search"}</Link<Route>>
+                                </li>
+                            </ul>
                             <ul class="navbar-nav">
                                 <li class="nav-item">
                                     if let Some(user) = get_user() {
@@ -336,8 +352,8 @@ impl Component for Row {
         html! {
           <tr>
             <th>{ctx.props().i}</th>
-            <td>{&ctx.props().values[0]}</td>
-            <td>{&ctx.props().values[1]}</td>
+            <td class="td">{&ctx.props().values[0]}</td>
+            <td class="td">{&ctx.props().values[1]}</td>
           </tr>
         }
     }
@@ -404,6 +420,15 @@ async fn import_list(id: &str) -> Result<(), JsValue> {
     let request = query(&format!("/api/?action=import&id={}", id), "POST")?;
     JsFuture::from(window.fetch_with_request(&request)).await?;
     Ok(())
+}
+
+async fn find_items(search: &str) -> Result<ItemQuery, JsValue> {
+    let window = web_sys::window().expect("no global `window` exists");
+    let request = query(&format!("/api/items?q=search&query={}", search), "GET")?;
+    let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
+    let resp: Response = resp_value.dyn_into()?;
+    let json = JsFuture::from(resp.json()?).await?;
+    Ok(json.into_serde().unwrap())
 }
 
 fn query(url: &str, method: &str) -> Result<Request, JsValue> {

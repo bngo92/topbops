@@ -175,7 +175,7 @@ impl Component for Item {
         html! {
           <tr>
             <th>{props.i}</th>
-            <td>{&props.item.name}</td>
+            <td class="td">{&props.item.name}</td>
             <td>{format!("{}-{}", props.item.wins, props.item.losses)}</td>
             <td>{&props.item.score}</td>
           </tr>
