@@ -18,6 +18,7 @@ use sqlparser::ast::{
 };
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
+use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -30,7 +31,14 @@ use topbops::{ItemQuery, List, ListMode, Lists};
 use topbops_web::{Error, Item, Token};
 use uuid::Uuid;
 
-const ITEM_FIELDS: [&str; 4] = ["id", "name", "user_score", "rating"];
+const ITEM_FIELDS: [&str; 6] = [
+    "id",
+    "name",
+    "rating",
+    "user_score",
+    "user_wins",
+    "user_losses",
+];
 
 #[derive(Debug, Deserialize, Serialize)]
 struct User {
@@ -132,6 +140,9 @@ async fn route(
                 (["lists", id, "items"], &Method::GET) => {
                     get_list_items(db, session, user_id, id).await
                 }
+                (["items"], &Method::GET) => {
+                    find_items(db, session, user_id, req.uri().query()).await
+                }
                 ([""], &Method::POST) => handle_action(db, session, user_id, req).await,
                 (_, _) => get_response_builder()
                     .status(StatusCode::METHOD_NOT_ALLOWED)
@@ -173,6 +184,9 @@ async fn route(
                 (["lists", id], &Method::GET) => get_list(db, session, user_id, id).await,
                 (["lists", id, "items"], &Method::GET) => {
                     get_list_items(db, session, user_id, id).await
+                }
+                (["items"], &Method::GET) => {
+                    find_items(db, session, user_id, req.uri().query()).await
                 }
                 ([""], &Method::POST) => handle_action(db, session, user_id, req).await,
                 (_, _) => get_response_builder()
@@ -418,6 +432,53 @@ async fn get_list_doc(
     } else {
         todo!()
     }
+}
+
+async fn find_items(
+    db: DatabaseClient,
+    session: Arc<SessionClient>,
+    user_id: String,
+    query: Option<&str>,
+) -> Result<Response<Body>, Error> {
+    let Some(query) = query else { return get_response_builder()
+        .status(StatusCode::BAD_REQUEST)
+            .body(Body::empty())
+            .map_err(Error::from); };
+    let [(Cow::Borrowed("q"), Cow::Borrowed("search")), (Cow::Borrowed("query"), Cow::Owned(original_query))] = &url::form_urlencoded::parse(query.as_bytes())
+        .collect::<Vec<_>>()[..] else { return get_response_builder()
+            .status(StatusCode::BAD_REQUEST)
+                .body(Body::empty())
+                .map_err(Error::from); };
+
+    let db = db.collection_client("items");
+    let mut query = parse_select(&original_query);
+    transform_query(&mut query, &user_id);
+    let values: Vec<Map<String, Value>> = session.query_documents(db, query.to_string()).await?;
+    let response = ItemQuery {
+        fields: parse_select(&original_query)
+            .projection
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        items: values
+            .iter()
+            .map(|r| topbops::Item {
+                values: r
+                    .values()
+                    .map(|v| match v {
+                        Value::String(s) => s.to_owned(),
+                        Value::Number(n) => n.to_string(),
+                        Value::Null => Value::Null.to_string(),
+                        _ => todo!(),
+                    })
+                    .collect(),
+                metadata: None,
+            })
+            .collect(),
+    };
+    get_response_builder()
+        .body(Body::from(serde_json::to_string(&response)?))
+        .map_err(Error::from)
 }
 
 fn transform_query(query: &mut Select, user_id: &str) {
