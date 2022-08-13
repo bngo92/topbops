@@ -9,7 +9,7 @@ rustup run nightly wasm-pack build --target web
 ```
 ## TODO
 ### P0
-- [ ] Move tournament component to use grids
+- [x] Move tournament component to use grids
 - [ ] Fix tournament list view
 - [ ] Add search page
 - [ ] Support custom queries for lists

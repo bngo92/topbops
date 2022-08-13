@@ -295,9 +295,7 @@ impl Component for Tournament {
                             </div>
                         }
                         <div class="overflow-scroll">
-                            <div style="min-width: 992px">
-                                <TournamentBracket data={fields.data.clone()} disabled=false on_click_select={ctx.link().callback(Msg::Update)}/>
-                            </div>
+                            <TournamentBracket data={fields.data.clone()} disabled=false on_click_select={ctx.link().callback(Msg::Update)}/>
                         </div>
                         if let Some(src) = fields.iframe.clone() {
                             <div class="row">
@@ -374,9 +372,7 @@ impl Component for Tournament {
                             </div>
                             if let ViewState::Tournament = fields.view_state {
                                 <div class="overflow-scroll">
-                                    <div style="min-width: 992px">
-                                        <TournamentBracket data={fields.data.clone()} disabled=true on_click_select={ctx.link().callback(Msg::Update)}/>
-                                    </div>
+                                    <TournamentBracket data={fields.data.clone()} disabled=true on_click_select={ctx.link().callback(Msg::Update)}/>
                                 </div>
                             } else {
                                 <ResponsiveTable query={fields.query.clone()}/>
@@ -392,10 +388,10 @@ impl Component for Tournament {
                     <div class="col-12 col-xl-8">
                         <h1>{title}</h1>
                     </div>
-                    <div class="col-2 align-self-center" style="min-width: 169.33px">
+                    <div class="col-2 align-self-center min-width">
                         <button type="button" class="btn btn-primary w-100 mb-1" onclick={ctx.link().callback(|_| Msg::Toggle)}>{toggle}</button>
                     </div>
-                    <div class="col-2 align-self-center" style="min-width: 169.33px">
+                    <div class="col-2 align-self-center min-width">
                         <button type="button" class="btn btn-danger w-100 mb-1" onclick={ctx.link().callback(|_| Msg::Reset)}>{"Reset"}</button>
                     </div>
                 </div>
@@ -487,6 +483,26 @@ impl Component for TournamentBracket {
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         let props = ctx.props();
+        // We want to limit the width of tournament buttons to between 168px and 1/6 of a bootstrap
+        // container
+        // 168px is the minimum width that avoids truncating Bop To The Top
+        let depth = std::cmp::max(
+            props
+                .data
+                .data
+                .get(props.data.data.len() / 2)
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .depth
+                + 1,
+            6,
+        );
+        let row_width = format!("min-width: {}px", 168 * depth);
+        let offsets: Vec<_> = std::iter::once(None)
+            .chain((1..depth).map(|i| Some(html! {<div style={format!("width: {}%", 100. * i as f64 / depth as f64)}></div>})))
+            .collect();
+        let col_width = format!("width: {}%", 100. / depth as f64);
         props
             .data
             .data
@@ -494,21 +510,14 @@ impl Component for TournamentBracket {
             .enumerate()
             .map(|(i, item)| {
                 if let Some(item) = item {
-                    let class = match item.depth {
-                        5 => "col-2 offset-10",
-                        4 => "col-2 offset-8",
-                        3 => "col-2 offset-6",
-                        2 => "col-2 offset-4",
-                        1 => "col-2 offset-2",
-                        _ => "col-2",
-                    };
                     let onclick = props.on_click_select.clone();
                     let onclick = Callback::from(move |_| onclick.emit(i));
                     let title = item.item.name.clone();
                     let disabled = ctx.props().disabled || item.disabled;
                     html! {
-                        <div class="row">
-                            <div {class}>
+                        <div class="row" style={row_width.clone()}>
+                        {for offsets[item.depth].clone()}
+                            <div style={col_width.clone()}>
                                 <button type="button" class="btn btn-warning text-truncate w-100" style="height: 38px" {title} {disabled} {onclick}>{item.item.name.clone()}</button>
                             </div>
                         </div>
