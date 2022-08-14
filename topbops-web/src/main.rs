@@ -380,11 +380,12 @@ async fn get_list_items(
         query
     };
     let db = db.collection_client("items");
-    let mut query = parse_select(&original_query);
-    transform_query(&mut query, &user_id);
+    let mut query = parse_select(&original_query).unwrap();
+    transform_query(&mut query, &user_id).unwrap();
     let values: Vec<Map<String, Value>> = session.query_documents(db, query.to_string()).await?;
     let response = ItemQuery {
         fields: parse_select(&original_query)
+            .unwrap()
             .projection
             .iter()
             .map(ToString::to_string)
@@ -444,18 +445,43 @@ async fn find_items(
         .status(StatusCode::BAD_REQUEST)
             .body(Body::empty())
             .map_err(Error::from); };
-    let [(Cow::Borrowed("q"), Cow::Borrowed("search")), (Cow::Borrowed("query"), Cow::Owned(original_query))] = &url::form_urlencoded::parse(query.as_bytes())
-        .collect::<Vec<_>>()[..] else { return get_response_builder()
-            .status(StatusCode::BAD_REQUEST)
-                .body(Body::empty())
-                .map_err(Error::from); };
+    let response = match _find_items(db, session, user_id, query).await {
+        Ok(query) => query,
+        Err(Error::SqlError(error)) => {
+            return get_response_builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::from(error))
+                .map_err(Error::from);
+        }
+        Err(error) => {
+            eprintln!("{}: {:?}", query, error);
+            return get_response_builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from("Internal Server Error"))
+                .map_err(Error::from);
+        }
+    };
+    get_response_builder()
+        .body(Body::from(serde_json::to_string(&response)?))
+        .map_err(Error::from)
+}
+
+async fn _find_items(
+    db: DatabaseClient,
+    session: Arc<SessionClient>,
+    user_id: String,
+    query: &str,
+) -> Result<ItemQuery, Error> {
+    let [(Cow::Borrowed("q"), Cow::Borrowed("search")), (Cow::Borrowed("query"), original_query)] = &url::form_urlencoded::parse(query.as_bytes())
+        .collect::<Vec<_>>()[..] else { return Err("invalid finder".into()); };
 
     let db = db.collection_client("items");
-    let mut query = parse_select(&original_query);
-    transform_query(&mut query, &user_id);
+    let mut query = parse_select(&original_query)?;
+    transform_query(&mut query, &user_id)?;
     let values: Vec<Map<String, Value>> = session.query_documents(db, query.to_string()).await?;
-    let response = ItemQuery {
+    Ok(ItemQuery {
         fields: parse_select(&original_query)
+            .unwrap()
             .projection
             .iter()
             .map(ToString::to_string)
@@ -475,14 +501,15 @@ async fn find_items(
                 metadata: None,
             })
             .collect(),
-    };
-    get_response_builder()
-        .body(Body::from(serde_json::to_string(&response)?))
-        .map_err(Error::from)
+    })
 }
 
-fn transform_query(query: &mut Select, user_id: &str) {
-    let from = if let TableFactor::Table { name, .. } = &mut query.from[0].relation {
+fn transform_query(query: &mut Select, user_id: &str) -> Result<(), Error> {
+    let Some(from) = query.from.get_mut(0) else { return Err("FROM clause is omitted".into()); };
+    let from = if let TableFactor::Table { name, alias, .. } = &mut from.relation {
+        if alias.is_some() {
+            return Err("alias is not supported".into());
+        }
         std::mem::replace(&mut name.0[0].value, String::from("c"))
     } else {
         todo!();
@@ -504,8 +531,15 @@ fn transform_query(query: &mut Select, user_id: &str) {
                     todo!()
                 }
             }
-            _ => {
+            SelectItem::UnnamedExpr(_) => {
                 todo!()
+            }
+            // TODO: support alias
+            SelectItem::ExprWithAlias { .. } => {
+                return Err("alias is not supported".into());
+            }
+            SelectItem::QualifiedWildcard(_) | SelectItem::Wildcard => {
+                return Err("wildcard is not supported".into());
             }
         }
     }
@@ -577,6 +611,7 @@ fn transform_query(query: &mut Select, user_id: &str) {
             _ => todo!(),
         }
     }
+    Ok(())
 }
 
 fn replace_identifier(id: Ident) -> Expr {
@@ -587,15 +622,15 @@ fn replace_identifier(id: Ident) -> Expr {
     })
 }
 
-fn parse_select(s: &str) -> Select {
+fn parse_select(s: &str) -> Result<Select, Error> {
     let dialect = GenericDialect {};
-    let statement = Parser::parse_sql(&dialect, s).unwrap().pop();
+    let statement = Parser::parse_sql(&dialect, s)?.pop();
     if let Some(Statement::Query(box sqlparser::ast::Query {
         body: SetExpr::Select(box s),
         ..
     })) = statement
     {
-        s
+        Ok(s)
     } else {
         todo!()
     }

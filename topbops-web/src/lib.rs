@@ -40,6 +40,7 @@ pub enum Error {
     JSONError(serde_json::Error),
     CosmosError(azure_core::error::Error),
     IOError(std::io::Error),
+    SqlError(String),
 }
 
 impl From<hyper::Error> for Error {
@@ -69,5 +70,20 @@ impl From<azure_core::error::Error> for Error {
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Error {
         Error::IOError(e)
+    }
+}
+
+impl From<sqlparser::parser::ParserError> for Error {
+    fn from(e: sqlparser::parser::ParserError) -> Error {
+        Error::SqlError(match e {
+            sqlparser::parser::ParserError::TokenizerError(e) => e,
+            sqlparser::parser::ParserError::ParserError(e) => e,
+        })
+    }
+}
+
+impl From<&'static str> for Error {
+    fn from(e: &'static str) -> Error {
+        Error::SqlError(e.to_owned())
     }
 }
