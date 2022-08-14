@@ -263,14 +263,10 @@ impl Home {
                     }
                 };
             });
-            let history = history.clone();
-            let id = list.id.clone();
-            let on_edit_select = Callback::once(move |_| history.push(Route::Edit { id }));
             Ok(ListData {
                 data: list,
                 query,
                 on_go_select,
-                on_edit_select,
             })
         }))
         .await
@@ -299,9 +295,13 @@ impl Component for Widget {
     fn view(&self, ctx: &Context<Self>) -> Html {
         let list = &ctx.props().list;
         let go = list.on_go_select.clone();
-        let edit = list.on_edit_select.clone();
         // TODO: support user list actions
         let disabled = matches!(list.data.mode, ListMode::User);
+        let history = ctx.link().history().unwrap();
+        let id = list.data.id.clone();
+        let edit = Callback::once(move |_| {
+            history.push(Route::Edit { id });
+        });
         html! {
           <div class="col-12 col-md-6">
             <div class="row">
@@ -364,7 +364,6 @@ pub struct ListData {
     data: List,
     query: ItemQuery,
     on_go_select: Callback<MouseEvent>,
-    on_edit_select: Callback<MouseEvent>,
 }
 
 // Called by our JS entry point to run the example
