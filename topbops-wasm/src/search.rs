@@ -3,13 +3,15 @@ use web_sys::HtmlSelectElement;
 use yew::{html, Component, Context, Html, NodeRef, Properties};
 
 pub enum Msg {
-    Load,
-    Update(ItemQuery),
+    Fetching,
+    Success(ItemQuery),
+    Failed(String),
 }
 
 pub struct Search {
     search_ref: NodeRef,
     query: Option<ItemQuery>,
+    error: Option<String>,
 }
 
 impl Component for Search {
@@ -20,18 +22,28 @@ impl Component for Search {
         Search {
             search_ref: NodeRef::default(),
             query: None,
+            error: None,
         }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         let default_search = "SELECT name, user_score FROM tracks";
-        let search = ctx.link().callback(|_| Msg::Load);
+        let search = ctx.link().callback(|_| Msg::Fetching);
+        let (class, error) = if let Some(error) = &self.error {
+            (
+                "col-12 is-invalid",
+                Some(html! {<div class="invalid-feedback">{error}</div>}),
+            )
+        } else {
+            ("col-12", None)
+        };
         html! {
             <div>
                 <form>
                     <div class="row">
                         <div class="col-12 col-md-10 col-xl-11 pt-1">
-                            <input ref={self.search_ref.clone()} type="text" class="col-12" placeholder={default_search}/>
+                            <input ref={self.search_ref.clone()} type="text" {class} placeholder={default_search}/>
+                            {for error}
                         </div>
                         <div class="col-3 col-sm-2 col-md-2 col-xl-1 pe-2">
                             <button type="button" class="col-12 btn btn-success" onclick={search}>{"Search"}</button>
@@ -47,15 +59,23 @@ impl Component for Search {
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
-            Msg::Load => {
+            Msg::Fetching => {
                 let input = self.search_ref.cast::<HtmlSelectElement>().unwrap().value();
                 ctx.link().send_future(async move {
-                    Msg::Update(crate::find_items(&input).await.unwrap())
+                    match crate::find_items(&input).await {
+                        Ok(query) => Msg::Success(query),
+                        Err(error) => Msg::Failed(error.as_string().unwrap()),
+                    }
                 });
                 false
             }
-            Msg::Update(query) => {
+            Msg::Success(query) => {
                 self.query = Some(query);
+                self.error = None;
+                true
+            }
+            Msg::Failed(error) => {
+                self.error = Some(error);
                 true
             }
         }

@@ -426,6 +426,9 @@ async fn find_items(search: &str) -> Result<ItemQuery, JsValue> {
     let request = query(&format!("/api/items?q=search&query={}", search), "GET")?;
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
+    if [400, 500].contains(&resp.status()) {
+        return Err(JsFuture::from(resp.text()?).await?);
+    }
     let json = JsFuture::from(resp.json()?).await?;
     Ok(json.into_serde().unwrap())
 }
