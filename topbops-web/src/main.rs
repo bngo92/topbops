@@ -453,8 +453,7 @@ async fn find_items(
                 .body(Body::from(error))
                 .map_err(Error::from);
         }
-        Err(error) => {
-            eprintln!("{}: {:?}", query, error);
+        Err(_) => {
             return get_response_builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .body(Body::from("Internal Server Error"))
@@ -478,7 +477,13 @@ async fn _find_items(
     let db = db.collection_client("items");
     let mut query = parse_select(&original_query)?;
     transform_query(&mut query, &user_id)?;
-    let values: Vec<Map<String, Value>> = session.query_documents(db, query.to_string()).await?;
+    let values: Vec<Map<String, Value>> = session
+        .query_documents(db, query.to_string())
+        .await
+        .map_err(|e| {
+            eprintln!("{}: {:?}", query, e);
+            e
+        })?;
     Ok(ItemQuery {
         fields: parse_select(&original_query)
             .unwrap()
@@ -543,7 +548,23 @@ fn transform_query(query: &mut Select, user_id: &str) -> Result<(), Error> {
             }
         }
     }
-    query.selection = Some(if let Some(mut selection) = query.selection.take() {
+    let required_user_id = Box::new(Expr::BinaryOp {
+        left: Box::new(Expr::CompoundIdentifier(vec![
+            Ident::new("c"),
+            Ident::new("user_id"),
+        ])),
+        op: BinaryOperator::Eq,
+        right: Box::new(Expr::Identifier(Ident::new(format!("\"{}\"", user_id)))),
+    });
+    let table_column_map = Box::new(Expr::BinaryOp {
+        left: Box::new(Expr::CompoundIdentifier(vec![
+            Ident::new("c"),
+            Ident::new("type"),
+        ])),
+        op: BinaryOperator::Eq,
+        right: Box::new(Expr::Identifier(Ident::new(format!("\"{}\"", from)))),
+    });
+    let sanitized_select = if let Some(mut selection) = query.selection.take() {
         let expr = &mut selection;
         let mut queue = VecDeque::new();
         queue.push_back(expr);
@@ -559,49 +580,18 @@ fn transform_query(query: &mut Select, user_id: &str) -> Result<(), Error> {
                 _ => {}
             }
         }
-        Expr::BinaryOp {
-            left: Box::new(Expr::BinaryOp {
-                left: Box::new(Expr::CompoundIdentifier(vec![
-                    Ident::new("c"),
-                    Ident::new("user_id"),
-                ])),
-                op: BinaryOperator::Eq,
-                right: Box::new(Expr::Identifier(Ident::new(format!("\"{}\"", user_id)))),
-            }),
+        Box::new(Expr::BinaryOp {
+            left: table_column_map,
             op: BinaryOperator::And,
-            right: Box::new(Expr::BinaryOp {
-                left: Box::new(Expr::BinaryOp {
-                    left: Box::new(Expr::CompoundIdentifier(vec![
-                        Ident::new("c"),
-                        Ident::new("type"),
-                    ])),
-                    op: BinaryOperator::Eq,
-                    right: Box::new(Expr::Identifier(Ident::new(format!("\"{}\"", from)))),
-                }),
-                op: BinaryOperator::And,
-                right: Box::new(selection),
-            }),
-        }
+            right: Box::new(selection),
+        })
     } else {
-        Expr::BinaryOp {
-            left: Box::new(Expr::BinaryOp {
-                left: Box::new(Expr::CompoundIdentifier(vec![
-                    Ident::new("c"),
-                    Ident::new("user_id"),
-                ])),
-                op: BinaryOperator::Eq,
-                right: Box::new(Expr::Identifier(Ident::new(format!("\"{}\"", user_id)))),
-            }),
-            op: BinaryOperator::And,
-            right: Box::new(Expr::BinaryOp {
-                left: Box::new(Expr::CompoundIdentifier(vec![
-                    Ident::new("c"),
-                    Ident::new("type"),
-                ])),
-                op: BinaryOperator::Eq,
-                right: Box::new(Expr::Identifier(Ident::new(format!("\"{}\"", from)))),
-            }),
-        }
+        table_column_map
+    };
+    query.selection = Some(Expr::BinaryOp {
+        left: required_user_id,
+        op: BinaryOperator::And,
+        right: sanitized_select,
     });
     for expr in &mut query.group_by {
         match expr {
@@ -632,7 +622,7 @@ fn parse_select(s: &str) -> Result<Select, Error> {
     {
         Ok(s)
     } else {
-        todo!()
+        Err("No query was provided".into())
     }
 }
 
@@ -1075,26 +1065,12 @@ fn get_response_builder() -> Builder {
 
 #[cfg(test)]
 mod test {
-    use sqlparser::ast::{Query, SetExpr, Statement};
-    use sqlparser::dialect::GenericDialect;
-    use sqlparser::parser::Parser;
+    use crate::Error;
 
     #[test]
     fn test_select() {
-        let statement =
-            Parser::parse_sql(&GenericDialect {}, "SELECT name, user_score FROM tracks")
-                .unwrap()
-                .pop();
-        let mut query = if let Some(Statement::Query(box Query {
-            body: SetExpr::Select(box s),
-            ..
-        })) = statement
-        {
-            s
-        } else {
-            unreachable!()
-        };
-        crate::transform_query(&mut query, "demo");
+        let mut query = crate::parse_select("SELECT name, user_score FROM tracks").unwrap();
+        crate::transform_query(&mut query, "demo").unwrap();
         assert_eq!(
             query.to_string(),
             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\""
@@ -1103,44 +1079,51 @@ mod test {
 
     #[test]
     fn test_where() {
-        let statement = Parser::parse_sql(
-            &GenericDialect {},
-            "SELECT name, user_score FROM tracks WHERE user_score >= 1500",
-        )
-        .unwrap()
-        .pop();
-        let mut query = if let Some(Statement::Query(box Query {
-            body: SetExpr::Select(box s),
-            ..
-        })) = statement
-        {
-            s
-        } else {
-            unreachable!()
-        };
-        crate::transform_query(&mut query, "demo");
+        let mut query =
+            crate::parse_select("SELECT name, user_score FROM tracks WHERE user_score >= 1500")
+                .unwrap();
+        crate::transform_query(&mut query, "demo").unwrap();
         assert_eq!(query.to_string(), "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.user_score >= 1500");
     }
 
     #[test]
     fn test_group_by() {
-        let statement = Parser::parse_sql(
-            &GenericDialect {},
-            "SELECT artists, AVG(user_score) FROM tracks GROUP BY artists",
-        )
-        .unwrap()
-        .pop();
-        let mut query = if let Some(Statement::Query(box Query {
-            body: SetExpr::Select(box s),
-            ..
-        })) = statement
-        {
-            s
-        } else {
-            unreachable!()
-        };
-        crate::transform_query(&mut query, "demo");
+        let mut query =
+            crate::parse_select("SELECT artists, AVG(user_score) FROM tracks GROUP BY artists")
+                .unwrap();
+        crate::transform_query(&mut query, "demo").unwrap();
         assert_eq!(query.to_string(), "SELECT c.metadata.artists, AVG(c.user_score) FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" GROUP BY c.metadata.artists");
+    }
+
+    #[test]
+    fn test_errors() {
+        for (input, expected) in [
+            ("", "No query was provided"),
+            ("S", "Expected an SQL statement, found: S"),
+            ("SELECT", "Expected an expression:, found: EOF"),
+            ("SELECT name", "FROM clause is omitted"),
+            ("SELECT name FROM", "Expected identifier, found: EOF"),
+            (
+                "SELECT name FROM tracks WHERE",
+                "Expected an expression:, found: EOF",
+            ),
+        ] {
+            let query = crate::parse_select(input);
+            match query {
+                Err(Error::SqlError(error)) => {
+                    assert_eq!(error, expected);
+                }
+                Ok(mut query) => {
+                    let err = crate::transform_query(&mut query, "demo").unwrap_err();
+                    if let Error::SqlError(error) = err {
+                        assert_eq!(error, expected);
+                    } else {
+                        unreachable!()
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
     }
 
     #[test]
