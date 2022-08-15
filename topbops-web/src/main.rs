@@ -366,15 +366,10 @@ async fn get_list_items(
     };
     let db = db.collection_client("items");
     let mut query = topbops_web::query::parse_select(&original_query).unwrap();
-    topbops_web::query::transform_query(&mut query, &user_id).unwrap();
+    let fields = topbops_web::query::transform_query(&mut query, &user_id).unwrap();
     let values: Vec<Map<String, Value>> = session.query_documents(db, query.to_string()).await?;
     let response = ItemQuery {
-        fields: topbops_web::query::parse_select(&original_query)
-            .unwrap()
-            .projection
-            .iter()
-            .map(ToString::to_string)
-            .collect(),
+        fields,
         items: values
             .iter()
             .map(|r| {
@@ -461,7 +456,7 @@ async fn _find_items(
 
     let db = db.collection_client("items");
     let mut query = topbops_web::query::parse_select(original_query)?;
-    topbops_web::query::transform_query(&mut query, &user_id)?;
+    let fields = topbops_web::query::transform_query(&mut query, &user_id)?;
     let values: Vec<Map<String, Value>> = session
         .query_documents(db, query.to_string())
         .await
@@ -470,12 +465,7 @@ async fn _find_items(
             e
         })?;
     Ok(ItemQuery {
-        fields: topbops_web::query::parse_select(original_query)
-            .unwrap()
-            .projection
-            .iter()
-            .map(ToString::to_string)
-            .collect(),
+        fields,
         items: values
             .iter()
             .map(|r| topbops::Item {
