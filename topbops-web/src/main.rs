@@ -342,7 +342,7 @@ async fn get_list_items(
     let list = get_list_doc(&db, &session, &user_id, id).await?;
 
     let mut map = HashMap::new();
-    let original_query = if let ListMode::User = list.mode {
+    let query = if let ListMode::User = list.mode {
         list.query
     } else {
         // TODO: update AST directly
@@ -365,8 +365,7 @@ async fn get_list_items(
         query
     };
     let db = db.collection_client("items");
-    let mut query = topbops_web::query::parse_select(&original_query).unwrap();
-    let fields = topbops_web::query::transform_query(&mut query, &user_id).unwrap();
+    let (query, fields) = topbops_web::query::rewrite_query(&query, &user_id).unwrap();
     let values: Vec<Map<String, Value>> = session.query_documents(db, query.to_string()).await?;
     let response = ItemQuery {
         fields,
@@ -451,12 +450,11 @@ async fn _find_items(
     user_id: UserId,
     query: &str,
 ) -> Result<ItemQuery, Error> {
-    let [(Cow::Borrowed("q"), Cow::Borrowed("search")), (Cow::Borrowed("query"), original_query)] = &url::form_urlencoded::parse(query.as_bytes())
+    let [(Cow::Borrowed("q"), Cow::Borrowed("search")), (Cow::Borrowed("query"), query)] = &url::form_urlencoded::parse(query.as_bytes())
         .collect::<Vec<_>>()[..] else { return Err("invalid finder".into()); };
 
     let db = db.collection_client("items");
-    let mut query = topbops_web::query::parse_select(original_query)?;
-    let fields = topbops_web::query::transform_query(&mut query, &user_id)?;
+    let (query, fields) = topbops_web::query::rewrite_query(&query, &user_id)?;
     let values: Vec<Map<String, Value>> = session
         .query_documents(db, query.to_string())
         .await

@@ -7,7 +7,9 @@ use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::collections::VecDeque;
 
-pub fn transform_query(query: &mut Select, user_id: &UserId) -> Result<Vec<String>, Error> {
+pub fn rewrite_query(s: &str, user_id: &UserId) -> Result<(Select, Vec<String>), Error> {
+    let mut query = parse_select(s)?;
+
     let Some(from) = query.from.get_mut(0) else { return Err("FROM clause is omitted".into()); };
     let from = if let TableFactor::Table { name, alias, .. } = &mut from.relation {
         if alias.is_some() {
@@ -23,14 +25,14 @@ pub fn transform_query(query: &mut Select, user_id: &UserId) -> Result<Vec<Strin
     for expr in &mut query.projection {
         match expr {
             SelectItem::UnnamedExpr(Expr::Identifier(id)) => {
-                *expr = SelectItem::UnnamedExpr(replace_identifier(id.clone()));
+                *expr = SelectItem::UnnamedExpr(rewrite_identifier(id.clone()));
             }
             SelectItem::UnnamedExpr(Expr::Function(f)) => {
                 if let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(id)))) =
                     f.args.pop()
                 {
                     f.args.push(FunctionArg::Unnamed(FunctionArgExpr::Expr(
-                        replace_identifier(id),
+                        rewrite_identifier(id),
                     )));
                 } else {
                     todo!()
@@ -75,11 +77,11 @@ pub fn transform_query(query: &mut Select, user_id: &UserId) -> Result<Vec<Strin
                     queue.push_back(right);
                 }
                 Expr::Identifier(id) => {
-                    *expr = replace_identifier(id.clone());
+                    *expr = rewrite_identifier(id.clone());
                 }
                 Expr::InList { expr, .. } => {
                     if let Expr::Identifier(id) = &**expr {
-                        *expr = Box::new(replace_identifier(id.clone()));
+                        *expr = Box::new(rewrite_identifier(id.clone()));
                     }
                 }
                 _ => {}
@@ -101,23 +103,15 @@ pub fn transform_query(query: &mut Select, user_id: &UserId) -> Result<Vec<Strin
     for expr in &mut query.group_by {
         match expr {
             Expr::Identifier(id) => {
-                *expr = replace_identifier(id.clone());
+                *expr = rewrite_identifier(id.clone());
             }
             _ => todo!(),
         }
     }
-    Ok(column_names)
+    Ok((query, column_names))
 }
 
-fn replace_identifier(id: Ident) -> Expr {
-    Expr::CompoundIdentifier(if ITEM_FIELDS.contains(&id.value.as_ref()) {
-        vec![Ident::new("c"), id]
-    } else {
-        vec![Ident::new("c"), Ident::new("metadata"), id]
-    })
-}
-
-pub fn parse_select(s: &str) -> Result<Select, Error> {
+fn parse_select(s: &str) -> Result<Select, Error> {
     let dialect = GenericDialect {};
     let statement = Parser::parse_sql(&dialect, s)?.pop();
     if let Some(Statement::Query(box sqlparser::ast::Query {
@@ -131,19 +125,26 @@ pub fn parse_select(s: &str) -> Result<Select, Error> {
     }
 }
 
+fn rewrite_identifier(id: Ident) -> Expr {
+    Expr::CompoundIdentifier(if ITEM_FIELDS.contains(&id.value.as_ref()) {
+        vec![Ident::new("c"), id]
+    } else {
+        vec![Ident::new("c"), Ident::new("metadata"), id]
+    })
+}
+
 #[cfg(test)]
 mod test {
     use crate::{Error, UserId};
     use sqlparser::ast::Select;
 
-    fn transform_query(query: &mut Select) -> Result<Vec<String>, Error> {
-        super::transform_query(query, &UserId(String::from("demo")))
+    fn rewrite_query(query: &str) -> Result<(Select, Vec<String>), Error> {
+        super::rewrite_query(query, &UserId(String::from("demo")))
     }
 
     #[test]
     fn test_select() {
-        let mut query = super::parse_select("SELECT name, user_score FROM tracks").unwrap();
-        let column_names = transform_query(&mut query).unwrap();
+        let (query, column_names) = rewrite_query("SELECT name, user_score FROM tracks").unwrap();
         assert_eq!(
             query.to_string(),
             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\""
@@ -159,8 +160,7 @@ mod test {
             ("SELECT name, user_score FROM tracks WHERE user_score IN (1500)",
              "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.user_score IN (1500)"),
         ] {
-            let mut query = super::parse_select(input).unwrap();
-            let column_names = transform_query(&mut query).unwrap();
+            let (query, column_names) = rewrite_query(input).unwrap();
             assert_eq!(query.to_string(), expected);
             assert_eq!(column_names, vec!["name", "user_score"]);
         }
@@ -168,10 +168,8 @@ mod test {
 
     #[test]
     fn test_group_by() {
-        let mut query =
-            super::parse_select("SELECT artists, AVG(user_score) FROM tracks GROUP BY artists")
-                .unwrap();
-        let column_names = transform_query(&mut query).unwrap();
+        let (query, column_names) =
+            rewrite_query("SELECT artists, AVG(user_score) FROM tracks GROUP BY artists").unwrap();
         assert_eq!(query.to_string(), "SELECT c.metadata.artists, AVG(c.user_score) FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" GROUP BY c.metadata.artists");
         assert_eq!(column_names, vec!["artists", "AVG(user_score)"]);
     }
@@ -197,20 +195,11 @@ mod test {
                 "Expected ), found: EOF",
             ),
         ] {
-            let query = super::parse_select(input);
-            match query {
-                Err(Error::SqlError(error)) => {
-                    assert_eq!(error, expected);
-                }
-                Ok(mut query) => {
-                    let err = transform_query(&mut query).unwrap_err();
-                    if let Error::SqlError(error) = err {
-                        assert_eq!(error, expected);
-                    } else {
-                        unreachable!()
-                    }
-                }
-                _ => unreachable!(),
+            let err = rewrite_query(input).unwrap_err();
+            if let Error::SqlError(error) = err {
+                assert_eq!(error, expected);
+            } else {
+                unreachable!()
             }
         }
     }
