@@ -13,6 +13,7 @@ struct Playlists {
 #[derive(Debug, Deserialize, Serialize)]
 struct Playlist {
     pub id: String,
+    pub href: String,
     pub name: String,
 }
 
@@ -38,19 +39,19 @@ struct Track {
     pub name: String,
     pub album: Album,
     pub artists: Vec<Artist>,
-    pub preview_url: Option<String>,
+    pub duration_ms: i32,
+    pub popularity: i32,
+    pub track_number: i32,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 struct AlbumTrack {
-    pub id: String,
-    pub name: String,
-    pub artists: Vec<Artist>,
-    pub preview_url: Option<String>,
+    pub href: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Album {
+    pub href: String,
     pub name: String,
 }
 
@@ -148,7 +149,7 @@ pub async fn import_playlist(
             .iter()
             .map(|i| ItemMetadata::new(i.id.clone(), i.name.clone(), i.iframe.clone()))
             .collect(),
-        mode: ListMode::External,
+        mode: ListMode::External(playlist.href),
         query: String::from("SELECT name, user_score FROM tracks"),
     };
     Ok((list, items))
@@ -188,11 +189,24 @@ pub async fn import_album(user_id: &UserId, id: &str) -> Result<(List, Vec<super
         .await?;
     let got = hyper::body::to_bytes(resp.into_body()).await?;
     let album_items: AlbumItems = serde_json::from_slice(&got)?;
-    let items: Vec<_> = album_items
-        .items
-        .into_iter()
-        .map(|i| new_spotify_album_item(album.name.clone(), i, user_id))
-        .collect();
+    let mut items = Vec::new();
+    for item in album_items.items {
+        let https = HttpsConnector::new();
+        let client = Client::builder().build::<_, hyper::Body>(https);
+        let uri: Uri = item.href.parse().unwrap();
+        let resp = client
+            .request(
+                Request::builder()
+                    .uri(uri)
+                    .header("Authorization", format!("Bearer {}", token.access_token))
+                    .body(Body::empty())?,
+            )
+            .await?;
+        let got = hyper::body::to_bytes(resp.into_body()).await?;
+        let track: Track = serde_json::from_slice(&got)?;
+        items.push(new_spotify_item(track, user_id));
+    }
+
     let list = List {
         id: id.to_owned(),
         user_id: user_id.0.clone(),
@@ -205,7 +219,7 @@ pub async fn import_album(user_id: &UserId, id: &str) -> Result<(List, Vec<super
             .iter()
             .map(|i| ItemMetadata::new(i.id.clone(), i.name.clone(), i.iframe.clone()))
             .collect(),
-        mode: ListMode::External,
+        mode: ListMode::External(album.href),
         query: String::from("SELECT name, user_score FROM tracks"),
     };
     Ok((list, items))
@@ -236,50 +250,34 @@ async fn get_token() -> Result<super::Token, Error> {
 }
 
 fn new_spotify_item(track: Track, user_id: &UserId) -> super::Item {
-    let mut metadata = Map::new();
-    metadata.insert(String::from("album"), Value::String(track.album.name));
-    metadata.insert(
-        String::from("artists"),
-        Value::String(
-            track
-                .artists
-                .into_iter()
-                .map(|a| a.name)
-                .collect::<Vec<_>>()
-                .join(", "),
+    let metadata: Map<_, _> = [
+        (String::from("album"), Value::String(track.album.name)),
+        (
+            String::from("artists"),
+            Value::String(
+                track
+                    .artists
+                    .into_iter()
+                    .map(|a| a.name)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
         ),
-    );
-    super::Item {
-        iframe: Some(format!(
-            "https://open.spotify.com/embed/track/{}?utm_source=generator",
-            track.id
-        )),
-        id: track.id,
-        user_id: user_id.0.clone(),
-        r#type: String::from("track"),
-        name: track.name,
-        rating: None,
-        user_score: 1500,
-        user_wins: 0,
-        user_losses: 0,
-        metadata,
-    }
-}
-
-fn new_spotify_album_item(name: String, track: AlbumTrack, user_id: &UserId) -> super::Item {
-    let mut metadata = Map::new();
-    metadata.insert(String::from("album"), Value::String(name));
-    metadata.insert(
-        String::from("artists"),
-        Value::String(
-            track
-                .artists
-                .into_iter()
-                .map(|a| a.name)
-                .collect::<Vec<_>>()
-                .join(", "),
+        (
+            String::from("duration_ms"),
+            Value::Number(track.duration_ms.into()),
         ),
-    );
+        (
+            String::from("popularity"),
+            Value::Number(track.popularity.into()),
+        ),
+        (
+            String::from("track_number"),
+            Value::Number(track.track_number.into()),
+        ),
+    ]
+    .into_iter()
+    .collect();
     super::Item {
         iframe: Some(format!(
             "https://open.spotify.com/embed/track/{}?utm_source=generator",

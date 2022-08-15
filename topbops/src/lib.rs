@@ -47,7 +47,7 @@ impl ItemMetadata {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ListMode {
     User,
-    External,
+    External(String),
 }
 
 #[cfg(feature = "azure")]
