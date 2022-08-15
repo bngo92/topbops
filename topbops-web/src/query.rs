@@ -1,4 +1,4 @@
-use crate::{Error, ITEM_FIELDS};
+use crate::{Error, UserId, ITEM_FIELDS};
 use sqlparser::ast::{
     BinaryOperator, Expr, FunctionArg, FunctionArgExpr, Ident, Select, SelectItem, SetExpr,
     Statement, TableFactor,
@@ -7,7 +7,7 @@ use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::collections::VecDeque;
 
-pub fn transform_query(query: &mut Select, user_id: &str) -> Result<(), Error> {
+pub fn transform_query(query: &mut Select, user_id: &UserId) -> Result<(), Error> {
     let Some(from) = query.from.get_mut(0) else { return Err("FROM clause is omitted".into()); };
     let from = if let TableFactor::Table { name, alias, .. } = &mut from.relation {
         if alias.is_some() {
@@ -52,7 +52,7 @@ pub fn transform_query(query: &mut Select, user_id: &str) -> Result<(), Error> {
             Ident::new("user_id"),
         ])),
         op: BinaryOperator::Eq,
-        right: Box::new(Expr::Identifier(Ident::new(format!("\"{}\"", user_id)))),
+        right: Box::new(Expr::Identifier(Ident::new(format!("\"{}\"", user_id.0)))),
     });
     let table_column_map = Box::new(Expr::BinaryOp {
         left: Box::new(Expr::CompoundIdentifier(vec![
@@ -131,12 +131,17 @@ pub fn parse_select(s: &str) -> Result<Select, Error> {
 
 #[cfg(test)]
 mod test {
-    use crate::Error;
+    use crate::{Error, UserId};
+    use sqlparser::ast::Select;
+
+    fn transform_query(query: &mut Select) -> Result<(), Error> {
+        super::transform_query(query, &UserId(String::from("demo")))
+    }
 
     #[test]
     fn test_select() {
         let mut query = super::parse_select("SELECT name, user_score FROM tracks").unwrap();
-        super::transform_query(&mut query, "demo").unwrap();
+        transform_query(&mut query).unwrap();
         assert_eq!(
             query.to_string(),
             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\""
@@ -152,7 +157,7 @@ mod test {
              "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.user_score IN (1500)"),
         ] {
             let mut query = super::parse_select(input).unwrap();
-            super::transform_query(&mut query, "demo").unwrap();
+            transform_query(&mut query).unwrap();
             assert_eq!(query.to_string(), expected);
         }
     }
@@ -162,7 +167,7 @@ mod test {
         let mut query =
             super::parse_select("SELECT artists, AVG(user_score) FROM tracks GROUP BY artists")
                 .unwrap();
-        super::transform_query(&mut query, "demo").unwrap();
+        transform_query(&mut query).unwrap();
         assert_eq!(query.to_string(), "SELECT c.metadata.artists, AVG(c.user_score) FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" GROUP BY c.metadata.artists");
     }
 
@@ -193,7 +198,7 @@ mod test {
                     assert_eq!(error, expected);
                 }
                 Ok(mut query) => {
-                    let err = super::transform_query(&mut query, "demo").unwrap_err();
+                    let err = transform_query(&mut query).unwrap_err();
                     if let Error::SqlError(error) = err {
                         assert_eq!(error, expected);
                     } else {

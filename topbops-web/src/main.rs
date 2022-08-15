@@ -22,7 +22,7 @@ use tokio::fs::File;
 #[cfg(feature = "dev")]
 use tokio::io::AsyncReadExt;
 use topbops::{ItemQuery, List, ListMode, Lists};
-use topbops_web::{Error, Item, Token};
+use topbops_web::{Error, Item, Token, UserId};
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -114,11 +114,11 @@ async fn route(
             if let Some(code) = query.get("code") {
                 code
             } else {
-                "demo"
+                DEMO_USER
             }
         };
-        if auth == "demo" {
-            let user_id = String::from(DEMO_USER);
+        if auth == DEMO_USER {
+            let user_id = UserId(String::from(DEMO_USER));
             match (&path[..], req.method()) {
                 (["lists"], &Method::GET) => get_lists(db, session, user_id).await,
                 (["lists", id], &Method::GET) => get_list(db, session, user_id, id).await,
@@ -160,7 +160,7 @@ async fn route(
                     )
                     .header(
                         "Set-Cookie",
-                        &format!("user={}; Max-Age=31536000; Path=/", user_id),
+                        &format!("user={}; Max-Age=31536000; Path=/", user_id.0),
                     )
                     .status(StatusCode::FOUND)
                     .body(Body::empty())
@@ -219,7 +219,7 @@ async fn login(
     session: &Arc<SessionClient>,
     auth: &str,
     origin: &str,
-) -> Result<(String, String), Error> {
+) -> Result<(UserId, String), Error> {
     let db = db.collection_client("users");
     let query = Query::new(format!("SELECT * FROM c WHERE c.auth = \"{}\"", auth));
     // TODO: debug why session token isn't working here
@@ -249,7 +249,7 @@ async fn login(
         (resp, token)
     };
     if let Some((user, _)) = resp.results.pop() {
-        return Ok((user.user_id, user.access_token));
+        return Ok((UserId(user.user_id), user.access_token));
     }
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
@@ -303,16 +303,16 @@ async fn login(
         .consistency_level(session)
         .into_future()
         .await?;
-    Ok((spotify_user.id, token.access_token))
+    Ok((UserId(spotify_user.id), token.access_token))
 }
 
 async fn get_lists(
     db: DatabaseClient,
     session: Arc<SessionClient>,
-    user_id: String,
+    user_id: UserId,
 ) -> Result<Response<Body>, Error> {
     let db = db.collection_client("lists");
-    let query = format!("SELECT * FROM c WHERE c.user_id = \"{}\"", user_id);
+    let query = format!("SELECT * FROM c WHERE c.user_id = \"{}\"", user_id.0);
     let lists = Lists {
         lists: session.query_documents(db, query).await?,
     };
@@ -324,7 +324,7 @@ async fn get_lists(
 async fn get_list(
     db: DatabaseClient,
     session: Arc<SessionClient>,
-    user_id: String,
+    user_id: UserId,
     id: &str,
 ) -> Result<Response<Body>, Error> {
     let list = get_list_doc(&db, &session, &user_id, id).await?;
@@ -336,7 +336,7 @@ async fn get_list(
 async fn get_list_items(
     db: DatabaseClient,
     session: Arc<SessionClient>,
-    user_id: String,
+    user_id: UserId,
     id: &str,
 ) -> Result<Response<Body>, Error> {
     let list = get_list_doc(&db, &session, &user_id, id).await?;
@@ -406,13 +406,13 @@ async fn get_list_items(
 async fn get_list_doc(
     db: &DatabaseClient,
     _: &Arc<SessionClient>,
-    user_id: &str,
+    user_id: &UserId,
     id: &str,
 ) -> Result<List, Error> {
     let client = db
         .clone()
         .collection_client("lists")
-        .document_client(id, &user_id)?;
+        .document_client(id, &user_id.0)?;
     if let GetDocumentResponse::Found(list) = client.get_document::<List>().into_future().await? {
         Ok(list.document.document)
     } else {
@@ -423,7 +423,7 @@ async fn get_list_doc(
 async fn find_items(
     db: DatabaseClient,
     session: Arc<SessionClient>,
-    user_id: String,
+    user_id: UserId,
     query: Option<&str>,
 ) -> Result<Response<Body>, Error> {
     let Some(query) = query else { return get_response_builder()
@@ -453,14 +453,14 @@ async fn find_items(
 async fn _find_items(
     db: DatabaseClient,
     session: Arc<SessionClient>,
-    user_id: String,
+    user_id: UserId,
     query: &str,
 ) -> Result<ItemQuery, Error> {
     let [(Cow::Borrowed("q"), Cow::Borrowed("search")), (Cow::Borrowed("query"), original_query)] = &url::form_urlencoded::parse(query.as_bytes())
         .collect::<Vec<_>>()[..] else { return Err("invalid finder".into()); };
 
     let db = db.collection_client("items");
-    let mut query = topbops_web::query::parse_select(&original_query)?;
+    let mut query = topbops_web::query::parse_select(original_query)?;
     topbops_web::query::transform_query(&mut query, &user_id)?;
     let values: Vec<Map<String, Value>> = session
         .query_documents(db, query.to_string())
@@ -470,7 +470,7 @@ async fn _find_items(
             e
         })?;
     Ok(ItemQuery {
-        fields: topbops_web::query::parse_select(&original_query)
+        fields: topbops_web::query::parse_select(original_query)
             .unwrap()
             .projection
             .iter()
@@ -539,7 +539,7 @@ impl SessionClient {
 async fn handle_action(
     db: DatabaseClient,
     session: Arc<SessionClient>,
-    user_id: String,
+    user_id: UserId,
     req: Request<Body>,
 ) -> Result<Response<Body>, Error> {
     let query = req.uri().query();
@@ -570,7 +570,7 @@ async fn handle_action(
 async fn handle_stats_update(
     db: DatabaseClient,
     session: Arc<SessionClient>,
-    user_id: String,
+    user_id: UserId,
     id: &str,
     win: &str,
     lose: &str,
@@ -578,7 +578,7 @@ async fn handle_stats_update(
     let list_client = db
         .clone()
         .collection_client("lists")
-        .document_client(id, &user_id)?;
+        .document_client(id, &user_id.0)?;
     let client = db.clone().collection_client("items");
     let (Ok(list_response), Ok(mut win_item), Ok(mut lose_item)) = futures::future::join3(
         list_client.get_document::<List>().into_future(),
@@ -654,25 +654,25 @@ async fn handle_stats_update(
 async fn import_list(
     db: DatabaseClient,
     session: Arc<SessionClient>,
-    user_id: String,
+    user_id: UserId,
     id: &str,
 ) -> Result<Response<Body>, Error> {
     let (list, items) = match id.split_once(':') {
         Some(("spotify", id)) => topbops_web::spotify::import(&user_id, id).await?,
         _ => todo!(),
     };
-    create_external_list(db, session, list, items, user_id == DEMO_USER).await
+    create_external_list(db, session, list, items, user_id.0 == DEMO_USER).await
 }
 
 async fn get_item_doc(
     client: CollectionClient,
     session: &Arc<SessionClient>,
-    user_id: String,
+    user_id: UserId,
     id: &str,
 ) -> Result<Item, Error> {
     let session_copy = session.session.read().unwrap().clone().unwrap();
     if let GetDocumentResponse::Found(item) = client
-        .document_client(id, &user_id)?
+        .document_client(id, &user_id.0)?
         .get_document::<Item>()
         .consistency_level(session_copy)
         .into_future()
@@ -783,7 +783,7 @@ async fn create_external_list(
 async fn update_items(
     db: DatabaseClient,
     session: Arc<SessionClient>,
-    user_id: String,
+    user_id: UserId,
     req: Request<Body>,
 ) -> Result<Response<Body>, Error> {
     let body = &hyper::body::to_bytes(req.into_body()).await?;
@@ -805,7 +805,7 @@ async fn update_items(
         let session_copy = session.session.read().unwrap().clone().unwrap();
         client
             .clone()
-            .document_client(id, &user_id)?
+            .document_client(id, &user_id.0)?
             .replace_document::<Item>(item)
             .consistency_level(session_copy)
             .into_future()
@@ -844,7 +844,7 @@ async fn main() {
         import_list(
             client.clone().database_client("topbops"),
             Arc::clone(&session),
-            demo_user.clone(),
+            UserId(demo_user.clone()),
             "spotify:playlist:5MztFbRbMpyxbVYuOSfQV9",
         )
         .await

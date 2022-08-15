@@ -6,6 +6,8 @@ use serde_json::{Map, Value};
 pub mod query;
 pub mod spotify;
 
+#[derive(Clone)]
+pub struct UserId(pub String);
 pub const ITEM_FIELDS: [&str; 6] = [
     "id",
     "name",

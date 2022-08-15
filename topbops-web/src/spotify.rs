@@ -1,4 +1,4 @@
-use super::Error;
+use crate::{Error, UserId};
 use hyper::{Body, Client, Method, Request, Uri};
 use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
@@ -64,7 +64,7 @@ pub struct User {
     pub id: String,
 }
 
-pub async fn import(user_id: &String, id: &str) -> Result<(List, Vec<super::Item>), Error> {
+pub async fn import(user_id: &UserId, id: &str) -> Result<(List, Vec<super::Item>), Error> {
     match id.split_once(':') {
         Some(("playlist", id)) => import_playlist(user_id, id).await,
         Some(("album", id)) => import_album(user_id, id).await,
@@ -73,7 +73,7 @@ pub async fn import(user_id: &String, id: &str) -> Result<(List, Vec<super::Item
 }
 
 pub async fn import_playlist(
-    user_id: &String,
+    user_id: &UserId,
     playlist_id: &str,
 ) -> Result<(List, Vec<super::Item>), Error> {
     let token = get_token().await?;
@@ -115,7 +115,7 @@ pub async fn import_playlist(
     let mut items: Vec<_> = playlist_items
         .items
         .into_iter()
-        .map(|i| new_spotify_item(i.track, &user_id))
+        .map(|i| new_spotify_item(i.track, user_id))
         .collect();
     while let Some(uri) = playlist_items.next {
         let uri: Uri = uri.parse().unwrap();
@@ -133,12 +133,12 @@ pub async fn import_playlist(
             playlist_items
                 .items
                 .into_iter()
-                .map(|i| new_spotify_item(i.track, &user_id)),
+                .map(|i| new_spotify_item(i.track, user_id)),
         );
     }
     let list = List {
         id: playlist_id.to_owned(),
-        user_id: user_id.clone(),
+        user_id: user_id.0.clone(),
         name: playlist.name,
         iframe: Some(format!(
             "https://open.spotify.com/embed/playlist/{}?utm_source=generator",
@@ -154,7 +154,7 @@ pub async fn import_playlist(
     Ok((list, items))
 }
 
-pub async fn import_album(user_id: &String, id: &str) -> Result<(List, Vec<super::Item>), Error> {
+pub async fn import_album(user_id: &UserId, id: &str) -> Result<(List, Vec<super::Item>), Error> {
     let token = get_token().await?;
 
     let https = HttpsConnector::new();
@@ -191,11 +191,11 @@ pub async fn import_album(user_id: &String, id: &str) -> Result<(List, Vec<super
     let items: Vec<_> = album_items
         .items
         .into_iter()
-        .map(|i| new_spotify_album_item(album.name.clone(), i, &user_id))
+        .map(|i| new_spotify_album_item(album.name.clone(), i, user_id))
         .collect();
     let list = List {
         id: id.to_owned(),
-        user_id: user_id.clone(),
+        user_id: user_id.0.clone(),
         name: album.name,
         iframe: Some(format!(
             "https://open.spotify.com/embed/album/{}?utm_source=generator",
@@ -235,7 +235,7 @@ async fn get_token() -> Result<super::Token, Error> {
     serde_json::from_slice(&got).map_err(Error::from)
 }
 
-fn new_spotify_item(track: Track, user_id: &String) -> super::Item {
+fn new_spotify_item(track: Track, user_id: &UserId) -> super::Item {
     let mut metadata = Map::new();
     metadata.insert(String::from("album"), Value::String(track.album.name));
     metadata.insert(
@@ -255,7 +255,7 @@ fn new_spotify_item(track: Track, user_id: &String) -> super::Item {
             track.id
         )),
         id: track.id,
-        user_id: user_id.clone(),
+        user_id: user_id.0.clone(),
         r#type: String::from("track"),
         name: track.name,
         rating: None,
@@ -266,7 +266,7 @@ fn new_spotify_item(track: Track, user_id: &String) -> super::Item {
     }
 }
 
-fn new_spotify_album_item(name: String, track: AlbumTrack, user_id: &String) -> super::Item {
+fn new_spotify_album_item(name: String, track: AlbumTrack, user_id: &UserId) -> super::Item {
     let mut metadata = Map::new();
     metadata.insert(String::from("album"), Value::String(name));
     metadata.insert(
@@ -286,7 +286,7 @@ fn new_spotify_album_item(name: String, track: AlbumTrack, user_id: &String) -> 
             track.id
         )),
         id: track.id,
-        user_id: user_id.clone(),
+        user_id: user_id.0.clone(),
         r#type: String::from("track"),
         name: track.name,
         rating: None,
