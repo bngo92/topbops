@@ -1,8 +1,19 @@
+#![feature(box_patterns, let_else)]
 use azure_data_cosmos::prelude::CosmosEntity;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+pub mod query;
 pub mod spotify;
+
+pub const ITEM_FIELDS: [&str; 6] = [
+    "id",
+    "name",
+    "rating",
+    "user_score",
+    "user_wins",
+    "user_losses",
+];
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Token {
