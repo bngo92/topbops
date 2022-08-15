@@ -577,6 +577,11 @@ fn transform_query(query: &mut Select, user_id: &str) -> Result<(), Error> {
                 Expr::Identifier(id) => {
                     *expr = replace_identifier(id.clone());
                 }
+                Expr::InList { expr, .. } => {
+                    if let Expr::Identifier(id) = &**expr {
+                        *expr = Box::new(replace_identifier(id.clone()));
+                    }
+                }
                 _ => {}
             }
         }
@@ -1079,11 +1084,16 @@ mod test {
 
     #[test]
     fn test_where() {
-        let mut query =
-            crate::parse_select("SELECT name, user_score FROM tracks WHERE user_score >= 1500")
-                .unwrap();
-        crate::transform_query(&mut query, "demo").unwrap();
-        assert_eq!(query.to_string(), "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.user_score >= 1500");
+        for (input, expected) in [
+            ("SELECT name, user_score FROM tracks WHERE user_score >= 1500",
+             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.user_score >= 1500"),
+            ("SELECT name, user_score FROM tracks WHERE user_score IN (1500)",
+             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.user_score IN (1500)"),
+        ] {
+            let mut query = crate::parse_select(input).unwrap();
+            crate::transform_query(&mut query, "demo").unwrap();
+            assert_eq!(query.to_string(), expected);
+        }
     }
 
     #[test]
@@ -1106,6 +1116,14 @@ mod test {
             (
                 "SELECT name FROM tracks WHERE",
                 "Expected an expression:, found: EOF",
+            ),
+            (
+                "SELECT name, user_score FROM tracks WHERE user_score IN (",
+                "Expected an expression:, found: EOF",
+            ),
+            (
+                "SELECT name, user_score FROM tracks WHERE user_score IN (1500",
+                "Expected ), found: EOF",
             ),
         ] {
             let query = crate::parse_select(input);
