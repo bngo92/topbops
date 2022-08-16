@@ -1,4 +1,5 @@
 use crate::{Error, UserId};
+use futures::{StreamExt, TryStreamExt};
 use hyper::{Body, Client, Method, Request, Uri};
 use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
@@ -189,23 +190,31 @@ pub async fn import_album(user_id: &UserId, id: &str) -> Result<(List, Vec<super
         .await?;
     let got = hyper::body::to_bytes(resp.into_body()).await?;
     let album_items: AlbumItems = serde_json::from_slice(&got)?;
-    let mut items = Vec::new();
-    for item in album_items.items {
-        let https = HttpsConnector::new();
-        let client = Client::builder().build::<_, hyper::Body>(https);
-        let uri: Uri = item.href.parse().unwrap();
-        let resp = client
-            .request(
-                Request::builder()
-                    .uri(uri)
-                    .header("Authorization", format!("Bearer {}", token.access_token))
-                    .body(Body::empty())?,
-            )
-            .await?;
-        let got = hyper::body::to_bytes(resp.into_body()).await?;
-        let track: Track = serde_json::from_slice(&got)?;
-        items.push(new_spotify_item(track, user_id));
-    }
+    let items: Vec<_> = futures::stream::iter(
+        album_items
+            .items
+            .into_iter()
+            .map(|i| (i, token.access_token.clone()))
+            .map(async move |(item, access_token)| {
+                let https = HttpsConnector::new();
+                let client = Client::builder().build::<_, hyper::Body>(https);
+                let uri: Uri = item.href.parse().unwrap();
+                let resp = client
+                    .request(
+                        Request::builder()
+                            .uri(uri)
+                            .header("Authorization", format!("Bearer {}", access_token))
+                            .body(Body::empty())?,
+                    )
+                    .await?;
+                let got = hyper::body::to_bytes(resp.into_body()).await?;
+                let track = serde_json::from_slice(&got)?;
+                Ok::<_, Error>(new_spotify_item(track, user_id))
+            }),
+    )
+    .buffered(5)
+    .try_collect()
+    .await?;
 
     let list = List {
         id: id.to_owned(),
