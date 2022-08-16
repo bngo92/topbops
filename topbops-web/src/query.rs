@@ -24,23 +24,7 @@ pub fn rewrite_query(s: &str, user_id: &UserId) -> Result<(Select, Vec<String>),
     let column_names = query.projection.iter().map(ToString::to_string).collect();
     for expr in &mut query.projection {
         match expr {
-            SelectItem::UnnamedExpr(Expr::Identifier(id)) => {
-                *expr = SelectItem::UnnamedExpr(rewrite_identifier(id.clone()));
-            }
-            SelectItem::UnnamedExpr(Expr::Function(f)) => {
-                if let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(id)))) =
-                    f.args.pop()
-                {
-                    f.args.push(FunctionArg::Unnamed(FunctionArgExpr::Expr(
-                        rewrite_identifier(id),
-                    )));
-                } else {
-                    todo!()
-                }
-            }
-            SelectItem::UnnamedExpr(_) => {
-                todo!()
-            }
+            SelectItem::UnnamedExpr(expr) => rewrite_expr(expr),
             // TODO: support alias
             SelectItem::ExprWithAlias { .. } => {
                 return Err("alias is not supported".into());
@@ -67,26 +51,7 @@ pub fn rewrite_query(s: &str, user_id: &UserId) -> Result<(Select, Vec<String>),
         right: Box::new(Expr::Identifier(Ident::new(format!("\"{}\"", from)))),
     });
     let sanitized_select = if let Some(mut selection) = query.selection.take() {
-        let expr = &mut selection;
-        let mut queue = VecDeque::new();
-        queue.push_back(expr);
-        while let Some(expr) = queue.pop_front() {
-            match expr {
-                Expr::BinaryOp { left, op: _, right } => {
-                    queue.push_back(left);
-                    queue.push_back(right);
-                }
-                Expr::Identifier(id) => {
-                    *expr = rewrite_identifier(id.clone());
-                }
-                Expr::InList { expr, .. } => {
-                    if let Expr::Identifier(id) = &**expr {
-                        *expr = Box::new(rewrite_identifier(id.clone()));
-                    }
-                }
-                _ => {}
-            }
-        }
+        rewrite_expr(&mut selection);
         Box::new(Expr::BinaryOp {
             left: table_column_map,
             op: BinaryOperator::And,
@@ -101,12 +66,7 @@ pub fn rewrite_query(s: &str, user_id: &UserId) -> Result<(Select, Vec<String>),
         right: sanitized_select,
     });
     for expr in &mut query.group_by {
-        match expr {
-            Expr::Identifier(id) => {
-                *expr = rewrite_identifier(id.clone());
-            }
-            _ => todo!(),
-        }
+        rewrite_expr(expr);
     }
     Ok((query, column_names))
 }
@@ -122,6 +82,39 @@ fn parse_select(s: &str) -> Result<Select, Error> {
         Ok(s)
     } else {
         Err("No query was provided".into())
+    }
+}
+
+fn rewrite_expr(expr: &mut Expr) {
+    let mut queue = VecDeque::new();
+    queue.push_back(expr);
+    while let Some(expr) = queue.pop_front() {
+        match expr {
+            Expr::Identifier(id) => {
+                *expr = rewrite_identifier(id.clone());
+            }
+            Expr::InList { expr, .. } => {
+                if let Expr::Identifier(id) = &**expr {
+                    *expr = Box::new(rewrite_identifier(id.clone()));
+                }
+            }
+            Expr::BinaryOp { left, op: _, right } => {
+                queue.push_back(left);
+                queue.push_back(right);
+            }
+            Expr::Function(f) => {
+                if let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(id)))) =
+                    f.args.pop()
+                {
+                    f.args.push(FunctionArg::Unnamed(FunctionArgExpr::Expr(
+                        rewrite_identifier(id),
+                    )));
+                } else {
+                    todo!()
+                }
+            }
+            _ => {}
+        }
     }
 }
 
