@@ -420,10 +420,12 @@ async fn find_items(
     user_id: UserId,
     query: Option<&str>,
 ) -> Result<Response<Body>, Error> {
-    let Some(query) = query else { return get_response_builder()
-        .status(StatusCode::BAD_REQUEST)
+    let Some(query) = query else {
+        return get_response_builder()
+            .status(StatusCode::BAD_REQUEST)
             .body(Body::empty())
-            .map_err(Error::from); };
+            .map_err(Error::from);
+    };
     let response = match _find_items(db, session, user_id, query).await {
         Ok(query) => query,
         Err(Error::SqlError(error)) => {
