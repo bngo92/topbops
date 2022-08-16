@@ -1,16 +1,17 @@
 use crate::{Error, UserId, ITEM_FIELDS};
 use sqlparser::ast::{
-    BinaryOperator, Expr, FunctionArg, FunctionArgExpr, Ident, Select, SelectItem, SetExpr,
+    BinaryOperator, Expr, FunctionArg, FunctionArgExpr, Ident, Query, SelectItem, SetExpr,
     Statement, TableFactor,
 };
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::collections::VecDeque;
 
-pub fn rewrite_query(s: &str, user_id: &UserId) -> Result<(Select, Vec<String>), Error> {
+pub fn rewrite_query(s: &str, user_id: &UserId) -> Result<(Query, Vec<String>), Error> {
     let mut query = parse_select(s)?;
+    let SetExpr::Select(select) = &mut query.body else { return Err("Only SELECT queries are supported".into()) };
 
-    let Some(from) = query.from.get_mut(0) else { return Err("FROM clause is omitted".into()); };
+    let Some(from) = select.from.get_mut(0) else { return Err("FROM clause is omitted".into()); };
     let from = if let TableFactor::Table { name, alias, .. } = &mut from.relation {
         if alias.is_some() {
             return Err("alias is not supported".into());
@@ -21,8 +22,8 @@ pub fn rewrite_query(s: &str, user_id: &UserId) -> Result<(Select, Vec<String>),
     };
     let from = &from[..from.len() - 1];
 
-    let column_names = query.projection.iter().map(ToString::to_string).collect();
-    for expr in &mut query.projection {
+    let column_names = select.projection.iter().map(ToString::to_string).collect();
+    for expr in &mut select.projection {
         match expr {
             SelectItem::UnnamedExpr(expr) => rewrite_expr(expr),
             // TODO: support alias
@@ -50,7 +51,7 @@ pub fn rewrite_query(s: &str, user_id: &UserId) -> Result<(Select, Vec<String>),
         op: BinaryOperator::Eq,
         right: Box::new(Expr::Identifier(Ident::new(format!("\"{}\"", from)))),
     });
-    let sanitized_select = if let Some(mut selection) = query.selection.take() {
+    let sanitized_select = if let Some(mut selection) = select.selection.take() {
         rewrite_expr(&mut selection);
         Box::new(Expr::BinaryOp {
             left: table_column_map,
@@ -60,26 +61,25 @@ pub fn rewrite_query(s: &str, user_id: &UserId) -> Result<(Select, Vec<String>),
     } else {
         table_column_map
     };
-    query.selection = Some(Expr::BinaryOp {
+    select.selection = Some(Expr::BinaryOp {
         left: required_user_id,
         op: BinaryOperator::And,
         right: sanitized_select,
     });
-    for expr in &mut query.group_by {
+    for expr in &mut select.group_by {
         rewrite_expr(expr);
+    }
+    for expr in &mut query.order_by {
+        rewrite_expr(&mut expr.expr);
     }
     Ok((query, column_names))
 }
 
-fn parse_select(s: &str) -> Result<Select, Error> {
+fn parse_select(s: &str) -> Result<Query, Error> {
     let dialect = GenericDialect {};
     let statement = Parser::parse_sql(&dialect, s)?.pop();
-    if let Some(Statement::Query(box sqlparser::ast::Query {
-        body: SetExpr::Select(box s),
-        ..
-    })) = statement
-    {
-        Ok(s)
+    if let Some(Statement::Query(query)) = statement {
+        Ok(*query)
     } else {
         Err("No query was provided".into())
     }
@@ -129,9 +129,9 @@ fn rewrite_identifier(id: Ident) -> Expr {
 #[cfg(test)]
 mod test {
     use crate::{Error, UserId};
-    use sqlparser::ast::Select;
+    use sqlparser::ast::Query;
 
-    fn rewrite_query(query: &str) -> Result<(Select, Vec<String>), Error> {
+    fn rewrite_query(query: &str) -> Result<(Query, Vec<String>), Error> {
         super::rewrite_query(query, &UserId(String::from("demo")))
     }
 
@@ -165,6 +165,14 @@ mod test {
             rewrite_query("SELECT artists, AVG(user_score) FROM tracks GROUP BY artists").unwrap();
         assert_eq!(query.to_string(), "SELECT c.metadata.artists, AVG(c.user_score) FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" GROUP BY c.metadata.artists");
         assert_eq!(column_names, vec!["artists", "AVG(user_score)"]);
+    }
+
+    #[test]
+    fn test_order_by() {
+        let (query, column_names) =
+            rewrite_query("SELECT name, user_score FROM tracks ORDER BY user_score").unwrap();
+        assert_eq!(query.to_string(), "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" ORDER BY c.user_score");
+        assert_eq!(column_names, vec!["name", "user_score"]);
     }
 
     #[test]
