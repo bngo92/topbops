@@ -454,7 +454,7 @@ async fn _find_items(
         .collect::<Vec<_>>()[..] else { return Err("invalid finder".into()); };
 
     let db = db.collection_client("items");
-    let (query, fields) = topbops_web::query::rewrite_query(&query, &user_id)?;
+    let (query, fields) = topbops_web::query::rewrite_query(query, &user_id)?;
     let values: Vec<Map<String, Value>> = session
         .query_documents(db, query.to_string())
         .await

@@ -11,6 +11,7 @@ pub fn rewrite_query(s: &str, user_id: &UserId) -> Result<(Query, Vec<String>), 
     let mut query = parse_select(s)?;
     let SetExpr::Select(select) = &mut query.body else { return Err("Only SELECT queries are supported".into()) };
 
+    // TODO: support having via subquery
     let Some(from) = select.from.get_mut(0) else { return Err("FROM clause is omitted".into()); };
     let from = if let TableFactor::Table { name, alias, .. } = &mut from.relation {
         if alias.is_some() {
@@ -103,14 +104,15 @@ fn rewrite_expr(expr: &mut Expr) {
                 queue.push_back(right);
             }
             Expr::Function(f) => {
-                if let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(id)))) =
-                    f.args.pop()
-                {
-                    f.args.push(FunctionArg::Unnamed(FunctionArgExpr::Expr(
-                        rewrite_identifier(id),
-                    )));
-                } else {
-                    todo!()
+                if let Some(last) = f.args.pop() {
+                    if let FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(id))) = last
+                    {
+                        f.args.push(FunctionArg::Unnamed(FunctionArgExpr::Expr(
+                            rewrite_identifier(id),
+                        )));
+                    } else {
+                        f.args.push(last);
+                    }
                 }
             }
             _ => {}
@@ -173,6 +175,16 @@ mod test {
             rewrite_query("SELECT name, user_score FROM tracks ORDER BY user_score").unwrap();
         assert_eq!(query.to_string(), "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" ORDER BY c.user_score");
         assert_eq!(column_names, vec!["name", "user_score"]);
+    }
+
+    #[test]
+    fn test_count() {
+        let (query, column_names) = rewrite_query("SELECT COUNT(1) FROM tracks").unwrap();
+        assert_eq!(
+            query.to_string(),
+            "SELECT COUNT(1) FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\""
+        );
+        assert_eq!(column_names, vec!["COUNT(1)"]);
     }
 
     #[test]
