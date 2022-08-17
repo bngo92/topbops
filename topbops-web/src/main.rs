@@ -1,4 +1,4 @@
-#![feature(async_closure, box_patterns, let_else)]
+#![feature(let_else)]
 use azure_data_cosmos::prelude::{
     AuthorizationToken, CollectionClient, ConsistencyLevel, CosmosClient, CosmosEntity,
     DatabaseClient, GetDocumentResponse, Query,
@@ -744,22 +744,24 @@ async fn create_external_list(
         session_copy
     };
     let items_client = db.clone().collection_client("items");
-    let items_client = &items_client;
-    let session = &session;
-    futures::stream::iter(items.into_iter().map(async move |item| {
-        items_client
-            .create_document(item)
-            .is_upsert(is_upsert)
-            .consistency_level(session.clone())
-            .into_future()
-            .await
-            .map(|_| ())
-            .or_else(|e| {
-                if let azure_core::StatusCode::Conflict = e.as_http_error().unwrap().status() {
-                    return Ok(());
-                }
-                Err(e)
-            })
+    futures::stream::iter(items.into_iter().map(move |item| {
+        let items_client = items_client.clone();
+        let session = session.clone();
+        async move {
+            items_client
+                .create_document(item)
+                .is_upsert(is_upsert)
+                .consistency_level(session)
+                .into_future()
+                .await
+                .map(|_| ())
+                .or_else(|e| {
+                    if let azure_core::StatusCode::Conflict = e.as_http_error().unwrap().status() {
+                        return Ok(());
+                    }
+                    Err(e)
+                })
+        }
     }))
     .buffered(5)
     .try_collect::<()>()
@@ -782,7 +784,7 @@ async fn update_items(
     let client = &client;
     let session = &session;
     let user_id = &user_id;
-    futures::stream::iter(updates.into_iter().map(async move |(id, update)| {
+    futures::stream::iter(updates.into_iter().map(move |(id, update)| async {
         let mut item = get_item_doc(client.clone(), session, user_id.clone(), &id).await?;
         for (k, v) in update {
             match k.as_str() {

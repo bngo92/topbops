@@ -1,4 +1,4 @@
-#![feature(async_closure, let_else)]
+#![feature(let_else)]
 use crate::edit::Edit;
 use crate::random::Match;
 use crate::search::Search;

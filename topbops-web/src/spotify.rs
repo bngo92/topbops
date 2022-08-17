@@ -195,7 +195,7 @@ pub async fn import_album(user_id: &UserId, id: &str) -> Result<(List, Vec<super
             .items
             .into_iter()
             .map(|i| (i, token.access_token.clone()))
-            .map(async move |(item, access_token)| {
+            .map(move |(item, access_token)| async move {
                 let https = HttpsConnector::new();
                 let client = Client::builder().build::<_, hyper::Body>(https);
                 let uri: Uri = item.href.parse().unwrap();
