@@ -1,4 +1,5 @@
 #![feature(let_else)]
+use crate::bootstrap::Accordion;
 use crate::edit::Edit;
 use crate::random::Match;
 use crate::search::Search;
@@ -17,6 +18,7 @@ use yew_router::scope_ext::RouterScopeExt;
 use yew_router::{BrowserRouter, Routable, Switch};
 
 mod base;
+mod bootstrap;
 mod edit;
 mod random;
 mod search;
@@ -303,31 +305,30 @@ impl Component for Widget {
             history.push(Route::Edit { id });
         });
         html! {
-          <div class="col-12 col-md-6">
-            <div class="row">
-              <div class="col-8">
-                <h2>{&list.data.name}</h2>
-              </div>
-              <div class="col-2">
-                <button type="button" class="btn btn-success col-12" onclick={go} {disabled}>{"Go"}</button>
-              </div>
-              <div class="col-2">
-                <button type="button" class="btn btn-warning col-12" onclick={edit} {disabled}>{"Edit"}</button>
-              </div>
+            <div class="col-12 col-md-6">
+                <Accordion header={list.data.name.clone()}>
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th class="col-1">{"#"}</th>
+                                <th class="col-8">{&list.query.fields[0]}</th>
+                                <th>{&list.query.fields[1]}</th>
+                            </tr>
+                        </thead>
+                        <tbody>{for list.query.items.iter().zip(1..).map(|(item, i)| html! {
+                            <Row i={i} values={item.values.clone()}/>
+                        })}</tbody>
+                    </table>
+                </Accordion>
+                <div class="row mb-3">
+                    <div class="col-2">
+                        <button type="button" class="btn btn-success col-12" onclick={go} {disabled}>{"Go"}</button>
+                    </div>
+                    <div class="col-2">
+                        <button type="button" class="btn btn-warning col-12" onclick={edit} {disabled}>{"Edit"}</button>
+                    </div>
+                </div>
             </div>
-            <table class="table table-striped">
-              <thead>
-                <tr>
-                  <th class="col-1">{"#"}</th>
-                  <th class="col-8">{&list.query.fields[0]}</th>
-                  <th>{&list.query.fields[1]}</th>
-                </tr>
-              </thead>
-              <tbody>{for list.query.items.iter().zip(1..).map(|(item, i)| html! {
-                <Row i={i} values={item.values.clone()}/>
-              })}</tbody>
-            </table>
-          </div>
         }
     }
 }
