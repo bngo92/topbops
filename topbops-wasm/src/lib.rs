@@ -6,13 +6,14 @@ use crate::search::Search;
 use crate::tournament::Tournament;
 use regex::Regex;
 use std::collections::HashMap;
+use std::rc::Rc;
 use topbops::{ItemQuery, List, ListMode, Lists};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlDocument, HtmlSelectElement, Request, RequestInit, RequestMode, Response};
-use yew::{html, Callback, Component, Context, Html, MouseEvent, NodeRef, Properties};
-use yew_router::history::{AnyHistory, History};
+use yew::{html, Callback, Component, Context, Html, NodeRef, Properties};
+use yew_router::history::History;
 use yew_router::prelude::Link;
 use yew_router::scope_ext::RouterScopeExt;
 use yew_router::{BrowserRouter, Routable, Switch};
@@ -124,12 +125,12 @@ impl Component for App {
 }
 
 pub enum HomeMsg {
-    Load(Vec<ListData>),
+    Load(Vec<List>),
     Import,
 }
 
 pub struct Home {
-    lists: Vec<ListData>,
+    lists: Vec<List>,
     select_ref: NodeRef,
     import_ref: NodeRef,
 }
@@ -139,10 +140,8 @@ impl Component for Home {
     type Properties = ();
 
     fn create(ctx: &Context<Self>) -> Self {
-        let history = ctx.link().history().unwrap();
         let select_ref = NodeRef::default();
-        ctx.link()
-            .send_future(Home::fetch_lists(select_ref.clone(), history));
+        ctx.link().send_future(Home::fetch_lists());
         Home {
             lists: Vec::new(),
             select_ref,
@@ -180,7 +179,6 @@ impl Component for Home {
               {for self.lists.iter().map(|l| html! {<Widget list={l.clone()}/>})}
             </div>
             <h1>{"My Spotify Playlists"}</h1>
-            <div></div>
             <form>
               <div class="row">
                 <div class="col-12 col-md-8 col-lg-9 pt-1">
@@ -202,7 +200,6 @@ impl Component for Home {
                 true
             }
             HomeMsg::Import => {
-                let history = ctx.link().history().unwrap();
                 let input = self.import_ref.cast::<HtmlSelectElement>().unwrap().value();
                 let playlist_re =
                     Regex::new(r"https://open.spotify.com/playlist/([[:alnum:]]*)").unwrap();
@@ -216,10 +213,9 @@ impl Component for Home {
                 } else {
                     return false;
                 };
-                let select_ref = self.select_ref.clone();
                 ctx.link().send_future(async move {
                     import_list(&id).await.unwrap();
-                    Home::fetch_lists(select_ref, history).await
+                    Home::fetch_lists().await
                 });
                 false
             }
@@ -228,97 +224,104 @@ impl Component for Home {
 }
 
 impl Home {
-    async fn fetch_lists(select_ref: NodeRef, history: AnyHistory) -> HomeMsg {
+    async fn fetch_lists() -> HomeMsg {
         let lists = fetch_lists().await.unwrap();
-        let lists = futures::future::join_all(lists.into_iter().map(|list| async {
-            let query = query_items(&list.id).await?;
-            let select_ref = select_ref.clone();
-            let history_copy = history.clone();
-            let id = list.id.clone();
-            let on_go_select = Callback::once(move |_| {
-                let mode = select_ref.cast::<HtmlSelectElement>().unwrap().value();
-                match mode.as_ref() {
-                    "Random Matches" => {
-                        history_copy.push(Route::Match { id });
-                    }
-                    "Random Rounds" => {
-                        history_copy
-                            .push_with_query(
-                                Route::Match { id },
-                                [("mode", "rounds")].into_iter().collect::<HashMap<_, _>>(),
-                            )
-                            .unwrap();
-                    }
-                    "Tournament" => {
-                        history_copy.push(Route::Tournament { id });
-                    }
-                    "Random Tournament" => {
-                        history_copy
-                            .push_with_query(
-                                Route::Tournament { id },
-                                [("mode", "random")].into_iter().collect::<HashMap<_, _>>(),
-                            )
-                            .unwrap();
-                    }
-                    _ => {
-                        web_sys::console::log_1(&JsValue::from("Invalid mode"));
-                    }
-                };
-            });
-            Ok(ListData {
-                data: list,
-                query,
-                on_go_select,
-            })
-        }))
-        .await
-        .into_iter()
-        .collect::<Result<_, JsValue>>()
-        .unwrap();
         HomeMsg::Load(lists)
     }
 }
 
-#[derive(PartialEq, Properties)]
-pub struct WidgetProps {
-    list: ListData,
+enum WidgetMsg {
+    Fetching(Rc<String>),
+    Success(ItemQuery),
 }
 
-struct Widget;
+#[derive(PartialEq, Properties)]
+pub struct WidgetProps {
+    list: List,
+    select_ref: NodeRef,
+}
+
+struct Widget {
+    collapsed: bool,
+    query: Option<ItemQuery>,
+}
 
 impl Component for Widget {
-    type Message = ();
+    type Message = WidgetMsg;
     type Properties = WidgetProps;
 
     fn create(_: &Context<Self>) -> Self {
-        Widget
+        Widget {
+            collapsed: true,
+            query: None,
+        }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         let list = &ctx.props().list;
-        let go = list.on_go_select.clone();
-        // TODO: support user list actions
-        let disabled = matches!(list.data.mode, ListMode::User);
+        let id = Rc::new(list.id.clone());
+        let on_toggle = ctx
+            .link()
+            .callback(move |_| WidgetMsg::Fetching(Rc::clone(&id)));
         let history = ctx.link().history().unwrap();
-        let id = list.data.id.clone();
+        let select_ref = ctx.props().select_ref.clone();
+        let history_copy = history.clone();
+        let id = list.id.clone();
+        let go = Callback::once(move |_| {
+            let mode = select_ref.cast::<HtmlSelectElement>().unwrap().value();
+            match mode.as_ref() {
+                "Random Matches" => {
+                    history_copy.push(Route::Match { id });
+                }
+                "Random Rounds" => {
+                    history_copy
+                        .push_with_query(
+                            Route::Match { id },
+                            [("mode", "rounds")].into_iter().collect::<HashMap<_, _>>(),
+                        )
+                        .unwrap();
+                }
+                "Tournament" => {
+                    history_copy.push(Route::Tournament { id });
+                }
+                "Random Tournament" => {
+                    history_copy
+                        .push_with_query(
+                            Route::Tournament { id },
+                            [("mode", "random")].into_iter().collect::<HashMap<_, _>>(),
+                        )
+                        .unwrap();
+                }
+                _ => {
+                    web_sys::console::log_1(&JsValue::from("Invalid mode"));
+                }
+            };
+        });
+        let id = list.id.clone();
         let edit = Callback::once(move |_| {
             history.push(Route::Edit { id });
         });
+        // TODO: support user list actions
+        let disabled = matches!(list.mode, ListMode::User);
         html! {
             <div class="col-12 col-md-6">
-                <Accordion header={list.data.name.clone()}>
-                    <table class="table table-striped">
-                        <thead>
-                            <tr>
-                                <th class="col-1">{"#"}</th>
-                                <th class="col-8">{&list.query.fields[0]}</th>
-                                <th>{&list.query.fields[1]}</th>
-                            </tr>
-                        </thead>
-                        <tbody>{for list.query.items.iter().zip(1..).map(|(item, i)| html! {
-                            <Row i={i} values={item.values.clone()}/>
-                        })}</tbody>
-                    </table>
+                <Accordion header={list.name.clone()} collapsed={self.collapsed} {on_toggle}>
+                    if let Some(query) = &self.query {
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th class="col-1">{"#"}</th>
+                                    <th class="col-8">{&query.fields[0]}</th>
+                                    <th>{&query.fields[1]}</th>
+                                </tr>
+                            </thead>
+                            <tbody>{for query.items.iter().zip(1..).map(|(item, i)| html! {
+                                <Row i={i} values={item.values.clone()}/>
+                            })}</tbody>
+                        </table>
+                    } else {
+                        <div></div>
+                    }
                 </Accordion>
                 <div class="row mb-3">
                     <div class="col-2">
@@ -329,6 +332,28 @@ impl Component for Widget {
                     </div>
                 </div>
             </div>
+        }
+    }
+
+    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
+        match msg {
+            WidgetMsg::Fetching(id) => {
+                // TODO: add the ability to refresh
+                if self.query.is_none() {
+                    ctx.link().send_future(async move {
+                        WidgetMsg::Success(query_items(&id).await.unwrap())
+                    });
+                    false
+                } else {
+                    self.collapsed = !self.collapsed;
+                    true
+                }
+            }
+            WidgetMsg::Success(query) => {
+                self.collapsed = false;
+                self.query = Some(query);
+                true
+            }
         }
     }
 }
@@ -358,13 +383,6 @@ impl Component for Row {
           </tr>
         }
     }
-}
-
-#[derive(Clone, PartialEq, Properties)]
-pub struct ListData {
-    data: List,
-    query: ItemQuery,
-    on_go_select: Callback<MouseEvent>,
 }
 
 // Called by our JS entry point to run the example

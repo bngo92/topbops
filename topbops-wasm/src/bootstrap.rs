@@ -1,4 +1,4 @@
-use yew::{html, Children, Component, Context, Html, Properties};
+use yew::{html, Callback, Children, Component, Context, Html, MouseEvent, Properties};
 
 pub enum AccordionMsg {
     Toggle,
@@ -8,6 +8,8 @@ pub enum AccordionMsg {
 pub struct AccordionProps {
     pub children: Children,
     pub header: String,
+    pub on_toggle: Option<Callback<MouseEvent>>,
+    pub collapsed: Option<bool>,
 }
 
 pub struct Accordion {
@@ -23,16 +25,21 @@ impl Component for Accordion {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let (button_class, body_class) = if self.collapsed {
+        let (button_class, body_class) = if ctx.props().collapsed.unwrap_or(self.collapsed) {
             ("accordion-button collapsed", "accordion-collapse collapse")
         } else {
             ("accordion-button", "accordion-collapse collapse show")
+        };
+        let onclick = if let Some(on_toggle) = &ctx.props().on_toggle {
+            on_toggle.clone()
+        } else {
+            ctx.link().callback(|_| AccordionMsg::Toggle)
         };
         html! {
             <div class="accordion">
                 <div class="accordion-item">
                     <h2 class="accordion-header">
-                        <button class={button_class} onclick={ctx.link().callback(|_| AccordionMsg::Toggle)}>{&ctx.props().header}</button>
+                        <button class={button_class} {onclick}>{&ctx.props().header}</button>
                     </h2>
                     <div class={body_class}>
                         <div class="accordion-body">
