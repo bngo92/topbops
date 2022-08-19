@@ -1,5 +1,5 @@
 #![feature(let_else)]
-use crate::bootstrap::Accordion;
+use crate::bootstrap::{Accordion, Collapse};
 use crate::edit::Edit;
 use crate::random::Match;
 use crate::search::Search;
@@ -175,8 +175,28 @@ impl Component for Home {
                 </select>
               </div>
             </div>
-            <div class="row">
-              {for self.lists.iter().map(|l| html! {<Widget list={l.clone()}/>})}
+            <Collapse header={String::from("Help")} initial_collapsed={get_user().is_some()}>
+              <p>
+              {"If you are the type of person that struggles to answer the question of what your favorite song is, this website is for you.
+                This website allows you to discover which songs you like by comparing them in different ways.
+                Select a sort mode and click \"Go\" to start comparing songs in that list.
+                The default mode is to compare songs in a randomly generated tournament."}
+              </p>
+              <p>{"Here is the full list of sort modes:"}</p>
+              <ul>
+                <li><strong>{"Tournament"}</strong>{" - Compare songs in a seeded tournament."}</li>
+                <li><strong>{"Random Tournament"}</strong>{" - Compare songs in a randomly generated tournament."}</li>
+                <li><strong>{"Random Matches"}</strong>{" - Compare random songs."}</li>
+                <li><strong>{"Random Rounds"}</strong>{" - Compare random songs. Every song will be chosen once before a song is repeated."}</li>
+              </ul>
+              <p>{"You can also:"}</p>
+              <ul class="mb-0">
+                  <li>{"View songs in the list by expanding the widget or by clicking on \"Edit\"."}</li>
+                  <li>{"Search for data about your comparison results by clicking on \"Search\"."}</li>
+              </ul>
+            </Collapse>
+            <div class="row mt-3">
+              {for self.lists.iter().map(|l| html! {<Widget list={l.clone()} select_ref={self.select_ref.clone()}/>})}
             </div>
             <h1>{"My Spotify Playlists"}</h1>
             <form>

@@ -42,9 +42,60 @@ impl Component for Accordion {
                         <button class={button_class} {onclick}>{&ctx.props().header}</button>
                     </h2>
                     <div class={body_class}>
-                        <div class="accordion-body">
-                        {for ctx.props().children.iter() }
-                        </div>
+                    {for ctx.props().children.iter() }
+                    </div>
+                </div>
+            </div>
+        }
+    }
+
+    fn update(&mut self, _: &Context<Self>, _: Self::Message) -> bool {
+        self.collapsed = !self.collapsed;
+        true
+    }
+}
+
+pub enum CollapseMsg {
+    Toggle,
+}
+
+#[derive(Clone, PartialEq, Properties)]
+pub struct CollapseProps {
+    pub children: Children,
+    pub header: String,
+    pub initial_collapsed: Option<bool>,
+    pub collapsed: Option<bool>,
+}
+
+pub struct Collapse {
+    collapsed: bool,
+}
+
+impl Component for Collapse {
+    type Message = CollapseMsg;
+    type Properties = CollapseProps;
+
+    fn create(ctx: &Context<Self>) -> Self {
+        Collapse {
+            collapsed: ctx.props().initial_collapsed.unwrap_or(true),
+        }
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let body_class = if ctx.props().collapsed.unwrap_or(self.collapsed) {
+            "collapse"
+        } else {
+            "collapse show"
+        };
+        let onclick = ctx.link().callback(|_| CollapseMsg::Toggle);
+        html! {
+            <div>
+                <p>
+                    <button class="btn btn-info" {onclick}>{&ctx.props().header}</button>
+                </p>
+                <div class={body_class}>
+                    <div class="card card-body bg-light">
+                    {for ctx.props().children.iter() }
                     </div>
                 </div>
             </div>
