@@ -408,35 +408,34 @@ impl Component for Tournament {
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match &mut self.state {
-            ComponentState::Fetching => {
-                match msg {
-                    Msg::Load(random, list, query) => {
-                        let title = if random {
-                            format!("{} - Random Tournament", list.name)
-                        } else {
-                            format!("{} - Tournament", list.name)
-                        };
-                        let mut items: Vec<_> = list.items;
-                        // TODO: order by score
-                        if random {
-                            items.shuffle(&mut rand::thread_rng());
-                        }
-                        let data = TournamentData::new(
-                            items,
-                            ItemMetadata::new(String::new(), String::new(), None),
-                        );
-                        self.state = ComponentState::Success(TournamentFields {
-                            title,
-                            state: TournamentState::Tournament,
-                            view_state: ViewState::Tournament,
-                            data,
-                            iframe: list.iframe,
-                            query,
-                        });
+            ComponentState::Fetching => match msg {
+                Msg::Load(random, list, query) => {
+                    let title = if random {
+                        format!("{} - Random Tournament", list.name)
+                    } else {
+                        format!("{} - Tournament", list.name)
+                    };
+                    let mut items: Vec<_> = list.items;
+                    if random {
+                        items.shuffle(&mut rand::thread_rng());
+                    } else {
+                        items.sort_by_key(|i| -i.score);
                     }
-                    _ => unreachable!(),
+                    let data = TournamentData::new(
+                        items,
+                        ItemMetadata::new(String::new(), String::new(), None),
+                    );
+                    self.state = ComponentState::Success(TournamentFields {
+                        title,
+                        state: TournamentState::Tournament,
+                        view_state: ViewState::Tournament,
+                        data,
+                        iframe: list.iframe,
+                        query,
+                    });
                 }
-            }
+                _ => unreachable!(),
+            },
             ComponentState::Success(fields) => match msg {
                 Msg::Load(..) => unreachable!(),
                 Msg::Update(i) => {
