@@ -157,16 +157,22 @@ impl<T: Clone> TournamentData<T> {
     /// Assign the node with the index i to win their round.
     ///
     /// The current node pair is disabled and the parent node is updated and enabled.
-    fn update(&mut self, i: usize) {
-        let Some(item) = self.data[i].clone() else { return; };
-        if !item.disabled && !self.data[item.pair].as_ref().unwrap().disabled {
-            self.data[i].as_mut().unwrap().disabled = true;
-            self.data[item.pair].as_mut().unwrap().disabled = true;
-            let win = self.data[i].as_ref().unwrap().item.clone();
-            let mut parent = self.data[(i + item.pair) / 2].as_mut().unwrap();
-            parent.item = win;
-            parent.disabled = false;
+    fn update(&mut self, i: usize) -> Option<(&T, &T)> {
+        if let Some(item) = self.data[i].clone() {
+            if !item.disabled && !self.data[item.pair].as_ref().unwrap().disabled {
+                self.data[i].as_mut().unwrap().disabled = true;
+                self.data[item.pair].as_mut().unwrap().disabled = true;
+                let win = self.data[i].as_ref().unwrap().item.clone();
+                let mut parent = self.data[(i + item.pair) / 2].as_mut().unwrap();
+                parent.item = win;
+                parent.disabled = false;
+                return Some((
+                    &self.data[i].as_ref().unwrap().item,
+                    &self.data[item.pair].as_ref().unwrap().item,
+                ));
+            }
         }
+        None
     }
 }
 
@@ -400,7 +406,7 @@ impl Component for Tournament {
         }
     }
 
-    fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
+    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match &mut self.state {
             ComponentState::Fetching => {
                 match msg {
@@ -434,7 +440,15 @@ impl Component for Tournament {
             ComponentState::Success(fields) => match msg {
                 Msg::Load(..) => unreachable!(),
                 Msg::Update(i) => {
-                    fields.data.update(i);
+                    if let Some((win, lose)) = fields.data.update(i) {
+                        let id = ctx.props().id.clone();
+                        let win = win.id.clone();
+                        let lose = lose.id.clone();
+                        ctx.link().send_future_batch(async move {
+                            crate::update_stats(&id, &win, &lose).await.unwrap();
+                            Vec::new()
+                        });
+                    }
                 }
                 Msg::Toggle => {
                     fields.state = match fields.state {
