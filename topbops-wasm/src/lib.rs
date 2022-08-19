@@ -125,11 +125,13 @@ impl Component for App {
 }
 
 pub enum HomeMsg {
+    ToggleHelp,
     Load(Vec<List>),
     Import,
 }
 
 pub struct Home {
+    help_collapsed: bool,
     lists: Vec<List>,
     select_ref: NodeRef,
     import_ref: NodeRef,
@@ -143,6 +145,7 @@ impl Component for Home {
         let select_ref = NodeRef::default();
         ctx.link().send_future(Home::fetch_lists());
         Home {
+            help_collapsed: get_user().is_some(),
             lists: Vec::new(),
             select_ref,
             import_ref: NodeRef::default(),
@@ -159,14 +162,12 @@ impl Component for Home {
         let import = ctx.link().callback(|_| HomeMsg::Import);
         html! {
           <div>
-            <div class="row">
-              <div class="col-8">
-                <h1>{"Home"}</h1>
-              </div>
-              <label class="col-2 col-form-label text-end align-self-end">
-                <strong>{"Sort Mode:"}</strong>
+            <h1>{"Home"}</h1>
+            <div class="row mb-3">
+              <label class="col-auto col-form-label">
+                <strong>{"Compare Mode:"}</strong>
               </label>
-              <div class="col-2 align-self-end">
+              <div class="col-auto">
                 <select ref={self.select_ref.clone()} class="form-select">
                   <option>{"Tournament"}</option>
                   <option selected=true>{"Random Tournament"}</option>
@@ -174,15 +175,18 @@ impl Component for Home {
                   <option>{"Random Rounds"}</option>
                 </select>
               </div>
+              <div class="col-auto">
+                <button class="btn btn-info" onclick={ctx.link().callback(|_| HomeMsg::ToggleHelp)}>{"Help"}</button>
+              </div>
             </div>
-            <Collapse header={String::from("Help")} initial_collapsed={get_user().is_some()}>
+            <Collapse collapsed={self.help_collapsed}>
               <p>
               {"If you are the type of person that struggles to answer the question of what your favorite song is, this website is for you.
                 This website allows you to discover which songs you like by comparing them in different ways.
                 Select a sort mode and click \"Go\" to start comparing songs in that list.
                 The default mode is to compare songs in a randomly generated tournament."}
               </p>
-              <p>{"Here is the full list of sort modes:"}</p>
+              <p>{"Here is the full list of compare modes:"}</p>
               <ul>
                 <li><strong>{"Tournament"}</strong>{" - Compare songs in a seeded tournament."}</li>
                 <li><strong>{"Random Tournament"}</strong>{" - Compare songs in a randomly generated tournament."}</li>
@@ -215,6 +219,10 @@ impl Component for Home {
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
+            HomeMsg::ToggleHelp => {
+                self.help_collapsed = !self.help_collapsed;
+                true
+            }
             HomeMsg::Load(lists) => {
                 self.lists = lists;
                 true
