@@ -36,7 +36,7 @@ impl Component for Accordion {
             ctx.link().callback(|_| AccordionMsg::Toggle)
         };
         html! {
-            <div class="accordion">
+            <div class="accordion mb-3">
                 <div class="accordion-item">
                     <h2 class="accordion-header">
                         <button class={button_class} {onclick}>{&ctx.props().header}</button>

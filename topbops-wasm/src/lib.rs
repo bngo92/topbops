@@ -183,7 +183,7 @@ impl Component for Home {
               <p>
               {"If you are the type of person that struggles to answer the question of what your favorite song is, this website is for you.
                 This website allows you to discover which songs you like by comparing them in different ways.
-                Select a sort mode and click \"Go\" to start comparing songs in that list.
+                Select a comparison mode and click \"Compare\" to start comparing songs in that list.
                 The default mode is to compare songs in a randomly generated tournament."}
               </p>
               <p>{"Here is the full list of compare modes:"}</p>
@@ -195,12 +195,12 @@ impl Component for Home {
               </ul>
               <p>{"You can also:"}</p>
               <ul class="mb-0">
-                  <li>{"View songs in the list by expanding the widget or by clicking on \"Edit\"."}</li>
+                  <li>{"View songs in the list by expanding the widget or by clicking on \"View\"."}</li>
                   <li>{"Search for data about your comparison results by clicking on \"Search\"."}</li>
               </ul>
             </Collapse>
             <div class="row mt-3">
-              {for self.lists.iter().map(|l| html! {<Widget list={l.clone()} select_ref={self.select_ref.clone()}/>})}
+            {for self.lists.iter().map(|l| html! {<Widget list={l.clone()} select_ref={self.select_ref.clone()}/>})}
             </div>
             <h1>{"My Spotify Playlists"}</h1>
             <form>
@@ -335,7 +335,7 @@ impl Component for Widget {
             <div class="col-12 col-md-6">
                 <Accordion header={list.name.clone()} collapsed={self.collapsed} {on_toggle}>
                     if let Some(query) = &self.query {
-                        <table class="table table-striped">
+                        <table class="table table-striped mb-0">
                             <thead>
                                 <tr>
                                     <th class="col-1">{"#"}</th>
@@ -352,11 +352,11 @@ impl Component for Widget {
                     }
                 </Accordion>
                 <div class="row mb-3">
-                    <div class="col-2">
-                        <button type="button" class="btn btn-success col-12" onclick={go} {disabled}>{"Go"}</button>
+                    <div class="col-auto">
+                        <button type="button" class="btn btn-success" onclick={edit} {disabled}>{"View"}</button>
                     </div>
-                    <div class="col-2">
-                        <button type="button" class="btn btn-warning col-12" onclick={edit} {disabled}>{"Edit"}</button>
+                    <div class="col-auto">
+                        <button type="button" class="btn btn-warning" onclick={go} {disabled}>{"Compare"}</button>
                     </div>
                 </div>
             </div>
