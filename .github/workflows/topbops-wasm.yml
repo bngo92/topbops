@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "main", "dev" ]
   pull_request:
-    branches: [ "main", "dev" ]
+    branches: [ "main" ]
 
 jobs:
   test:
@@ -16,4 +16,9 @@ jobs:
       - name: Install
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - run: rustup run nightly wasm-pack test --node
+      - run: cargo test
+      - run: wasm-pack test --node
+
+defaults:
+  run:
+    working-directory: topbops-wasm
