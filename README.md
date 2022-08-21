@@ -23,7 +23,7 @@ rustup run nightly wasm-pack build --target web
 ### P2
 - [ ] Add sort mode
 - [ ] Revisit data model
-- [ ] Fix sort mode responsiveness
+- [x] Fix sort mode responsiveness
 - [ ] Add spinners
 - [ ] Add Google auth
 - [ ] Improve error handling
