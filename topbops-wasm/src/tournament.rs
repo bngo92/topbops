@@ -395,9 +395,21 @@ impl Component for Tournament {
                         let id = ctx.props().id.clone();
                         let win = win.id.clone();
                         let lose = lose.id.clone();
+                        let updated_ranks = if fields.bracket.winner().is_some() {
+                            fields.list.items.iter().map(|i| i.rank).collect()
+                        } else {
+                            Vec::new()
+                        };
                         ctx.link().send_future_batch(async move {
                             crate::update_stats(&id, &win, &lose).await.unwrap();
-                            // TODO: update rank
+                            if !updated_ranks.is_empty() {
+                                // TODO: handle state syncing better
+                                let mut list = crate::fetch_list(&id).await.unwrap();
+                                for (item, rank) in &mut list.items.iter_mut().zip(updated_ranks) {
+                                    item.rank = rank;
+                                }
+                                crate::update_list(&id, list).await.unwrap();
+                            }
                             Vec::new()
                         });
                     }
@@ -510,7 +522,7 @@ impl Tournament {
                     )
                 })
             });
-            crate::base::responsive_table_view(items)
+            crate::base::responsive_table_view(["Track", "Prev. Rank", "Score"], items)
         };
         html! {
             <div>

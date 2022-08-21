@@ -93,7 +93,7 @@ impl Component for Match {
             <div>
                 <h1>{mode}</h1>
                 <IframeCompare left={left} {on_left_select} right={right} {on_right_select}/>
-                {crate::base::responsive_table_view(items)}
+                {crate::base::responsive_table_view(["Track", "Record", "Score"], items)}
             </div>
         }
     }

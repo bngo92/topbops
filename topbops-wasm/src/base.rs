@@ -74,7 +74,10 @@ impl Component for IframeCompare {
     }
 }
 
-pub fn responsive_table_view(items: impl Iterator<Item = Option<(i32, Vec<String>)>>) -> Html {
+pub fn responsive_table_view(
+    header: [&str; 3],
+    items: impl Iterator<Item = Option<(i32, Vec<String>)>>,
+) -> Html {
     let items: Vec<_> = items.map(item_view).collect();
     let (left_items, right_items): (Vec<_>, Vec<_>) = items
         .iter()
@@ -90,9 +93,9 @@ pub fn responsive_table_view(items: impl Iterator<Item = Option<(i32, Vec<String
               <thead>
                 <tr>
                   <th class="col-1">{"#"}</th>
-                  <th class="col-8">{"Track"}</th>
-                  <th>{"Record"}</th>
-                  <th>{"Score"}</th>
+                  <th class="col-8">{header[0]}</th>
+                  <th>{header[1]}</th>
+                  <th>{header[2]}</th>
                 </tr>
               </thead>
               <tbody>{for left_items}</tbody>
@@ -103,9 +106,9 @@ pub fn responsive_table_view(items: impl Iterator<Item = Option<(i32, Vec<String
               <thead>
                 <tr>
                   <th class="col-1">{"#"}</th>
-                  <th class="col-8">{"Track"}</th>
-                  <th>{"Record"}</th>
-                  <th>{"Score"}</th>
+                  <th class="col-8">{header[0]}</th>
+                  <th>{header[1]}</th>
+                  <th>{header[2]}</th>
                 </tr>
               </thead>
               <tbody>{for right_items}</tbody>
@@ -116,9 +119,9 @@ pub fn responsive_table_view(items: impl Iterator<Item = Option<(i32, Vec<String
               <thead>
                 <tr>
                   <th class="col-1">{"#"}</th>
-                  <th class="col-8">{"Track"}</th>
-                  <th>{"Record"}</th>
-                  <th>{"Score"}</th>
+                  <th class="col-8">{header[0]}</th>
+                  <th>{header[1]}</th>
+                  <th>{header[2]}</th>
                 </tr>
               </thead>
               <tbody>{for items.clone().into_iter()}</tbody>

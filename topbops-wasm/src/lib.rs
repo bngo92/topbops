@@ -439,6 +439,21 @@ async fn fetch_list(id: &str) -> Result<List, JsValue> {
     Ok(json.into_serde().unwrap())
 }
 
+async fn update_list(id: &str, list: List) -> Result<(), JsValue> {
+    let window = web_sys::window().expect("no global `window` exists");
+    let request = Request::new_with_str_and_init(
+        &format!("/api/lists/{}", id),
+        &RequestInit::new()
+            .method("PUT")
+            .mode(RequestMode::Cors)
+            .body(Some(&JsValue::from_str(
+                &serde_json::to_string(&list).unwrap(),
+            ))),
+    )?;
+    JsFuture::from(window.fetch_with_request(&request)).await?;
+    Ok(())
+}
+
 async fn query_items(id: &str) -> Result<ItemQuery, JsValue> {
     let window = web_sys::window().expect("no global `window` exists");
     let request = query(&format!("/api/lists/{}/items", id), "GET").unwrap();
