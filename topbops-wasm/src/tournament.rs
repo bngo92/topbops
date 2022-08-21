@@ -560,14 +560,19 @@ fn tournament_bracket_view(
         }))
         .collect();
     let col_width = format!("width: {}%", 100. / depth as f64);
-    bracket.data
+    bracket
+        .data
         .iter()
         .enumerate()
         .map(|(i, item)| {
             if let Some(item) = item {
                 let onclick = on_click_select.clone();
                 let onclick = Callback::from(move |_| onclick.emit(i));
-                let title = if item.item == usize::MAX { String::new() } else {lut[item.item].name.clone()};
+                let title = if item.item == usize::MAX {
+                    String::new()
+                } else {
+                    lut[item.item].name.clone()
+                };
                 let disabled = disabled || item.disabled;
                 html! {
                     <div class="row" style={row_width.clone()}>

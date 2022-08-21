@@ -443,7 +443,7 @@ async fn update_list(id: &str, list: List) -> Result<(), JsValue> {
     let window = web_sys::window().expect("no global `window` exists");
     let request = Request::new_with_str_and_init(
         &format!("/api/lists/{}", id),
-        &RequestInit::new()
+        RequestInit::new()
             .method("PUT")
             .mode(RequestMode::Cors)
             .body(Some(&JsValue::from_str(
