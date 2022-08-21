@@ -171,33 +171,33 @@ impl<T: Clone> TournamentBracket<T> {
     }
 }
 
-impl TournamentBracket<ItemMetadata> {
+impl TournamentBracket<usize> {
     /// Assign the node with the index i to win their round.
     ///
     /// The current node pair is disabled and the parent node is updated and enabled.
-    fn update(&mut self, i: usize) -> Option<(&ItemMetadata, &ItemMetadata)> {
+    fn update<'a>(
+        &mut self,
+        i: usize,
+        lut: &'a mut [ItemMetadata],
+    ) -> Option<(&'a ItemMetadata, &'a ItemMetadata)> {
         if let Some(item) = self.data[i].clone() {
             if !item.disabled && !self.data[item.pair].as_ref().unwrap().disabled {
                 self.data[i].as_mut().unwrap().disabled = true;
                 self.data[item.pair].as_mut().unwrap().disabled = true;
-                self.data[item.pair].as_mut().unwrap().item.rank = Some(
+                lut[self.data[item.pair].as_mut().unwrap().item].rank = Some(
                     (1 << (self.complete_depth - self.data[item.pair].as_ref().unwrap().depth)) + 1,
                 );
-                self.finished[self.finished_index] =
-                    self.data[item.pair].as_ref().map(|i| i.item.clone());
+                self.finished[self.finished_index] = self.data[item.pair].as_ref().map(|i| i.item);
                 self.finished_index -= 1;
-                let mut win = self.data[i].as_ref().unwrap().item.clone();
-                let mut parent = self.data[(i + item.pair) / 2].as_mut().unwrap();
+                let win = self.data[i].as_ref().unwrap().item;
+                let parent = self.data[(i + item.pair) / 2].as_mut().unwrap();
                 if parent.pair == usize::MAX {
-                    win.rank = Some(1);
-                    self.finished[self.finished_index] = Some(win.clone());
+                    lut[win].rank = Some(1);
+                    self.finished[self.finished_index] = Some(win);
                 }
                 parent.item = win;
                 parent.disabled = false;
-                return Some((
-                    &self.data[i].as_ref().unwrap().item,
-                    &self.data[item.pair].as_ref().unwrap().item,
-                ));
+                return Some((&lut[win], &lut[self.data[item.pair].as_ref().unwrap().item]));
             }
         }
         None
@@ -252,7 +252,7 @@ struct TournamentFields {
     view_state: ViewState,
     list: List,
     previous_ranks: HashMap<String, Option<i32>>,
-    bracket: TournamentBracket<ItemMetadata>,
+    bracket: TournamentBracket<usize>,
 }
 
 enum TournamentState {
@@ -310,11 +310,15 @@ impl Component for Tournament {
     fn view(&self, ctx: &Context<Self>) -> Html {
         let ComponentState::Success(fields) = &self.state else { return html! {}; };
         let (toggle, html) = match &fields.state {
-            TournamentState::Tournament => (
-                "Match Mode",
+            TournamentState::Tournament => ("Match Mode", {
+                let winner = if let Some(winner) = fields.bracket.winner() {
+                    fields.list.items.get(*winner)
+                } else {
+                    None
+                };
                 html! {
                     <div>
-                        if let Some(winner) = fields.bracket.winner() {
+                        if let Some(winner) = winner {
                             <h2>{format!("Winner: {}", winner.name)}</h2>
                             <div class="row">
                                 <div class="col-6">
@@ -323,7 +327,7 @@ impl Component for Tournament {
                             </div>
                         }
                         <div class="overflow-scroll">
-                        {tournament_bracket_view(&fields.bracket, ctx.link().callback(Msg::Update), false)}
+                        {tournament_bracket_view(&fields.bracket, &fields.list.items, ctx.link().callback(Msg::Update), false)}
                         </div>
                         if let Some(src) = fields.list.iframe.clone() {
                             <div class="row">
@@ -333,8 +337,8 @@ impl Component for Tournament {
                             </div>
                         }
                     </div>
-                },
-            ),
+                }
+            }),
             TournamentState::Match => ("Tournament Mode", self.match_view(fields, ctx)),
         };
         html! {
@@ -364,24 +368,22 @@ impl Component for Tournament {
                     } else {
                         format!("{} - Tournament", list.name)
                     };
-                    let mut items: Vec<_> = list.items.clone();
+                    let mut items: Vec<_> = (0..list.items.len()).collect();
                     if random {
                         items.shuffle(&mut rand::thread_rng());
                     } else {
-                        items.sort_by_key(|i| -i.score);
+                        items.sort_by_key(|&i| -list.items[i].score);
                     }
-                    let previous_ranks = items.iter().map(|i| (i.id.clone(), i.rank)).collect();
-                    let bracket = TournamentBracket::new(
-                        items,
-                        ItemMetadata::new(String::new(), String::new(), None),
-                    );
+                    let previous_ranks =
+                        list.items.iter().map(|i| (i.id.clone(), i.rank)).collect();
+                    let bracket = TournamentBracket::new(items, usize::MAX);
                     self.state = ComponentState::Success(TournamentFields {
                         title,
                         state: TournamentState::Tournament,
                         view_state: ViewState::Tournament,
                         list,
-                        bracket,
                         previous_ranks,
+                        bracket,
                     });
                 }
                 _ => unreachable!(),
@@ -389,7 +391,7 @@ impl Component for Tournament {
             ComponentState::Success(fields) => match msg {
                 Msg::Load(..) => unreachable!(),
                 Msg::Update(i) => {
-                    if let Some((win, lose)) = fields.bracket.update(i) {
+                    if let Some((win, lose)) = fields.bracket.update(i, &mut fields.list.items) {
                         let id = ctx.props().id.clone();
                         let win = win.id.clone();
                         let lose = lose.id.clone();
@@ -421,7 +423,9 @@ impl Component for Tournament {
                 }
                 Msg::Reset => {
                     fields.bracket.data = fields.bracket.initial_data.clone();
-                    fields.bracket.finished.clear();
+                    for item in &mut fields.bracket.finished {
+                        *item = None;
+                    }
                     fields.bracket.finished_index = fields.bracket.finished.len() - 1;
                 }
             },
@@ -432,7 +436,12 @@ impl Component for Tournament {
 
 impl Tournament {
     fn match_view(&self, fields: &TournamentFields, ctx: &Context<Self>) -> Html {
-        let select = if let Some(winner) = fields.bracket.winner() {
+        let winner = if let Some(winner) = fields.bracket.winner() {
+            fields.list.items.get(*winner)
+        } else {
+            None
+        };
+        let select = if let Some(winner) = winner {
             html! {
                 <div>
                     <h2>{format!("Winner: {}", winner.name)}</h2>
@@ -462,9 +471,9 @@ impl Tournament {
                                 let on_right_select =
                                     Callback::from(move |_| right_callback.emit(pair_i));
                                 found = Some((
-                                    item.item.clone(),
+                                    fields.list.items[item.item].clone(),
                                     on_left_select,
-                                    pair.item.clone(),
+                                    fields.list.items[pair.item].clone(),
                                     on_right_select,
                                 ));
                                 break 'found;
@@ -482,12 +491,13 @@ impl Tournament {
         let view = if let ViewState::Tournament = fields.view_state {
             html! {
                 <div class="overflow-scroll">
-                {tournament_bracket_view(&fields.bracket, ctx.link().callback(Msg::Update), true)}
+                {tournament_bracket_view(&fields.bracket, &fields.list.items, ctx.link().callback(Msg::Update), true)}
                 </div>
             }
         } else {
             let items = fields.bracket.finished.iter().map(|i| {
                 i.as_ref().map(|i| {
+                    let i = &fields.list.items[*i];
                     (
                         i.rank.unwrap(),
                         vec![
@@ -520,7 +530,8 @@ impl Tournament {
 }
 
 fn tournament_bracket_view(
-    bracket: &TournamentBracket<ItemMetadata>,
+    bracket: &TournamentBracket<usize>,
+    lut: &[ItemMetadata],
     on_click_select: Callback<usize>,
     disabled: bool,
 ) -> Html {
@@ -542,13 +553,13 @@ fn tournament_bracket_view(
             if let Some(item) = item {
                 let onclick = on_click_select.clone();
                 let onclick = Callback::from(move |_| onclick.emit(i));
-                let title = item.item.name.clone();
+                let title = if item.item == usize::MAX { String::new() } else {lut[item.item].name.clone()};
                 let disabled = disabled || item.disabled;
                 html! {
                     <div class="row" style={row_width.clone()}>
                     {for offsets[item.depth].clone()}
                         <div style={col_width.clone()}>
-                            <button type="button" class="btn btn-warning text-truncate w-100" style="height: 38px" {title} {disabled} {onclick}>{item.item.name.clone()}</button>
+                            <button type="button" class="btn btn-warning text-truncate w-100" style="height: 38px" {disabled} {onclick}>{title}</button>
                         </div>
                     </div>
                 }
