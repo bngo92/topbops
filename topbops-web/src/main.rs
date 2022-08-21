@@ -63,12 +63,12 @@ async fn handle(
 
 async fn route(
     db: CosmosClient,
-    req: Request<Body>,
+    mut req: Request<Body>,
     session: Arc<SessionClient>,
 ) -> Result<Response<Body>, Error> {
     let db = db.database_client("topbops");
     eprintln!("{}", req.uri().path());
-    if let Some(path) = req.uri().path().strip_prefix("/api/") {
+    if let Some(path) = req.uri().clone().path().strip_prefix("/api/") {
         let path: Vec<_> = path.split('/').collect();
         if req.method() == Method::OPTIONS {
             return get_response_builder()
@@ -122,6 +122,9 @@ async fn route(
             match (&path[..], req.method()) {
                 (["lists"], &Method::GET) => get_lists(db, session, user_id).await,
                 (["lists", id], &Method::GET) => get_list(db, session, user_id, id).await,
+                (["lists", id], &Method::PUT) => {
+                    update_list(db, session, user_id, id, req.body_mut()).await
+                }
                 (["lists", id, "items"], &Method::GET) => {
                     get_list_items(db, session, user_id, id).await
                 }
@@ -167,6 +170,9 @@ async fn route(
                     .map_err(Error::from),
                 (["lists"], &Method::GET) => get_lists(db, session, user_id).await,
                 (["lists", id], &Method::GET) => get_list(db, session, user_id, id).await,
+                (["lists", id], &Method::PUT) => {
+                    update_list(db, session, user_id, id, req.body_mut()).await
+                }
                 (["lists", id, "items"], &Method::GET) => {
                     get_list_items(db, session, user_id, id).await
                 }
@@ -412,6 +418,26 @@ async fn get_list_doc(
     } else {
         todo!()
     }
+}
+
+async fn update_list(
+    db: DatabaseClient,
+    _: Arc<SessionClient>,
+    user_id: UserId,
+    id: &str,
+    body: &mut Body,
+) -> Result<Response<Body>, Error> {
+    let client = db
+        .clone()
+        .collection_client("lists")
+        .document_client(id, &user_id.0)?;
+    let got = hyper::body::to_bytes(body).await?;
+    let list = serde_json::from_slice(&got)?;
+    client.replace_document::<List>(list).into_future().await?;
+    get_response_builder()
+        .status(StatusCode::NO_CONTENT)
+        .body(Body::empty())
+        .map_err(Error::from)
 }
 
 async fn find_items(
