@@ -1,4 +1,4 @@
-use crate::base::{IframeCompare, ResponsiveTable};
+use crate::base::IframeCompare;
 use rand::prelude::SliceRandom;
 use std::collections::HashMap;
 use topbops::{ItemMetadata, ItemQuery};
@@ -77,11 +77,23 @@ impl Component for Match {
         let on_right_select = ctx
             .link()
             .callback_once(move |_| Msg::UpdateStats(right_param));
+        let items = query.items.iter().zip(1..).map(|(item, i)| {
+            item.metadata.as_ref().map(|m| {
+                (
+                    i,
+                    vec![
+                        m.name.to_owned(),
+                        format!("{}-{}", m.wins, m.losses),
+                        m.score.to_string(),
+                    ],
+                )
+            })
+        });
         html! {
             <div>
                 <h1>{mode}</h1>
                 <IframeCompare left={left} {on_left_select} right={right} {on_right_select}/>
-                <ResponsiveTable query={query}/>
+                {crate::base::responsive_table_view(items)}
             </div>
         }
     }

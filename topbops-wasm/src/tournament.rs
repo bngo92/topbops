@@ -1,7 +1,7 @@
-use crate::base::{IframeCompare, ResponsiveTable};
+use crate::base::IframeCompare;
 use rand::prelude::SliceRandom;
 use std::collections::HashMap;
-use topbops::{ItemMetadata, ItemQuery, List};
+use topbops::{ItemMetadata, List};
 use web_sys::HtmlSelectElement;
 use yew::{html, Callback, Component, Context, Html, NodeRef, Properties};
 use yew_router::history::Location;
@@ -53,13 +53,19 @@ pub struct Node<T: Clone> {
 /// 2
 #[derive(Clone, Eq, PartialEq)]
 pub struct TournamentData<T: Clone> {
+    depth: usize,
+    complete_depth: usize,
     initial_data: Vec<Option<Node<T>>>,
+    // TODO: reduce number of copies
     pub data: Vec<Option<Node<T>>>,
+    finished: Vec<Option<T>>,
+    finished_index: usize,
 }
 
 impl<T: Clone> TournamentData<T> {
     pub fn new(items: Vec<T>, default: T) -> TournamentData<T> {
-        let depth = (items.len() as f64).log2().ceil() as u32;
+        let complete_depth = (items.len() as f64).log2();
+        let depth = complete_depth.ceil() as u32;
 
         // Build arrays of steps between items with ascending seeds
         // Steps for the next level can be calculated from the previous level
@@ -107,7 +113,8 @@ impl<T: Clone> TournamentData<T> {
         .collect();
 
         // Create leaf nodes in the first two layers
-        let len = (1 << depth) - items.len();
+        let items_len = items.len();
+        let len = (1 << depth) - items_len;
         let iter = std::iter::once(0)
             .chain(Interleave::new(next_top.into_iter(), top.into_iter()))
             .chain(std::iter::once(-2))
@@ -148,22 +155,39 @@ impl<T: Clone> TournamentData<T> {
                 }
             }
         }
+
         TournamentData {
+            depth: depth as usize,
+            complete_depth: complete_depth as usize,
             initial_data: data.clone(),
             data,
+            finished: vec![None; items_len],
+            finished_index: items_len - 1,
         }
     }
+}
 
+impl TournamentData<ItemMetadata> {
     /// Assign the node with the index i to win their round.
     ///
     /// The current node pair is disabled and the parent node is updated and enabled.
-    fn update(&mut self, i: usize) -> Option<(&T, &T)> {
+    fn update(&mut self, i: usize) -> Option<(&ItemMetadata, &ItemMetadata)> {
         if let Some(item) = self.data[i].clone() {
             if !item.disabled && !self.data[item.pair].as_ref().unwrap().disabled {
                 self.data[i].as_mut().unwrap().disabled = true;
                 self.data[item.pair].as_mut().unwrap().disabled = true;
-                let win = self.data[i].as_ref().unwrap().item.clone();
+                self.data[item.pair].as_mut().unwrap().item.rank = Some(
+                    (1 << (self.complete_depth - self.data[item.pair].as_ref().unwrap().depth)) + 1,
+                );
+                self.finished[self.finished_index] =
+                    self.data[item.pair].as_ref().map(|i| i.item.clone());
+                self.finished_index -= 1;
+                let mut win = self.data[i].as_ref().unwrap().item.clone();
                 let mut parent = self.data[(i + item.pair) / 2].as_mut().unwrap();
+                if parent.pair == usize::MAX {
+                    win.rank = Some(1);
+                    self.finished[self.finished_index] = Some(win.clone());
+                }
                 parent.item = win;
                 parent.disabled = false;
                 return Some((
@@ -224,7 +248,7 @@ struct TournamentFields {
     view_state: ViewState,
     data: TournamentData<ItemMetadata>,
     iframe: Option<String>,
-    query: ItemQuery,
+    previous_ranks: HashMap<String, Option<i32>>,
 }
 
 enum TournamentState {
@@ -239,7 +263,7 @@ enum ViewState {
 }
 
 pub enum Msg {
-    Load(bool, List, ItemQuery),
+    Load(bool, List),
     Update(usize),
     Toggle,
     SelectView,
@@ -270,9 +294,8 @@ impl Component for Tournament {
         let random = matches!(query.get("mode").map_or("", String::as_str), "random");
         let id = ctx.props().id.clone();
         ctx.link().send_future(async move {
-            let (list, query) =
-                futures::future::join(crate::fetch_list(&id), crate::query_items(&id)).await;
-            Msg::Load(random, list.unwrap(), query.unwrap())
+            let list = crate::fetch_list(&id).await.unwrap();
+            Msg::Load(random, list)
         });
         Tournament {
             state: ComponentState::Fetching,
@@ -362,9 +385,28 @@ impl Component for Tournament {
                         </div>
                     }
                 };
-                (
-                    &fields.title,
-                    "Tournament Mode",
+                (&fields.title, "Tournament Mode", {
+                    let view = if let ViewState::Tournament = fields.view_state {
+                        html! {<div class="overflow-scroll">
+                            <TournamentBracket data={fields.data.clone()} disabled=true on_click_select={ctx.link().callback(Msg::Update)}/>
+                        </div>}
+                    } else {
+                        let items = fields.data.finished.iter().map(|i| {
+                            i.as_ref().map(|i| {
+                                (
+                                    i.rank.unwrap(),
+                                    vec![
+                                        i.name.clone(),
+                                        fields.previous_ranks[&i.id]
+                                            .map(|i| i.to_string())
+                                            .unwrap_or_else(String::new),
+                                        i.score.to_string(),
+                                    ],
+                                )
+                            })
+                        });
+                        crate::base::responsive_table_view(items)
+                    };
                     html! {
                         <div>
                             {select}
@@ -376,16 +418,10 @@ impl Component for Tournament {
                                     </select>
                                 </div>
                             </div>
-                            if let ViewState::Tournament = fields.view_state {
-                                <div class="overflow-scroll">
-                                    <TournamentBracket data={fields.data.clone()} disabled=true on_click_select={ctx.link().callback(Msg::Update)}/>
-                                </div>
-                            } else {
-                                <ResponsiveTable query={fields.query.clone()}/>
-                            }
+                            {view}
                         </div>
-                    },
-                )
+                    }
+                })
             }
         };
         html! {
@@ -409,7 +445,7 @@ impl Component for Tournament {
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match &mut self.state {
             ComponentState::Fetching => match msg {
-                Msg::Load(random, list, query) => {
+                Msg::Load(random, list) => {
                     let title = if random {
                         format!("{} - Random Tournament", list.name)
                     } else {
@@ -421,6 +457,7 @@ impl Component for Tournament {
                     } else {
                         items.sort_by_key(|i| -i.score);
                     }
+                    let previous_ranks = items.iter().map(|i| (i.id.clone(), i.rank)).collect();
                     let data = TournamentData::new(
                         items,
                         ItemMetadata::new(String::new(), String::new(), None),
@@ -431,7 +468,7 @@ impl Component for Tournament {
                         view_state: ViewState::Tournament,
                         data,
                         iframe: list.iframe,
-                        query,
+                        previous_ranks,
                     });
                 }
                 _ => unreachable!(),
@@ -445,6 +482,7 @@ impl Component for Tournament {
                         let lose = lose.id.clone();
                         ctx.link().send_future_batch(async move {
                             crate::update_stats(&id, &win, &lose).await.unwrap();
+                            // TODO: update rank
                             Vec::new()
                         });
                     }
@@ -470,6 +508,8 @@ impl Component for Tournament {
                 }
                 Msg::Reset => {
                     fields.data.data = fields.data.initial_data.clone();
+                    fields.data.finished.clear();
+                    fields.data.finished_index = fields.data.finished.len() - 1;
                 }
             },
         }
@@ -499,18 +539,7 @@ impl Component for TournamentBracket {
         // We want to limit the width of tournament buttons to between 168px and 1/6 of a bootstrap
         // container
         // 168px is the minimum width that avoids truncating Bop To The Top
-        let depth = std::cmp::max(
-            props
-                .data
-                .data
-                .get(props.data.data.len() / 2)
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .depth
-                + 1,
-            6,
-        );
+        let depth = std::cmp::max(props.data.depth + 1, 6);
         let row_width = format!("min-width: {}px", 168 * depth);
         let offsets: Vec<_> = std::iter::once(None)
             .chain((1..depth).map(|i| Some(html! {<div style={format!("width: {}%", 100. * i as f64 / depth as f64)}></div>})))
