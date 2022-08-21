@@ -52,7 +52,7 @@ pub struct Node<T: Clone> {
 /// 2
 /// 2
 #[derive(Clone, Eq, PartialEq)]
-pub struct TournamentData<T: Clone> {
+pub struct TournamentBracket<T: Clone> {
     depth: usize,
     complete_depth: usize,
     initial_data: Vec<Option<Node<T>>>,
@@ -62,8 +62,8 @@ pub struct TournamentData<T: Clone> {
     finished_index: usize,
 }
 
-impl<T: Clone> TournamentData<T> {
-    pub fn new(items: Vec<T>, default: T) -> TournamentData<T> {
+impl<T: Clone> TournamentBracket<T> {
+    pub fn new(items: Vec<T>, default: T) -> TournamentBracket<T> {
         let complete_depth = (items.len() as f64).log2();
         let depth = complete_depth.ceil() as u32;
 
@@ -156,7 +156,7 @@ impl<T: Clone> TournamentData<T> {
             }
         }
 
-        TournamentData {
+        TournamentBracket {
             depth: depth as usize,
             complete_depth: complete_depth as usize,
             initial_data: data.clone(),
@@ -167,7 +167,7 @@ impl<T: Clone> TournamentData<T> {
     }
 }
 
-impl TournamentData<ItemMetadata> {
+impl TournamentBracket<ItemMetadata> {
     /// Assign the node with the index i to win their round.
     ///
     /// The current node pair is disabled and the parent node is updated and enabled.
@@ -246,7 +246,7 @@ struct TournamentFields {
     title: String,
     state: TournamentState,
     view_state: ViewState,
-    data: TournamentData<ItemMetadata>,
+    bracket: TournamentBracket<ItemMetadata>,
     iframe: Option<String>,
     previous_ranks: HashMap<String, Option<i32>>,
 }
@@ -305,7 +305,7 @@ impl Component for Tournament {
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         let ComponentState::Success(fields) = &self.state else { return html! {}; };
-        let winner = &fields.data.data[fields.data.data.len() / 2]
+        let winner = &fields.bracket.data[fields.bracket.data.len() / 2]
             .as_ref()
             .unwrap()
             .item;
@@ -324,7 +324,7 @@ impl Component for Tournament {
                             </div>
                         }
                         <div class="overflow-scroll">
-                            <TournamentBracket data={fields.data.clone()} disabled=false on_click_select={ctx.link().callback(Msg::Update)}/>
+                        {tournament_bracket_view(&fields.bracket, ctx.link().callback(Msg::Update), false)}
                         </div>
                         if let Some(src) = fields.iframe.clone() {
                             <div class="row">
@@ -342,12 +342,12 @@ impl Component for Tournament {
                     let mut start_i = 0;
                     let mut step = 2;
                     let mut found = None;
-                    'found: while start_i != fields.data.data.len() / 2 {
+                    'found: while start_i != fields.bracket.data.len() / 2 {
                         let mut i = start_i;
-                        while i < fields.data.data.len() {
-                            if let Some(item) = &fields.data.data[i] {
+                        while i < fields.bracket.data.len() {
+                            if let Some(item) = &fields.bracket.data[i] {
                                 if !item.disabled {
-                                    let pair = fields.data.data[item.pair].as_ref().unwrap();
+                                    let pair = fields.bracket.data[item.pair].as_ref().unwrap();
                                     if !pair.disabled {
                                         let left_callback = ctx.link().callback(Msg::Update);
                                         let on_left_select =
@@ -387,11 +387,13 @@ impl Component for Tournament {
                 };
                 (&fields.title, "Tournament Mode", {
                     let view = if let ViewState::Tournament = fields.view_state {
-                        html! {<div class="overflow-scroll">
-                            <TournamentBracket data={fields.data.clone()} disabled=true on_click_select={ctx.link().callback(Msg::Update)}/>
-                        </div>}
+                        html! {
+                            <div class="overflow-scroll">
+                            {tournament_bracket_view(&fields.bracket, ctx.link().callback(Msg::Update), true)}
+                            </div>
+                        }
                     } else {
-                        let items = fields.data.finished.iter().map(|i| {
+                        let items = fields.bracket.finished.iter().map(|i| {
                             i.as_ref().map(|i| {
                                 (
                                     i.rank.unwrap(),
@@ -458,7 +460,7 @@ impl Component for Tournament {
                         items.sort_by_key(|i| -i.score);
                     }
                     let previous_ranks = items.iter().map(|i| (i.id.clone(), i.rank)).collect();
-                    let data = TournamentData::new(
+                    let bracket = TournamentBracket::new(
                         items,
                         ItemMetadata::new(String::new(), String::new(), None),
                     );
@@ -466,7 +468,7 @@ impl Component for Tournament {
                         title,
                         state: TournamentState::Tournament,
                         view_state: ViewState::Tournament,
-                        data,
+                        bracket,
                         iframe: list.iframe,
                         previous_ranks,
                     });
@@ -476,7 +478,7 @@ impl Component for Tournament {
             ComponentState::Success(fields) => match msg {
                 Msg::Load(..) => unreachable!(),
                 Msg::Update(i) => {
-                    if let Some((win, lose)) = fields.data.update(i) {
+                    if let Some((win, lose)) = fields.bracket.update(i) {
                         let id = ctx.props().id.clone();
                         let win = win.id.clone();
                         let lose = lose.id.clone();
@@ -507,9 +509,9 @@ impl Component for Tournament {
                     };
                 }
                 Msg::Reset => {
-                    fields.data.data = fields.data.initial_data.clone();
-                    fields.data.finished.clear();
-                    fields.data.finished_index = fields.data.finished.len() - 1;
+                    fields.bracket.data = fields.bracket.initial_data.clone();
+                    fields.bracket.finished.clear();
+                    fields.bracket.finished_index = fields.bracket.finished.len() - 1;
                 }
             },
         }
@@ -517,57 +519,42 @@ impl Component for Tournament {
     }
 }
 
-#[derive(PartialEq, Properties)]
-pub struct TournamentBracketProps {
-    pub data: TournamentData<ItemMetadata>,
-    pub on_click_select: Callback<usize>,
-    pub disabled: bool,
-}
-
-pub struct TournamentBracket;
-
-impl Component for TournamentBracket {
-    type Message = ();
-    type Properties = TournamentBracketProps;
-
-    fn create(_: &Context<Self>) -> Self {
-        TournamentBracket
-    }
-
-    fn view(&self, ctx: &Context<Self>) -> Html {
-        let props = ctx.props();
-        // We want to limit the width of tournament buttons to between 168px and 1/6 of a bootstrap
-        // container
-        // 168px is the minimum width that avoids truncating Bop To The Top
-        let depth = std::cmp::max(props.data.depth + 1, 6);
-        let row_width = format!("min-width: {}px", 168 * depth);
-        let offsets: Vec<_> = std::iter::once(None)
-            .chain((1..depth).map(|i| Some(html! {<div style={format!("width: {}%", 100. * i as f64 / depth as f64)}></div>})))
-            .collect();
-        let col_width = format!("width: {}%", 100. / depth as f64);
-        props
-            .data
-            .data
-            .iter()
-            .enumerate()
-            .map(|(i, item)| {
-                if let Some(item) = item {
-                    let onclick = props.on_click_select.clone();
-                    let onclick = Callback::from(move |_| onclick.emit(i));
-                    let title = item.item.name.clone();
-                    let disabled = ctx.props().disabled || item.disabled;
-                    html! {
-                        <div class="row" style={row_width.clone()}>
-                        {for offsets[item.depth].clone()}
-                            <div style={col_width.clone()}>
-                                <button type="button" class="btn btn-warning text-truncate w-100" style="height: 38px" {title} {disabled} {onclick}>{item.item.name.clone()}</button>
-                            </div>
+fn tournament_bracket_view(
+    bracket: &TournamentBracket<ItemMetadata>,
+    on_click_select: Callback<usize>,
+    disabled: bool,
+) -> Html {
+    // We want to limit the width of tournament buttons to between 168px and 1/6 of a bootstrap
+    // container
+    // 168px is the minimum width that avoids truncating Bop To The Top
+    let depth = std::cmp::max(bracket.depth + 1, 6);
+    let row_width = format!("min-width: {}px", 168 * depth);
+    let offsets: Vec<_> = std::iter::once(None)
+        .chain((1..depth).map(|i| {
+            Some(html! {<div style={format!("width: {}%", 100. * i as f64 / depth as f64)}></div>})
+        }))
+        .collect();
+    let col_width = format!("width: {}%", 100. / depth as f64);
+    bracket.data
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            if let Some(item) = item {
+                let onclick = on_click_select.clone();
+                let onclick = Callback::from(move |_| onclick.emit(i));
+                let title = item.item.name.clone();
+                let disabled = disabled || item.disabled;
+                html! {
+                    <div class="row" style={row_width.clone()}>
+                    {for offsets[item.depth].clone()}
+                        <div style={col_width.clone()}>
+                            <button type="button" class="btn btn-warning text-truncate w-100" style="height: 38px" {title} {disabled} {onclick}>{item.item.name.clone()}</button>
                         </div>
-                    }
-                } else {
-                    html! { <div style="height: 38px"></div> }
+                    </div>
                 }
-            })
-            .collect()
-    }
+            } else {
+                html! { <div style="height: 38px"></div> }
+            }
+        })
+        .collect()
 }
