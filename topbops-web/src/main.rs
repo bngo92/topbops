@@ -849,22 +849,6 @@ async fn main() {
             client.clone().database_client("topbops"),
             Arc::clone(&session),
             List {
-                id: String::from("4539f893-8471-4e23-b815-cd7c8b722016"),
-                user_id: demo_user.clone(),
-                name: String::from("Winners"),
-                iframe: None,
-                items: Vec::new(),
-                mode: ListMode::User,
-                query: String::from("SELECT name, user_score FROM tracks WHERE user_score >= 1500"),
-            },
-            true,
-        )
-        .await
-        .unwrap();
-        create_user_list(
-            client.clone().database_client("topbops"),
-            Arc::clone(&session),
-            List {
                 id: String::from("3c16df67-582d-449a-9862-0540f516d6b5"),
                 user_id: demo_user.clone(),
                 name: String::from("Artists"),
@@ -881,13 +865,13 @@ async fn main() {
             client.clone().database_client("topbops"),
             Arc::clone(&session),
             List {
-                id: String::from("a425903e-d12f-43eb-8a53-dbfad3325fd5"),
-                user_id: demo_user,
-                name: String::from("Albums"),
+                id: String::from("4539f893-8471-4e23-b815-cd7c8b722016"),
+                user_id: demo_user.clone(),
+                name: String::from("Winners"),
                 iframe: None,
                 items: Vec::new(),
                 mode: ListMode::User,
-                query: String::from("SELECT album, AVG(user_score) FROM tracks GROUP BY album"),
+                query: String::from("SELECT name, user_score FROM tracks WHERE user_score >= 1500"),
             },
             true,
         )

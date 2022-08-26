@@ -8,13 +8,14 @@ pub mod spotify;
 
 #[derive(Clone)]
 pub struct UserId(pub String);
-pub const ITEM_FIELDS: [&str; 6] = [
+pub const ITEM_FIELDS: [&str; 7] = [
     "id",
     "name",
     "rating",
     "user_score",
     "user_wins",
     "user_losses",
+    "hidden",
 ];
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -35,6 +36,7 @@ pub struct Item {
     pub user_wins: i32,
     pub user_losses: i32,
     pub metadata: Map<String, Value>,
+    pub hidden: bool,
 }
 
 impl CosmosEntity for Item {
