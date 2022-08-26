@@ -301,5 +301,6 @@ fn new_spotify_item(track: Track, user_id: &UserId) -> super::Item {
         user_wins: 0,
         user_losses: 0,
         metadata,
+        hidden: false,
     }
 }

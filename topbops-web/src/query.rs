@@ -1,7 +1,7 @@
 use crate::{Error, UserId, ITEM_FIELDS};
 use sqlparser::ast::{
     BinaryOperator, Expr, FunctionArg, FunctionArgExpr, Ident, Query, SelectItem, SetExpr,
-    Statement, TableFactor,
+    Statement, TableFactor, Value,
 };
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
@@ -40,7 +40,7 @@ pub fn rewrite_list_query<'a>(
         }
         &query
     };
-    let (query, _) = rewrite_query(&query, user_id)?;
+    let (query, _) = rewrite_query(query, user_id)?;
     Ok((query, fields, map))
 }
 
@@ -89,20 +89,40 @@ pub fn rewrite_query(s: &str, user_id: &UserId) -> Result<(Query, Vec<String>), 
         op: BinaryOperator::Eq,
         right: Box::new(Expr::Identifier(Ident::new(format!("\"{}\"", from)))),
     });
-    let sanitized_select = if let Some(mut selection) = select.selection.take() {
-        rewrite_expr(&mut selection);
+    // If the query doesn't filter on hidden, default to hiding hidden items
+    let hidden = || {
         Box::new(Expr::BinaryOp {
-            left: table_column_map,
-            op: BinaryOperator::And,
-            right: Box::new(selection),
+            left: Box::new(Expr::CompoundIdentifier(vec![
+                Ident::new("c"),
+                Ident::new("hidden"),
+            ])),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::Value(Value::Boolean(false))),
         })
+    };
+    let sanitized_select = if let Some(mut selection) = select.selection.take() {
+        let hidden_filter = find_expr(&selection, |id| id.value == "hidden");
+        rewrite_expr(&mut selection);
+        if hidden_filter {
+            Box::new(selection)
+        } else {
+            Box::new(Expr::BinaryOp {
+                left: Box::new(selection),
+                op: BinaryOperator::And,
+                right: hidden(),
+            })
+        }
     } else {
-        table_column_map
+        hidden()
     };
     select.selection = Some(Expr::BinaryOp {
         left: required_user_id,
         op: BinaryOperator::And,
-        right: sanitized_select,
+        right: Box::new(Expr::BinaryOp {
+            left: table_column_map,
+            op: BinaryOperator::And,
+            right: sanitized_select,
+        }),
     });
     for expr in &mut select.group_by {
         rewrite_expr(expr);
@@ -121,6 +141,42 @@ fn parse_select(s: &str) -> Result<Query, Error> {
     } else {
         Err("No query was provided".into())
     }
+}
+
+fn find_expr(expr: &Expr, predicate: fn(&Ident) -> bool) -> bool {
+    let mut queue = VecDeque::new();
+    queue.push_back(expr);
+    while let Some(expr) = queue.pop_front() {
+        match expr {
+            Expr::Identifier(id) => {
+                if predicate(id) {
+                    return true;
+                }
+            }
+            Expr::InList { expr, .. } => {
+                if let Expr::Identifier(id) = &**expr {
+                    if predicate(id) {
+                        return true;
+                    }
+                }
+            }
+            Expr::BinaryOp { left, op: _, right } => {
+                queue.push_back(left);
+                queue.push_back(right);
+            }
+            Expr::Function(f) => {
+                if let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(id)))) =
+                    f.args.last()
+                {
+                    if predicate(id) {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 fn rewrite_expr(expr: &mut Expr) {
@@ -179,7 +235,7 @@ mod test {
         let (query, column_names) = rewrite_query("SELECT name, user_score FROM tracks").unwrap();
         assert_eq!(
             query.to_string(),
-            "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\""
+            "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.hidden = false"
         );
         assert_eq!(column_names, vec!["name", "user_score"]);
     }
@@ -188,9 +244,9 @@ mod test {
     fn test_where() {
         for (input, expected) in [
             ("SELECT name, user_score FROM tracks WHERE user_score >= 1500",
-             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.user_score >= 1500"),
+             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.user_score >= 1500 AND c.hidden = false"),
             ("SELECT name, user_score FROM tracks WHERE user_score IN (1500)",
-             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.user_score IN (1500)"),
+             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.user_score IN (1500) AND c.hidden = false"),
         ] {
             let (query, column_names) = rewrite_query(input).unwrap();
             assert_eq!(query.to_string(), expected);
@@ -202,7 +258,7 @@ mod test {
     fn test_group_by() {
         let (query, column_names) =
             rewrite_query("SELECT artists, AVG(user_score) FROM tracks GROUP BY artists").unwrap();
-        assert_eq!(query.to_string(), "SELECT c.metadata.artists, AVG(c.user_score) FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" GROUP BY c.metadata.artists");
+        assert_eq!(query.to_string(), "SELECT c.metadata.artists, AVG(c.user_score) FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.hidden = false GROUP BY c.metadata.artists");
         assert_eq!(column_names, vec!["artists", "AVG(user_score)"]);
     }
 
@@ -210,7 +266,7 @@ mod test {
     fn test_order_by() {
         let (query, column_names) =
             rewrite_query("SELECT name, user_score FROM tracks ORDER BY user_score").unwrap();
-        assert_eq!(query.to_string(), "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" ORDER BY c.user_score");
+        assert_eq!(query.to_string(), "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.hidden = false ORDER BY c.user_score");
         assert_eq!(column_names, vec!["name", "user_score"]);
     }
 
@@ -219,9 +275,31 @@ mod test {
         let (query, column_names) = rewrite_query("SELECT COUNT(1) FROM tracks").unwrap();
         assert_eq!(
             query.to_string(),
-            "SELECT COUNT(1) FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\""
+            "SELECT COUNT(1) FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.hidden = false"
         );
         assert_eq!(column_names, vec!["COUNT(1)"]);
+    }
+
+    #[test]
+    fn test_hidden_false() {
+        let (query, column_names) =
+            rewrite_query("SELECT name, user_score FROM tracks WHERE hidden = false").unwrap();
+        assert_eq!(
+            query.to_string(),
+            "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.hidden = false"
+        );
+        assert_eq!(column_names, vec!["name", "user_score"]);
+    }
+
+    #[test]
+    fn test_hidden_true() {
+        let (query, column_names) =
+            rewrite_query("SELECT name, user_score FROM tracks WHERE hidden = true").unwrap();
+        assert_eq!(
+            query.to_string(),
+            "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.hidden = true"
+        );
+        assert_eq!(column_names, vec!["name", "user_score"]);
     }
 
     #[test]
