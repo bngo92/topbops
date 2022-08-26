@@ -1,5 +1,6 @@
 use crate::base::IframeCompare;
 use rand::prelude::SliceRandom;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use topbops::{ItemMetadata, List};
 use web_sys::HtmlSelectElement;
@@ -509,22 +510,27 @@ impl Tournament {
                 </div>
             }
         } else {
-            let items = fields.bracket.finished.iter().map(|i| {
-                i.as_ref().map(|i| {
-                    let i = &fields.list.items[*i];
-                    (
-                        i.rank.unwrap(),
-                        vec![
-                            i.name.clone(),
-                            fields.previous_ranks[&i.id]
-                                .map(|i| i.to_string())
-                                .unwrap_or_else(String::new),
-                            i.score.to_string(),
-                        ],
-                    )
+            let items = fields
+                .bracket
+                .finished
+                .iter()
+                .map(|i| {
+                    i.as_ref().map(|i| {
+                        let i = &fields.list.items[*i];
+                        (
+                            i.rank.unwrap(),
+                            Cow::from(vec![
+                                i.name.clone(),
+                                fields.previous_ranks[&i.id]
+                                    .map(|i| i.to_string())
+                                    .unwrap_or_else(String::new),
+                                i.score.to_string(),
+                            ]),
+                        )
+                    })
                 })
-            });
-            crate::base::responsive_table_view(["Track", "Prev. Rank", "Score"], items)
+                .collect();
+            crate::base::responsive_table_view(&["Track", "Prev. Rank", "Score"], items)
         };
         html! {
             <div>

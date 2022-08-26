@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use topbops::ItemMetadata;
 use yew::{html, Callback, Component, Context, Html, MouseEvent, Properties};
 
@@ -74,11 +75,10 @@ impl Component for IframeCompare {
     }
 }
 
-pub fn responsive_table_view(
-    header: [&str; 3],
-    items: impl Iterator<Item = Option<(i32, Vec<String>)>>,
+pub fn responsive_table_view<'a>(
+    header: &[&str],
+    items: Vec<Option<(i32, Cow<'a, [String]>)>>,
 ) -> Html {
-    let items: Vec<_> = items.map(item_view).collect();
     let (left_items, right_items): (Vec<_>, Vec<_>) = items
         .iter()
         .cloned()
@@ -88,57 +88,48 @@ pub fn responsive_table_view(
     let right_items = right_items.into_iter().map(|(item, _)| item);
     html! {
         <div class="row">
-          <div class="col-md-6 d-none d-lg-block">
-            <table class="table table-striped">
-              <thead>
-                <tr>
-                  <th class="col-1">{"#"}</th>
-                  <th class="col-8">{header[0]}</th>
-                  <th>{header[1]}</th>
-                  <th>{header[2]}</th>
-                </tr>
-              </thead>
-              <tbody>{for left_items}</tbody>
-            </table>
-          </div>
-          <div class="col-md-6 d-none d-lg-block">
-            <table class="table table-striped">
-              <thead>
-                <tr>
-                  <th class="col-1">{"#"}</th>
-                  <th class="col-8">{header[0]}</th>
-                  <th>{header[1]}</th>
-                  <th>{header[2]}</th>
-                </tr>
-              </thead>
-              <tbody>{for right_items}</tbody>
-            </table>
-          </div>
-          <div class="col-12 d-lg-none">
-            <table class="table table-striped">
-              <thead>
-                <tr>
-                  <th class="col-1">{"#"}</th>
-                  <th class="col-8">{header[0]}</th>
-                  <th>{header[1]}</th>
-                  <th>{header[2]}</th>
-                </tr>
-              </thead>
-              <tbody>{for items.clone().into_iter()}</tbody>
-            </table>
-          </div>
+            <div class="col-md-6 d-none d-lg-block">
+            {table_view(header, left_items)}
+            </div>
+            <div class="col-md-6 d-none d-lg-block">
+            {table_view(header, right_items)}
+            </div>
+            <div class="col-12 d-lg-none">
+            {table_view(header, items.into_iter())}
+            </div>
         </div>
     }
 }
 
-fn item_view(item: Option<(i32, Vec<String>)>) -> Html {
+pub fn table_view<'a>(
+    header: &[&str],
+    items: impl Iterator<Item = Option<(i32, Cow<'a, [String]>)>>,
+) -> Html {
+    html! {
+        <div class="table-responsive">
+            <table class="table table-striped mb-0">
+                <thead>
+                    <tr>
+                        <th>{"#"}</th>
+                        {for header.iter().map(|item| html! {
+                            <th>{item}</th>
+                        })}
+                    </tr>
+                </thead>
+                <tbody>{for items.map(|item| item_view(item, header.len()))}</tbody>
+            </table>
+        </div>
+    }
+}
+
+fn item_view(item: Option<(i32, Cow<[String]>)>, len: usize) -> Html {
     if let Some((i, item)) = item {
         html! {
             <tr>
                 <th>{i}</th>
-                <td class="td">{&item[0]}</td>
-                <td>{&item[1]}</td>
-                <td>{&item[2]}</td>
+                {for item.iter().take(len).map(|item| html! {
+                    <td class="text-truncate max-width">{item}</td>
+                })}
             </tr>
         }
     } else {
