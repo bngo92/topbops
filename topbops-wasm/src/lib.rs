@@ -5,6 +5,7 @@ use crate::random::Match;
 use crate::search::Search;
 use crate::tournament::Tournament;
 use regex::Regex;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::rc::Rc;
 use topbops::{ItemQuery, List, ListMode, Lists};
@@ -335,18 +336,7 @@ impl Component for Widget {
             <div class="col-12 col-md-6">
                 <Accordion header={list.name.clone()} collapsed={self.collapsed} {on_toggle}>
                     if let Some(query) = &self.query {
-                        <table class="table table-striped mb-0">
-                            <thead>
-                                <tr>
-                                    <th class="col-1">{"#"}</th>
-                                    <th class="col-8">{&query.fields[0]}</th>
-                                    <th>{&query.fields[1]}</th>
-                                </tr>
-                            </thead>
-                            <tbody>{for query.items.iter().zip(1..).map(|(item, i)| html! {
-                                <Row i={i} values={item.values.clone()}/>
-                            })}</tbody>
-                        </table>
+                        {crate::base::table_view(&query.fields.iter().map(String::as_str).collect::<Vec<_>>(), query.items.iter().zip(1..).map(|(item, i)| Some((i, Cow::from(&item.values)))))}
                     } else {
                         <div></div>
                     }
