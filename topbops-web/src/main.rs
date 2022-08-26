@@ -347,31 +347,8 @@ async fn get_list_items(
 ) -> Result<Response<Body>, Error> {
     let list = get_list_doc(&db, &session, &user_id, id).await?;
 
-    let mut map = HashMap::new();
-    let query = if let ListMode::User = list.mode {
-        list.query
-    } else {
-        // TODO: update AST directly
-        let mut query = format!(
-            "{} WHERE c.id IN ({})",
-            list.query,
-            list.items
-                .iter()
-                .map(|i| format!("\"{}\"", i.id))
-                .collect::<Vec<_>>()
-                .join(",")
-        );
-        let i = query.find("FROM").unwrap();
-        query.insert_str(i - 1, ", id ");
-        // TODO: need a first class way to get rating
-        query.insert_str(i - 1, ", rating ");
-        for i in list.items {
-            map.insert(i.id.clone(), i);
-        }
-        query
-    };
     let db = db.collection_client("items");
-    let (query, fields) = topbops_web::query::rewrite_query(&query, &user_id).unwrap();
+    let (query, fields, map) = topbops_web::query::rewrite_list_query(&list, &user_id).unwrap();
     let values: Vec<Map<String, Value>> = session.query_documents(db, query.to_string()).await?;
     let response = ItemQuery {
         fields,

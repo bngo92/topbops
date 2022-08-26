@@ -5,7 +5,44 @@ use sqlparser::ast::{
 };
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use topbops::{ItemMetadata, List, ListMode};
+
+pub fn rewrite_list_query<'a>(
+    list: &'a List,
+    user_id: &UserId,
+) -> Result<(Query, Vec<String>, HashMap<String, &'a ItemMetadata>), Error> {
+    // TODO: clean up column parsing
+    let mut query = parse_select(&list.query)?;
+    let SetExpr::Select(select) = &mut query.body else { return Err("Only SELECT queries are supported".into()) };
+    let fields = select.projection.iter().map(ToString::to_string).collect();
+
+    let mut map = HashMap::new();
+    // TODO: update AST directly
+    let mut query = format!(
+        "{} WHERE c.id IN ({})",
+        list.query,
+        list.items
+            .iter()
+            .map(|i| format!("\"{}\"", i.id))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let query = if let ListMode::User = list.mode {
+        &list.query
+    } else {
+        let i = query.find("FROM").unwrap();
+        query.insert_str(i - 1, ", id ");
+        // TODO: need a first class way to get rating
+        query.insert_str(i - 1, ", rating ");
+        for i in &list.items {
+            map.insert(i.id.clone(), i);
+        }
+        &query
+    };
+    let (query, _) = rewrite_query(&query, user_id)?;
+    Ok((query, fields, map))
+}
 
 pub fn rewrite_query(s: &str, user_id: &UserId) -> Result<(Query, Vec<String>), Error> {
     let mut query = parse_select(s)?;
