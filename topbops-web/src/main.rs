@@ -367,6 +367,7 @@ async fn get_list_items(
                             Value::String(s) => s.to_owned(),
                             Value::Number(n) => n.to_string(),
                             Value::Null => Value::Null.to_string(),
+                            Value::Bool(b) => b.to_string(),
                             _ => todo!(),
                         })
                         .collect(),
@@ -793,6 +794,9 @@ async fn update_items(
             match k.as_str() {
                 "rating" => {
                     item.rating = serde_json::from_value(v)?;
+                }
+                "hidden" => {
+                    item.hidden = serde_json::from_value(v)?;
                 }
                 _ => {}
             }
