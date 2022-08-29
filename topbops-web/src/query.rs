@@ -35,16 +35,25 @@ pub fn rewrite_list_query<'a>(
         query.insert_str(i - 1, ", id ");
         // TODO: need a first class way to get rating
         query.insert_str(i - 1, ", rating ");
+        query.insert_str(i - 1, ", hidden ");
         for i in &list.items {
             map.insert(i.id.clone(), i);
         }
         &query
     };
-    let (query, _) = rewrite_query(query, user_id)?;
+    let (query, _) = rewrite_query_impl(query, user_id, true)?;
     Ok((query, fields, map))
 }
 
 pub fn rewrite_query(s: &str, user_id: &UserId) -> Result<(Query, Vec<String>), Error> {
+    rewrite_query_impl(s, user_id, false)
+}
+
+fn rewrite_query_impl(
+    s: &str,
+    user_id: &UserId,
+    disable_hidden_filter: bool,
+) -> Result<(Query, Vec<String>), Error> {
     let mut query = parse_select(s)?;
     let SetExpr::Select(select) = &mut query.body else { return Err("Only SELECT queries are supported".into()) };
 
@@ -101,9 +110,9 @@ pub fn rewrite_query(s: &str, user_id: &UserId) -> Result<(Query, Vec<String>), 
         })
     };
     let sanitized_select = if let Some(mut selection) = select.selection.take() {
-        let hidden_filter = find_expr(&selection, |id| id.value == "hidden");
+        let no_filter = disable_hidden_filter || find_expr(&selection, |id| id.value == "hidden");
         rewrite_expr(&mut selection);
-        if hidden_filter {
+        if no_filter {
             Box::new(selection)
         } else {
             Box::new(Expr::BinaryOp {
