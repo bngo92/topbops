@@ -42,12 +42,14 @@ enum Route {
 
 fn switch(routes: &Route) -> Html {
     match routes {
+        #[allow(clippy::let_unit_value)]
         Route::Home => html! { <Home/> },
         Route::Edit { id } => html! { <Edit id={id.clone()}/> },
         Route::Match { id } => html! { <Match id={id.clone()}/> },
         Route::Tournament { id } => html! {
             <Tournament id={id.clone()}/>
         },
+        #[allow(clippy::let_unit_value)]
         Route::Search => html! { <Search/> },
     }
 }

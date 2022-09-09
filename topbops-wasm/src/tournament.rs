@@ -244,6 +244,8 @@ impl<I: Iterator, J: Iterator<Item = I::Item>> Iterator for Interleave<I, J> {
     }
 }
 
+// We mutate ComponentState in place so boxing doesn't help
+#[allow(clippy::large_enum_variant)]
 enum ComponentState {
     Fetching,
     Success(TournamentFields),

@@ -13,7 +13,7 @@ rustup run nightly wasm-pack build --target web
 - [x] Fix tournament list view
 - [x] Add search page
 - [ ] Support custom queries for lists
-- [ ] Support hiding items
+- [x] Support hiding items
 - [ ] Support deleting lists
 ### P1
 - [ ] Support user lists
