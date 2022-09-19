@@ -1,6 +1,9 @@
+use std::collections::HashMap;
 use topbops::ItemQuery;
 use web_sys::HtmlSelectElement;
 use yew::{html, Component, Context, Html, NodeRef, Properties};
+use yew_router::history::Location;
+use yew_router::scope_ext::RouterScopeExt;
 
 pub enum Msg {
     Fetching,
@@ -12,17 +15,34 @@ pub struct Search {
     search_ref: NodeRef,
     query: Option<ItemQuery>,
     error: Option<String>,
+    format: Format,
+}
+
+enum Format {
+    Table,
+    Csv,
 }
 
 impl Component for Search {
     type Message = Msg;
     type Properties = ();
 
-    fn create(_: &Context<Self>) -> Self {
+    fn create(ctx: &Context<Self>) -> Self {
+        let query = ctx
+            .link()
+            .location()
+            .unwrap()
+            .query::<HashMap<String, String>>()
+            .unwrap_or_default();
+        let format = match query.get("mode").map(String::as_str) {
+            Some("csv") => Format::Csv,
+            _ => Format::Table,
+        };
         Search {
             search_ref: NodeRef::default(),
             query: None,
             error: None,
+            format,
         }
     }
 
@@ -51,7 +71,16 @@ impl Component for Search {
                     </div>
                 </form>
                 if let Some(query) = &self.query {
-                    <Table query={query.clone()}/>
+                    if let Format::Table = self.format {
+                        <Table query={query.clone()}/>
+                    } else if let Format::Csv = self.format {
+                        <p>{query
+                            .items
+                                .iter()
+                                .map(|items| html! {items.values.join(",")})
+                                .intersperse(html! {<br/>})
+                                .collect::<Html>()}</p>
+                    }
                 }
             </div>
         }
