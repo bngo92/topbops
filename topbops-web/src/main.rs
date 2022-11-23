@@ -1,4 +1,3 @@
-#![feature(let_else)]
 use azure_data_cosmos::prelude::{
     AuthorizationToken, CollectionClient, ConsistencyLevel, CosmosClient, CosmosEntity,
     DatabaseClient, GetDocumentResponse, Query,
