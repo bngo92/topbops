@@ -1,4 +1,3 @@
-#![feature(let_else)]
 use azure_data_cosmos::prelude::CosmosEntity;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};

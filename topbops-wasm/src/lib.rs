@@ -1,4 +1,4 @@
-#![feature(iter_intersperse, let_else)]
+#![feature(iter_intersperse)]
 use crate::bootstrap::{Accordion, Collapse};
 use crate::edit::Edit;
 use crate::random::Match;
