@@ -8,11 +8,17 @@ use yew::{html, Component, Context, Html, NodeRef, Properties};
 
 enum EditState {
     Fetching,
-    Success(List, Vec<(ItemMetadata, String, String, NodeRef, NodeRef)>),
+    Success(
+        List,
+        Vec<(ItemMetadata, String, String, NodeRef, NodeRef)>,
+        NodeRef,
+    ),
 }
 
 pub enum Msg {
+    None,
     Load(List, ItemQuery),
+    Update,
     Save,
     SaveSuccess(Vec<(usize, HashMap<String, Value>)>),
 }
@@ -46,7 +52,7 @@ impl Component for Edit {
         let disabled = crate::get_user().is_none();
         match &self.state {
             EditState::Fetching => html! {},
-            EditState::Success(list, items) => {
+            EditState::Success(list, items, favorite_ref) => {
                 let html = items.iter().map(|(item, rating, hidden, rating_ref, hidden_ref)| {
                     let checked = hidden == "true";
                     html! {
@@ -74,10 +80,16 @@ impl Component for Edit {
                         </div>
                     }
                 });
+                let checked = list.favorite;
+                let update = ctx.link().callback(|_| Msg::Update);
                 let save = ctx.link().callback(|_| Msg::Save);
                 html! {
                     <div>
                         <h1>{&list.name}</h1>
+                        <div class="form-check-inline">
+                            <label class="form-check-label">{"Favorite"}</label>
+                            <input ref={favorite_ref} class="form-check-input" style="float: right; margin-right: -1.5em" type="checkbox" onclick={update} {checked}/>
+                        </div>
                         <div class="row">
                             <p class="col-lg-8 col-xl-7"></p>
                             <p class="col-3 col-lg-2 col-xl-1"><strong>{"Rating"}</strong></p>
@@ -104,6 +116,7 @@ impl Component for Edit {
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
+            Msg::None => false,
             Msg::Load(list, query) => {
                 let items = query
                     .items
@@ -118,11 +131,21 @@ impl Component for Edit {
                         )
                     })
                     .collect();
-                self.state = EditState::Success(list, items);
+                self.state = EditState::Success(list, items, NodeRef::default());
                 true
             }
+            Msg::Update => {
+                let EditState::Success(list, _, favorite_ref) = &mut self.state else { unreachable!() };
+                list.favorite = favorite_ref.cast::<HtmlInputElement>().unwrap().checked();
+                let list = list.clone();
+                ctx.link().send_future(async move {
+                    crate::update_list(&list.id, list.clone()).await.unwrap();
+                    Msg::None
+                });
+                false
+            }
             Msg::Save => {
-                let EditState::Success(_, items) = &self.state else { unreachable!() };
+                let EditState::Success(_, items, _) = &self.state else { unreachable!() };
                 let mut update_ids = HashMap::new();
                 let mut update_indexes = Vec::new();
                 for (i, (item, rating, hidden, rating_ref, hidden_ref)) in items.iter().enumerate()
@@ -174,7 +197,7 @@ impl Component for Edit {
             // Update the rating and hidden state values if the save request is successful.
             // We check if the values are the same to avoid no-op requests.
             Msg::SaveSuccess(updates) => {
-                let EditState::Success(_, items) = &mut self.state else { unreachable!() };
+                let EditState::Success(_, items, _) = &mut self.state else { unreachable!() };
                 for (i, update) in updates {
                     for (k, v) in update {
                         let (_item, rating, hidden, _rating_ref, _hidden_ref) = &mut items[i];
