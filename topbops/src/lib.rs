@@ -15,6 +15,8 @@ pub struct List {
     pub iframe: Option<String>,
     pub items: Vec<ItemMetadata>,
     pub mode: ListMode,
+    #[serde(default)]
+    pub favorite: bool,
     // For external lists, query is only used to select fields (not filter)
     pub query: String,
 }

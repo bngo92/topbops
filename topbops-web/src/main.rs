@@ -119,7 +119,9 @@ async fn route(
         if auth == DEMO_USER {
             let user_id = UserId(String::from(DEMO_USER));
             match (&path[..], req.method()) {
-                (["lists"], &Method::GET) => get_lists(db, session, user_id).await,
+                (["lists"], &Method::GET) => {
+                    get_lists(db, session, user_id, req.uri().query()).await
+                }
                 (["lists", id], &Method::GET) => get_list(db, session, user_id, id).await,
                 (["lists", id], &Method::PUT) => {
                     update_list(db, session, user_id, id, req.body_mut()).await
@@ -167,7 +169,9 @@ async fn route(
                     .status(StatusCode::FOUND)
                     .body(Body::empty())
                     .map_err(Error::from),
-                (["lists"], &Method::GET) => get_lists(db, session, user_id).await,
+                (["lists"], &Method::GET) => {
+                    get_lists(db, session, user_id, req.uri().query()).await
+                }
                 (["lists", id], &Method::GET) => get_list(db, session, user_id, id).await,
                 (["lists", id], &Method::PUT) => {
                     update_list(db, session, user_id, id, req.body_mut()).await
@@ -315,9 +319,19 @@ async fn get_lists(
     db: DatabaseClient,
     session: Arc<SessionClient>,
     user_id: UserId,
+    query: Option<&str>,
 ) -> Result<Response<Body>, Error> {
     let db = db.collection_client("lists");
-    let query = format!("SELECT * FROM c WHERE c.user_id = \"{}\"", user_id.0);
+    let query = query.map(|q| url::form_urlencoded::parse(q.as_bytes()).collect::<Vec<_>>());
+    let query = if let Some([(Cow::Borrowed("favorite"), Cow::Borrowed("true"))]) = query.as_deref()
+    {
+        format!(
+            "SELECT * FROM c WHERE c.user_id = \"{}\" AND c.favorite = true",
+            user_id.0
+        )
+    } else {
+        format!("SELECT * FROM c WHERE c.user_id = \"{}\"", user_id.0)
+    };
     let lists = Lists {
         lists: session.query_documents(db, query).await?,
     };
@@ -546,7 +560,7 @@ async fn handle_action(
                 return handle_stats_update(db, session, user_id, id, win, lose).await;
             }
             [("action", "import"), ("id", id)] => {
-                return import_list(db, session, user_id, id).await;
+                return import_list(db, session, user_id, id, false).await;
             }
             [("action", "updateItems")] => {
                 return update_items(db, session, user_id, req).await;
@@ -649,11 +663,13 @@ async fn import_list(
     session: Arc<SessionClient>,
     user_id: UserId,
     id: &str,
+    favorite: bool,
 ) -> Result<Response<Body>, Error> {
-    let (list, items) = match id.split_once(':') {
+    let (mut list, items) = match id.split_once(':') {
         Some(("spotify", id)) => topbops_web::spotify::import(&user_id, id).await?,
         _ => todo!(),
     };
+    list.favorite = favorite;
     create_external_list(db, session, list, items, user_id.0 == DEMO_USER).await
 }
 
@@ -844,6 +860,7 @@ async fn main() {
             Arc::clone(&session),
             UserId(demo_user.clone()),
             "spotify:playlist:5MztFbRbMpyxbVYuOSfQV9",
+            true,
         )
         .await
         .unwrap();
@@ -858,6 +875,7 @@ async fn main() {
                 iframe: None,
                 items: Vec::new(),
                 mode: ListMode::User,
+                favorite: true,
                 query: String::from("SELECT artists, AVG(user_score) FROM tracks GROUP BY artists"),
             },
             true,
@@ -874,6 +892,7 @@ async fn main() {
                 iframe: None,
                 items: Vec::new(),
                 mode: ListMode::User,
+                favorite: true,
                 query: String::from("SELECT name, user_score FROM tracks WHERE user_score >= 1500"),
             },
             true,

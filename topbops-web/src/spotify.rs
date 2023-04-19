@@ -151,6 +151,7 @@ pub async fn import_playlist(
             .map(|i| ItemMetadata::new(i.id.clone(), i.name.clone(), i.iframe.clone()))
             .collect(),
         mode: ListMode::External(playlist.href),
+        favorite: false,
         query: String::from("SELECT name, user_score FROM tracks"),
     };
     Ok((list, items))
@@ -229,6 +230,7 @@ pub async fn import_album(user_id: &UserId, id: &str) -> Result<(List, Vec<super
             .map(|i| ItemMetadata::new(i.id.clone(), i.name.clone(), i.iframe.clone()))
             .collect(),
         mode: ListMode::External(album.href),
+        favorite: false,
         query: String::from("SELECT name, user_score FROM tracks"),
     };
     Ok((list, items))

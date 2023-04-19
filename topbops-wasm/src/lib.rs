@@ -30,6 +30,8 @@ pub mod tournament;
 enum Route {
     #[at("/")]
     Home,
+    #[at("/lists")]
+    Lists,
     #[at("/lists/:id")]
     Edit { id: String },
     #[at("/lists/:id/match")]
@@ -42,8 +44,8 @@ enum Route {
 
 fn switch(routes: &Route) -> Html {
     match routes {
-        #[allow(clippy::let_unit_value)]
-        Route::Home => html! { <Home/> },
+        Route::Home => html! { <Home favorite=true/> },
+        Route::Lists => html! { <Home favorite=false/> },
         Route::Edit { id } => html! { <Edit id={id.clone()}/> },
         Route::Match { id } => html! { <Match id={id.clone()}/> },
         Route::Tournament { id } => html! {
@@ -86,6 +88,9 @@ impl Component for App {
                         <div class="container-lg">
                             <Link<Route> classes="navbar-brand" to={Route::Home}>{"Bops to the Top"}</Link<Route>>
                             <ul class="navbar-nav me-auto">
+                                <li class="nav-item">
+                                    <Link<Route> classes={search} to={Route::Lists}>{"Lists"}</Link<Route>>
+                                </li>
                                 <li class="nav-item">
                                     <Link<Route> classes={search} to={Route::Search}>{"Search"}</Link<Route>>
                                 </li>
@@ -133,6 +138,11 @@ pub enum HomeMsg {
     Import,
 }
 
+#[derive(PartialEq, Properties)]
+pub struct HomeProps {
+    favorite: bool,
+}
+
 pub struct Home {
     help_collapsed: bool,
     lists: Vec<List>,
@@ -142,11 +152,12 @@ pub struct Home {
 
 impl Component for Home {
     type Message = HomeMsg;
-    type Properties = ();
+    type Properties = HomeProps;
 
     fn create(ctx: &Context<Self>) -> Self {
         let select_ref = NodeRef::default();
-        ctx.link().send_future(Home::fetch_lists());
+        ctx.link()
+            .send_future(Home::fetch_lists(ctx.props().favorite));
         Home {
             help_collapsed: get_user().is_some(),
             lists: Vec::new(),
@@ -244,19 +255,27 @@ impl Component for Home {
                 } else {
                     return false;
                 };
+                let favorite = ctx.props().favorite;
                 ctx.link().send_future(async move {
                     import_list(&id).await.unwrap();
-                    Home::fetch_lists().await
+                    Home::fetch_lists(favorite).await
                 });
                 false
             }
         }
     }
+
+    // Changing the favorite prop using BrowserRouter doesn't re-render so manually do it
+    fn changed(&mut self, ctx: &Context<Self>) -> bool {
+        ctx.link()
+            .send_future(Home::fetch_lists(ctx.props().favorite));
+        true
+    }
 }
 
 impl Home {
-    async fn fetch_lists() -> HomeMsg {
-        let lists = fetch_lists().await.unwrap();
+    async fn fetch_lists(favorite: bool) -> HomeMsg {
+        let lists = fetch_lists(favorite).await.unwrap();
         HomeMsg::Load(lists)
     }
 }
@@ -412,9 +431,9 @@ pub async fn run() -> Result<(), JsValue> {
     Ok(())
 }
 
-async fn fetch_lists() -> Result<Vec<List>, JsValue> {
+async fn fetch_lists(favorite: bool) -> Result<Vec<List>, JsValue> {
     let window = web_sys::window().expect("no global `window` exists");
-    let request = query("/api/lists", "GET")?;
+    let request = query(&format!("/api/lists?favorite={}", favorite), "GET")?;
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
     let json = JsFuture::from(resp.json()?).await?;
