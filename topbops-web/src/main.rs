@@ -361,14 +361,20 @@ async fn get_list_items(
     let list = get_list_doc(&db, &session, &user_id, id).await?;
 
     let db = db.collection_client("items");
-    let (query, fields, map) = topbops_web::query::rewrite_list_query(&list, &user_id).unwrap();
-    let values: Vec<Map<String, Value>> = session.query_documents(db, query.to_string()).await?;
+    let (query, fields, map, ids) =
+        topbops_web::query::rewrite_list_query(&list, &user_id).unwrap();
+    let items: HashMap<_, _> = session
+        .query_documents(db, query.to_string())
+        .await?
+        .into_iter()
+        .map(|r: Map<String, Value>| (r["id"].to_string(), r))
+        .collect();
     let response = ItemQuery {
         fields,
-        items: values
-            .iter()
-            .map(|r| {
-                let mut iter = r.values();
+        items: ids
+            .into_iter()
+            .map(|id| {
+                let mut iter = items[&id].values();
                 let metadata = if map.is_empty() {
                     None
                 } else {

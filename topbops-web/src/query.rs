@@ -11,7 +11,15 @@ use topbops::{ItemMetadata, List, ListMode};
 pub fn rewrite_list_query<'a>(
     list: &'a List,
     user_id: &UserId,
-) -> Result<(Query, Vec<String>, HashMap<String, &'a ItemMetadata>), Error> {
+) -> Result<
+    (
+        Query,
+        Vec<String>,
+        HashMap<String, &'a ItemMetadata>,
+        Vec<String>,
+    ),
+    Error,
+> {
     // TODO: clean up column parsing
     let mut query = parse_select(&list.query)?;
     let SetExpr::Select(select) = &mut query.body else { return Err("Only SELECT queries are supported".into()) };
@@ -19,15 +27,12 @@ pub fn rewrite_list_query<'a>(
 
     let mut map = HashMap::new();
     // TODO: update AST directly
-    let mut query = format!(
-        "{} WHERE c.id IN ({})",
-        list.query,
-        list.items
-            .iter()
-            .map(|i| format!("\"{}\"", i.id))
-            .collect::<Vec<_>>()
-            .join(",")
-    );
+    let ids = list
+        .items
+        .iter()
+        .map(|i| format!("\"{}\"", i.id))
+        .collect::<Vec<_>>();
+    let mut query = format!("{} WHERE c.id IN ({})", list.query, ids.join(","));
     let query = if let ListMode::View = list.mode {
         &list.query
     } else {
@@ -42,7 +47,7 @@ pub fn rewrite_list_query<'a>(
         &query
     };
     let (query, _) = rewrite_query_impl(query, user_id, true)?;
-    Ok((query, fields, map))
+    Ok((query, fields, map, ids))
 }
 
 pub fn rewrite_query(s: &str, user_id: &UserId) -> Result<(Query, Vec<String>), Error> {
