@@ -351,8 +351,8 @@ impl Component for Widget {
         let edit = Callback::once(move |_| {
             history.push(Route::Edit { id });
         });
-        // TODO: support user list actions
-        let disabled = matches!(list.mode, ListMode::User);
+        // TODO: support actions on views
+        let disabled = matches!(list.mode, ListMode::View);
         html! {
             <div class="col-12 col-md-6">
                 <Accordion header={list.name.clone()} collapsed={self.collapsed} {on_toggle}>

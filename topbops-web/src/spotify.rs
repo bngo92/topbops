@@ -4,7 +4,7 @@ use hyper::{Body, Client, Method, Request, Uri};
 use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use topbops::{ItemMetadata, List, ListMode};
+use topbops::{ItemMetadata, List, ListMode, Source, SourceType, Spotify};
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Playlists {
@@ -141,7 +141,12 @@ pub async fn import_playlist(
     let list = List {
         id: playlist_id.to_owned(),
         user_id: user_id.0.clone(),
-        name: playlist.name,
+        mode: ListMode::External,
+        name: playlist.name.clone(),
+        sources: vec![Source {
+            source_type: SourceType::Spotify(Spotify::Playlist(playlist.href)),
+            name: playlist.name,
+        }],
         iframe: Some(format!(
             "https://open.spotify.com/embed/playlist/{}?utm_source=generator",
             playlist_id
@@ -150,7 +155,6 @@ pub async fn import_playlist(
             .iter()
             .map(|i| ItemMetadata::new(i.id.clone(), i.name.clone(), i.iframe.clone()))
             .collect(),
-        mode: ListMode::External(playlist.href),
         favorite: false,
         query: String::from("SELECT name, user_score FROM tracks"),
     };
@@ -220,7 +224,12 @@ pub async fn import_album(user_id: &UserId, id: &str) -> Result<(List, Vec<super
     let list = List {
         id: id.to_owned(),
         user_id: user_id.0.clone(),
-        name: album.name,
+        mode: ListMode::External,
+        name: album.name.clone(),
+        sources: vec![Source {
+            source_type: SourceType::Spotify(Spotify::Album(album.href)),
+            name: album.name,
+        }],
         iframe: Some(format!(
             "https://open.spotify.com/embed/album/{}?utm_source=generator",
             id
@@ -229,7 +238,6 @@ pub async fn import_album(user_id: &UserId, id: &str) -> Result<(List, Vec<super
             .iter()
             .map(|i| ItemMetadata::new(i.id.clone(), i.name.clone(), i.iframe.clone()))
             .collect(),
-        mode: ListMode::External(album.href),
         favorite: false,
         query: String::from("SELECT name, user_score FROM tracks"),
     };
@@ -265,13 +273,12 @@ fn new_spotify_item(track: Track, user_id: &UserId) -> super::Item {
         (String::from("album"), Value::String(track.album.name)),
         (
             String::from("artists"),
-            Value::String(
+            Value::Array(
                 track
                     .artists
                     .into_iter()
-                    .map(|a| a.name)
-                    .collect::<Vec<_>>()
-                    .join(", "),
+                    .map(|a| Value::String(a.name))
+                    .collect::<Vec<_>>(),
             ),
         ),
         (

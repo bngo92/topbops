@@ -28,7 +28,7 @@ pub fn rewrite_list_query<'a>(
             .collect::<Vec<_>>()
             .join(",")
     );
-    let query = if let ListMode::User = list.mode {
+    let query = if let ListMode::View = list.mode {
         &list.query
     } else {
         let i = query.find("FROM").unwrap();
