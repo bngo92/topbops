@@ -375,15 +375,7 @@ async fn get_list_items(
                     Some(map[iter.next_back().unwrap().as_str().unwrap()].clone())
                 };
                 topbops::Item {
-                    values: iter
-                        .map(|v| match v {
-                            Value::String(s) => s.to_owned(),
-                            Value::Number(n) => n.to_string(),
-                            Value::Null => Value::Null.to_string(),
-                            Value::Bool(b) => b.to_string(),
-                            _ => todo!(),
-                        })
-                        .collect(),
+                    values: iter.map(format_value).collect(),
                     metadata,
                 }
             })
@@ -392,6 +384,17 @@ async fn get_list_items(
     get_response_builder()
         .body(Body::from(serde_json::to_string(&response)?))
         .map_err(Error::from)
+}
+
+fn format_value(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.to_owned(),
+        Value::Number(n) => n.to_string(),
+        Value::Null => Value::Null.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Array(a) => a.iter().map(format_value).collect::<Vec<_>>().join(", "),
+        _ => todo!(),
+    }
 }
 
 async fn get_list_doc(
@@ -486,15 +489,7 @@ async fn _find_items(
         items: values
             .iter()
             .map(|r| topbops::Item {
-                values: r
-                    .values()
-                    .map(|v| match v {
-                        Value::String(s) => s.to_owned(),
-                        Value::Number(n) => n.to_string(),
-                        Value::Null => Value::Null.to_string(),
-                        _ => todo!(),
-                    })
-                    .collect(),
+                values: r.values().map(format_value).collect(),
                 metadata: None,
             })
             .collect(),
