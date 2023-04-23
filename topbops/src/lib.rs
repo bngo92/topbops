@@ -11,11 +11,15 @@ pub struct Lists {
 pub struct List {
     pub id: String,
     pub user_id: String,
+    pub mode: ListMode,
+    // This is not editable for external lists
     pub name: String,
+    // External lists can only have one data source that must match id
+    // Views have no data sources
+    pub sources: Vec<Source>,
+
     pub iframe: Option<String>,
     pub items: Vec<ItemMetadata>,
-    pub mode: ListMode,
-    #[serde(default)]
     pub favorite: bool,
     // For external lists, query is only used to select fields (not filter)
     pub query: String,
@@ -48,8 +52,30 @@ impl ItemMetadata {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ListMode {
-    User,
-    External(String),
+    /// User defined lists that can pull from multiple sources
+    /// User lists can also be pushed to an external source
+    User(Option<String>),
+    /// Lists that are pulled from an external source
+    External,
+    /// Read only lists
+    View,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct Source {
+    pub source_type: SourceType,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum SourceType {
+    Spotify(Spotify),
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum Spotify {
+    Playlist(String),
+    Album(String),
 }
 
 #[cfg(feature = "azure")]
