@@ -4,7 +4,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use topbops::{ItemMetadata, ItemQuery};
 use yew::{html, Component, Context, Html, Properties};
-use yew_router::history::Location;
 use yew_router::scope_ext::RouterScopeExt;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -73,11 +72,11 @@ impl Component for Match {
         let left_param = (list.clone(), left.id.clone(), right.id.clone());
         let on_left_select = ctx
             .link()
-            .callback_once(move |_| Msg::UpdateStats(left_param));
+            .callback(move |_| Msg::UpdateStats(left_param.clone()));
         let right_param = (list.clone(), right.id.clone(), left.id.clone());
         let on_right_select = ctx
             .link()
-            .callback_once(move |_| Msg::UpdateStats(right_param));
+            .callback(move |_| Msg::UpdateStats(right_param.clone()));
         let items = query
             .items
             .iter()

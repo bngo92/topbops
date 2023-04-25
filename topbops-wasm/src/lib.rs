@@ -14,7 +14,6 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlDocument, HtmlSelectElement, Request, RequestInit, RequestMode, Response};
 use yew::{html, Callback, Component, Context, Html, NodeRef, Properties};
-use yew_router::history::History;
 use yew_router::prelude::Link;
 use yew_router::scope_ext::RouterScopeExt;
 use yew_router::{BrowserRouter, Routable, Switch};
@@ -42,16 +41,15 @@ enum Route {
     Search,
 }
 
-fn switch(routes: &Route) -> Html {
+fn switch(routes: Route) -> Html {
     match routes {
         Route::Home => html! { <Home favorite=true/> },
         Route::Lists => html! { <Home favorite=false/> },
-        Route::Edit { id } => html! { <Edit id={id.clone()}/> },
-        Route::Match { id } => html! { <Match id={id.clone()}/> },
+        Route::Edit { id } => html! { <Edit {id}/> },
+        Route::Match { id } => html! { <Match {id}/> },
         Route::Tournament { id } => html! {
-            <Tournament id={id.clone()}/>
+            <Tournament {id}/>
         },
-        #[allow(clippy::let_unit_value)]
         Route::Search => html! { <Search/> },
     }
 }
@@ -107,7 +105,7 @@ impl Component for App {
                         </div>
                     </nav>
                     <div class="container-lg my-md-4">
-                        <Switch<Route> render={Switch::render(switch)} />
+                        <Switch<Route> render={switch} />
                     </div>
                 </BrowserRouter>
             </div>
@@ -266,7 +264,7 @@ impl Component for Home {
     }
 
     // Changing the favorite prop using BrowserRouter doesn't re-render so manually do it
-    fn changed(&mut self, ctx: &Context<Self>) -> bool {
+    fn changed(&mut self, ctx: &Context<Self>, _: &Self::Properties) -> bool {
         ctx.link()
             .send_future(Home::fetch_lists(ctx.props().favorite));
         true
@@ -313,32 +311,33 @@ impl Component for Widget {
         let on_toggle = ctx
             .link()
             .callback(move |_| WidgetMsg::Fetching(Rc::clone(&id)));
-        let history = ctx.link().history().unwrap();
+        let navigator = ctx.link().navigator().unwrap();
         let select_ref = ctx.props().select_ref.clone();
-        let history_copy = history.clone();
+        let navigator_copy = navigator.clone();
         let id = list.id.clone();
-        let go = Callback::once(move |_| {
+        let go = Callback::from(move |_| {
+            let id = id.clone();
             let mode = select_ref.cast::<HtmlSelectElement>().unwrap().value();
             match mode.as_ref() {
                 "Random Matches" => {
-                    history_copy.push(Route::Match { id });
+                    navigator_copy.push(&Route::Match { id });
                 }
                 "Random Rounds" => {
-                    history_copy
+                    navigator_copy
                         .push_with_query(
-                            Route::Match { id },
-                            [("mode", "rounds")].into_iter().collect::<HashMap<_, _>>(),
+                            &Route::Match { id },
+                            &[("mode", "rounds")].into_iter().collect::<HashMap<_, _>>(),
                         )
                         .unwrap();
                 }
                 "Tournament" => {
-                    history_copy.push(Route::Tournament { id });
+                    navigator_copy.push(&Route::Tournament { id });
                 }
                 "Random Tournament" => {
-                    history_copy
+                    navigator_copy
                         .push_with_query(
-                            Route::Tournament { id },
-                            [("mode", "random")].into_iter().collect::<HashMap<_, _>>(),
+                            &Route::Tournament { id },
+                            &[("mode", "random")].into_iter().collect::<HashMap<_, _>>(),
                         )
                         .unwrap();
                 }
@@ -348,8 +347,8 @@ impl Component for Widget {
             };
         });
         let id = list.id.clone();
-        let edit = Callback::once(move |_| {
-            history.push(Route::Edit { id });
+        let edit = Callback::from(move |_| {
+            navigator.push(&Route::Edit { id: id.clone() });
         });
         // TODO: support actions on views
         let disabled = matches!(list.mode, ListMode::View);
@@ -427,7 +426,7 @@ impl Component for Row {
 // Called by our JS entry point to run the example
 #[wasm_bindgen(start)]
 pub async fn run() -> Result<(), JsValue> {
-    yew::start_app::<App>();
+    yew::Renderer::<App>::new().render();
     Ok(())
 }
 
