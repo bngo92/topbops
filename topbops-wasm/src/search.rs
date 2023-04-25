@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use topbops::ItemQuery;
 use web_sys::HtmlSelectElement;
 use yew::{html, Component, Context, Html, NodeRef, Properties};
-use yew_router::history::Location;
 use yew_router::scope_ext::RouterScopeExt;
 
 pub enum Msg {

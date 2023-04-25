@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use topbops::{ItemMetadata, List};
 use web_sys::HtmlSelectElement;
 use yew::{html, Callback, Component, Context, Html, NodeRef, Properties};
-use yew_router::history::Location;
 use yew_router::scope_ext::RouterScopeExt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
