@@ -18,7 +18,6 @@ enum EditState {
 pub enum Msg {
     None,
     Load(List, ItemQuery),
-    Update,
     Save,
     SaveSuccess(Vec<(usize, HashMap<String, Value>)>),
 }
@@ -81,15 +80,20 @@ impl Component for Edit {
                     }
                 });
                 let checked = list.favorite;
-                let update = ctx.link().callback(|_| Msg::Update);
                 let save = ctx.link().callback(|_| Msg::Save);
                 html! {
                     <div>
                         <h1>{&list.name}</h1>
-                        <div class="form-check-inline">
-                            <label class="form-check-label">{"Favorite"}</label>
-                            <input ref={favorite_ref} class="form-check-input" style="float: right; margin-right: -1.5em" type="checkbox" onclick={update} {checked}/>
-                        </div>
+                        <form>
+                            <div class="row">
+                                <label class="col-sm-1">{"Favorite"}</label>
+                                <div class="col-sm-5">
+                                    <div class="form-check">
+                                        <input ref={favorite_ref} class="form-check-input" type="checkbox" {checked}/>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
                         <div class="row">
                             <p class="col-lg-8 col-xl-7"></p>
                             <p class="col-3 col-lg-2 col-xl-1"><strong>{"Rating"}</strong></p>
@@ -134,18 +138,14 @@ impl Component for Edit {
                 self.state = EditState::Success(list, items, NodeRef::default());
                 true
             }
-            Msg::Update => {
-                let EditState::Success(list, _, favorite_ref) = &mut self.state else { unreachable!() };
+            Msg::Save => {
+                let EditState::Success(list, items, favorite_ref) = &mut self.state else { unreachable!() };
                 list.favorite = favorite_ref.cast::<HtmlInputElement>().unwrap().checked();
                 let list = list.clone();
                 ctx.link().send_future(async move {
                     crate::update_list(&list.id, list.clone()).await.unwrap();
                     Msg::None
                 });
-                false
-            }
-            Msg::Save => {
-                let EditState::Success(_, items, _) = &self.state else { unreachable!() };
                 let mut update_ids = HashMap::new();
                 let mut update_indexes = Vec::new();
                 for (i, (item, rating, hidden, rating_ref, hidden_ref)) in items.iter().enumerate()
