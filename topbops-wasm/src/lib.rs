@@ -436,7 +436,7 @@ async fn fetch_lists(favorite: bool) -> Result<Vec<List>, JsValue> {
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
     let json = JsFuture::from(resp.json()?).await?;
-    let lists: Lists = json.into_serde().unwrap();
+    let lists: Lists = serde_wasm_bindgen::from_value(json).unwrap();
     Ok(lists.lists)
 }
 
@@ -446,7 +446,7 @@ async fn fetch_list(id: &str) -> Result<List, JsValue> {
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
     let json = JsFuture::from(resp.json()?).await?;
-    Ok(json.into_serde().unwrap())
+    Ok(serde_wasm_bindgen::from_value(json).unwrap())
 }
 
 async fn update_list(id: &str, list: List) -> Result<(), JsValue> {
@@ -470,7 +470,7 @@ async fn query_items(id: &str) -> Result<ItemQuery, JsValue> {
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
     let json = JsFuture::from(resp.json()?).await?;
-    Ok(json.into_serde().unwrap())
+    Ok(serde_wasm_bindgen::from_value(json).unwrap())
 }
 
 async fn update_stats(list: &str, win: &str, lose: &str) -> Result<(), JsValue> {
@@ -502,7 +502,7 @@ async fn find_items(search: &str) -> Result<ItemQuery, JsValue> {
         return Err(JsFuture::from(resp.text()?).await?);
     }
     let json = JsFuture::from(resp.json()?).await?;
-    Ok(json.into_serde().unwrap())
+    Ok(serde_wasm_bindgen::from_value(json).unwrap())
 }
 
 fn query(url: &str, method: &str) -> Result<Request, JsValue> {

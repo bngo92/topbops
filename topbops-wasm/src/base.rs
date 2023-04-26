@@ -75,9 +75,9 @@ impl Component for IframeCompare {
     }
 }
 
-pub fn responsive_table_view<'a>(
+pub fn responsive_table_view(
     header: &[&str],
-    items: Vec<Option<(i32, Cow<'a, [String]>)>>,
+    items: Vec<Option<(i32, Cow<'_, [String]>)>>,
 ) -> Html {
     let (left_items, right_items): (Vec<_>, Vec<_>) = items
         .iter()
