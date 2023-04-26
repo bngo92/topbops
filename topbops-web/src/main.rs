@@ -172,6 +172,7 @@ async fn route(
                 (["lists"], &Method::GET) => {
                     get_lists(db, session, user_id, req.uri().query()).await
                 }
+                (["lists"], &Method::POST) => create_list(db, session, user_id).await,
                 (["lists", id], &Method::GET) => get_list(db, session, user_id, id).await,
                 (["lists", id], &Method::PUT) => {
                     update_list(db, session, user_id, id, req.body_mut()).await
@@ -359,33 +360,39 @@ async fn get_list_items(
     id: &str,
 ) -> Result<Response<Body>, Error> {
     let list = get_list_doc(&db, &session, &user_id, id).await?;
-
-    let db = db.collection_client("items");
-    let (query, fields, map, ids) =
-        topbops_web::query::rewrite_list_query(&list, &user_id).unwrap();
-    let items: HashMap<_, _> = session
-        .query_documents(db, query.to_string())
-        .await?
-        .into_iter()
-        .map(|r: Map<String, Value>| (r["id"].to_string(), r))
-        .collect();
-    let response = ItemQuery {
-        fields,
-        items: ids
+    let response = if list.items.is_empty() {
+        ItemQuery {
+            fields: Vec::new(),
+            items: Vec::new(),
+        }
+    } else {
+        let db = db.collection_client("items");
+        let (query, fields, map, ids) =
+            topbops_web::query::rewrite_list_query(&list, &user_id).unwrap();
+        let items: HashMap<_, _> = session
+            .query_documents(db, query.to_string())
+            .await?
             .into_iter()
-            .map(|id| {
-                let mut iter = items[&id].values();
-                let metadata = if map.is_empty() {
-                    None
-                } else {
-                    Some(map[iter.next_back().unwrap().as_str().unwrap()].clone())
-                };
-                topbops::Item {
-                    values: iter.map(format_value).collect(),
-                    metadata,
-                }
-            })
-            .collect(),
+            .map(|r: Map<String, Value>| (r["id"].to_string(), r))
+            .collect();
+        ItemQuery {
+            fields,
+            items: ids
+                .into_iter()
+                .map(|id| {
+                    let mut iter = items[&id].values();
+                    let metadata = if map.is_empty() {
+                        None
+                    } else {
+                        Some(map[iter.next_back().unwrap().as_str().unwrap()].clone())
+                    };
+                    topbops::Item {
+                        values: iter.map(format_value).collect(),
+                        metadata,
+                    }
+                })
+                .collect(),
+        }
     };
     get_response_builder()
         .body(Body::from(serde_json::to_string(&response)?))
@@ -418,6 +425,30 @@ async fn get_list_doc(
     } else {
         todo!()
     }
+}
+
+async fn create_list(
+    db: DatabaseClient,
+    session: Arc<SessionClient>,
+    user_id: UserId,
+) -> Result<Response<Body>, Error> {
+    let list = List {
+        id: Uuid::new_v4().to_hyphenated().to_string(),
+        user_id: user_id.0,
+        mode: ListMode::User(None),
+        name: String::from("New List"),
+        sources: Vec::new(),
+        iframe: None,
+        items: Vec::new(),
+        favorite: false,
+        query: String::from("SELECT name, user_score FROM tracks"),
+    };
+    create_user_list(db, session, list.clone(), false).await?;
+    get_response_builder()
+        .header("Content-Type", HeaderValue::from_static("application/json"))
+        .status(StatusCode::CREATED)
+        .body(Body::from(serde_json::to_string(&list)?))
+        .map_err(Error::from)
 }
 
 async fn update_list(
