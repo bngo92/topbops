@@ -21,7 +21,7 @@ struct MatchData {
 
 pub enum Msg {
     LoadRandom(ItemQuery),
-    UpdateStats((String, String, String)),
+    UpdateStats((String, String)),
 }
 
 #[derive(Clone, Eq, PartialEq, Properties)]
@@ -68,12 +68,11 @@ impl Component for Match {
             Mode::Round => String::from("Random Rounds"),
         };
         let Some(MatchData{left, right, query}) = self.data.clone() else { return html! {}; };
-        let list = &ctx.props().id;
-        let left_param = (list.clone(), left.id.clone(), right.id.clone());
+        let left_param = (left.id.clone(), right.id.clone());
         let on_left_select = ctx
             .link()
             .callback(move |_| Msg::UpdateStats(left_param.clone()));
-        let right_param = (list.clone(), right.id.clone(), left.id.clone());
+        let right_param = (right.id.clone(), left.id.clone());
         let on_right_select = ctx
             .link()
             .callback(move |_| Msg::UpdateStats(right_param.clone()));
@@ -142,7 +141,8 @@ impl Component for Match {
                 self.data = Some(MatchData { left, right, query });
                 true
             }
-            Msg::UpdateStats((list, win, lose)) => {
+            Msg::UpdateStats((win, lose)) => {
+                let list = ctx.props().id.clone();
                 ctx.link().send_future(async move {
                     crate::update_stats(&list, &win, &lose).await.unwrap();
                     let query = crate::query_items(&list).await.unwrap();
