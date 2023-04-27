@@ -1,6 +1,6 @@
 use serde_json::Value;
 use std::collections::HashMap;
-use topbops::{ItemMetadata, ItemQuery, List};
+use topbops::{ItemMetadata, ItemQuery, List, ListMode};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlInputElement, HtmlSelectElement, Request, RequestInit, RequestMode};
@@ -11,6 +11,7 @@ enum EditState {
     Success(
         List,
         Vec<(ItemMetadata, String, String, NodeRef, NodeRef)>,
+        NodeRef,
         NodeRef,
     ),
 }
@@ -51,7 +52,7 @@ impl Component for Edit {
         let disabled = crate::get_user().is_none();
         match &self.state {
             EditState::Fetching => html! {},
-            EditState::Success(list, items, favorite_ref) => {
+            EditState::Success(list, items, name_ref, favorite_ref) => {
                 let html = items.iter().map(|(item, rating, hidden, rating_ref, hidden_ref)| {
                     let checked = hidden == "true";
                     html! {
@@ -83,8 +84,17 @@ impl Component for Edit {
                 let save = ctx.link().callback(|_| Msg::Save);
                 html! {
                     <div>
-                        <h1>{&list.name}</h1>
+                        if matches!(list.mode, ListMode::External) {
+                            <h1>{&list.name}</h1>
+                        }
                         <form>
+                            if !matches!(list.mode, ListMode::External) {
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <input class="form-control" value={Some(list.name.clone())} ref={name_ref.clone()} placeholder="Name"/>
+                                    </div>
+                                </div>
+                            }
                             <div class="row">
                                 <label class="col-sm-1">{"Favorite"}</label>
                                 <div class="col-sm-5">
@@ -135,11 +145,15 @@ impl Component for Edit {
                         )
                     })
                     .collect();
-                self.state = EditState::Success(list, items, NodeRef::default());
+                self.state =
+                    EditState::Success(list, items, NodeRef::default(), NodeRef::default());
                 true
             }
             Msg::Save => {
-                let EditState::Success(list, items, favorite_ref) = &mut self.state else { unreachable!() };
+                let EditState::Success(list, items, name_ref, favorite_ref) = &mut self.state else { unreachable!() };
+                if !matches!(list.mode, ListMode::External) {
+                    list.name = name_ref.cast::<HtmlInputElement>().unwrap().value();
+                }
                 list.favorite = favorite_ref.cast::<HtmlInputElement>().unwrap().checked();
                 let list = list.clone();
                 ctx.link().send_future(async move {
@@ -197,7 +211,7 @@ impl Component for Edit {
             // Update the rating and hidden state values if the save request is successful.
             // We check if the values are the same to avoid no-op requests.
             Msg::SaveSuccess(updates) => {
-                let EditState::Success(_, items, _) = &mut self.state else { unreachable!() };
+                let EditState::Success(_, items, _, _) = &mut self.state else { unreachable!() };
                 for (i, update) in updates {
                     for (k, v) in update {
                         let (_item, rating, hidden, _rating_ref, _hidden_ref) = &mut items[i];
