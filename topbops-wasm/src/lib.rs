@@ -131,8 +131,10 @@ impl Component for App {
 }
 
 pub enum HomeMsg {
+    None,
     ToggleHelp,
     Load(Vec<List>),
+    Create,
     Import,
 }
 
@@ -171,6 +173,7 @@ impl Component for Home {
         } else {
             "https://open.spotify.com/playlist/5MztFbRbMpyxbVYuOSfQV9?si=9db089ab25274efa"
         };
+        let create = ctx.link().callback(|_| HomeMsg::Create);
         let import = ctx.link().callback(|_| HomeMsg::Import);
         html! {
           <div>
@@ -214,6 +217,7 @@ impl Component for Home {
             <div class="row mt-3">
             {for self.lists.iter().map(|l| html! {<Widget list={l.clone()} select_ref={self.select_ref.clone()}/>})}
             </div>
+            <button type="button" class="btn btn-primary" onclick={create} {disabled}>{"Create List"}</button>
             <h1>{"My Spotify Playlists"}</h1>
             <form>
               <div class="row">
@@ -231,6 +235,7 @@ impl Component for Home {
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
+            HomeMsg::None => false,
             HomeMsg::ToggleHelp => {
                 self.help_collapsed = !self.help_collapsed;
                 true
@@ -238,6 +243,15 @@ impl Component for Home {
             HomeMsg::Load(lists) => {
                 self.lists = lists;
                 true
+            }
+            HomeMsg::Create => {
+                let navigator = ctx.link().navigator().unwrap();
+                ctx.link().send_future(async move {
+                    let list = create_list().await.unwrap();
+                    navigator.push(&Route::Edit { id: list.id });
+                    HomeMsg::None
+                });
+                false
             }
             HomeMsg::Import => {
                 let input = self.import_ref.cast::<HtmlSelectElement>().unwrap().value();
@@ -443,6 +457,18 @@ async fn fetch_lists(favorite: bool) -> Result<Vec<List>, JsValue> {
 async fn fetch_list(id: &str) -> Result<List, JsValue> {
     let window = web_sys::window().expect("no global `window` exists");
     let request = query(&format!("/api/lists/{}", id), "GET")?;
+    let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
+    let resp: Response = resp_value.dyn_into()?;
+    let json = JsFuture::from(resp.json()?).await?;
+    Ok(serde_wasm_bindgen::from_value(json).unwrap())
+}
+
+async fn create_list() -> Result<List, JsValue> {
+    let window = web_sys::window().expect("no global `window` exists");
+    let request = Request::new_with_str_and_init(
+        "/api/lists",
+        RequestInit::new().method("POST").mode(RequestMode::Cors),
+    )?;
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
     let json = JsFuture::from(resp.json()?).await?;
