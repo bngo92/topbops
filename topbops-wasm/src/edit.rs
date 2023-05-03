@@ -1,6 +1,6 @@
 use serde_json::Value;
 use std::collections::HashMap;
-use topbops::{ItemMetadata, ItemQuery, List, ListMode};
+use topbops::{ItemMetadata, ItemQuery, List, ListMode, Source, SourceType};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlInputElement, HtmlSelectElement, Request, RequestInit, RequestMode};
@@ -10,6 +10,7 @@ enum EditState {
     Fetching,
     Success(
         List,
+        Vec<(NodeRef, NodeRef)>,
         Vec<(ItemMetadata, String, String, NodeRef, NodeRef)>,
         NodeRef,
         NodeRef,
@@ -19,6 +20,9 @@ enum EditState {
 pub enum Msg {
     None,
     Load(List, ItemQuery),
+    AddSource,
+    DeleteSource(usize),
+    DeleteNewSource(usize),
     Save,
     SaveSuccess(Vec<(usize, HashMap<String, Value>)>),
 }
@@ -52,7 +56,36 @@ impl Component for Edit {
         let disabled = crate::get_user().is_none();
         match &self.state {
             EditState::Fetching => html! {},
-            EditState::Success(list, items, name_ref, favorite_ref) => {
+            EditState::Success(list, new_sources, items, name_ref, favorite_ref) => {
+                let source_html = list.sources.iter().enumerate().map(|(i, source)| {
+                    let onclick = ctx.link().callback(move |_| Msg::DeleteSource(i));
+                    html! {
+                        <div class="row mb-1">
+                            <label class="col-12 col-lg-9 col-xl-8 col-form-label">{&source.name}</label>
+                            if !matches!(list.mode, ListMode::External) {
+                                <div class="col-1">
+                                    <button type="button" class="btn btn-danger" {onclick}>{"Delete"}</button>
+                                </div>
+                            }
+                        </div>
+                    }
+                });
+                let new_source_html = new_sources.iter().enumerate().map(|(i, (source, id))| {
+                    let onclick = ctx.link().callback(move |_| Msg::DeleteNewSource(i));
+                    html! {
+                        <div class="row mb-1">
+                            <div class="col-2">
+                                <select ref={source} class="form-select">
+                                    <option>{"Spotify"}</option>
+                                </select>
+                            </div>
+                            <input class="col-12 col-lg-9 col-xl-8 col-form-label" ref={id}/>
+                            <div class="col-1">
+                                <button type="button" class="btn btn-danger" {onclick}>{"Delete"}</button>
+                            </div>
+                        </div>
+                    }
+                });
                 let html = items.iter().map(|(item, rating, hidden, rating_ref, hidden_ref)| {
                     let checked = hidden == "true";
                     html! {
@@ -81,6 +114,7 @@ impl Component for Edit {
                     }
                 });
                 let checked = list.favorite;
+                let add_source = ctx.link().callback(|_| Msg::AddSource);
                 let save = ctx.link().callback(|_| Msg::Save);
                 html! {
                     <div>
@@ -105,7 +139,17 @@ impl Component for Edit {
                             </div>
                         </form>
                         <div class="row">
-                            <p class="col-lg-8 col-xl-7"></p>
+                            <h2>{"Data Sources"}</h2>
+                        </div>
+                        <form>
+                            {for source_html}
+                            {for new_source_html}
+                            if !matches!(list.mode, ListMode::External) {
+                                <button type="button" class="btn btn-primary" onclick={add_source}>{"Add source"}</button>
+                            }
+                        </form>
+                        <div class="row">
+                            <h2 class="col-lg-8 col-xl-7">{"Items"}</h2>
                             <p class="col-3 col-lg-2 col-xl-1"><strong>{"Rating"}</strong></p>
                             <p class="col-1"><strong>{"Hidden"}</strong></p>
                         </div>
@@ -145,16 +189,55 @@ impl Component for Edit {
                         )
                     })
                     .collect();
-                self.state =
-                    EditState::Success(list, items, NodeRef::default(), NodeRef::default());
+                self.state = EditState::Success(
+                    list,
+                    Vec::new(),
+                    items,
+                    NodeRef::default(),
+                    NodeRef::default(),
+                );
+                true
+            }
+            Msg::AddSource => {
+                let EditState::Success(_, new_sources, _, _, _) = &mut self.state else { unreachable!() };
+                new_sources.push((NodeRef::default(), NodeRef::default()));
+                true
+            }
+            Msg::DeleteSource(i) => {
+                let EditState::Success(list, _, _, _, _) = &mut self.state else { unreachable!() };
+                list.sources.remove(i);
+                true
+            }
+            Msg::DeleteNewSource(i) => {
+                let EditState::Success(_, new_sources, _, _, _) = &mut self.state else { unreachable!() };
+                new_sources.remove(i);
                 true
             }
             Msg::Save => {
-                let EditState::Success(list, items, name_ref, favorite_ref) = &mut self.state else { unreachable!() };
+                let EditState::Success(list, new_refs, items, name_ref, favorite_ref) = &mut self.state else { unreachable!() };
                 if !matches!(list.mode, ListMode::External) {
                     list.name = name_ref.cast::<HtmlInputElement>().unwrap().value();
                 }
                 list.favorite = favorite_ref.cast::<HtmlInputElement>().unwrap().checked();
+                for (source, id) in new_refs {
+                    let source = source.cast::<HtmlSelectElement>().unwrap().value();
+                    let id = id.cast::<HtmlInputElement>().unwrap().value();
+                    match &*source {
+                        "Spotify" => {
+                            if let Some(source) = crate::parse_spotify_source(&id) {
+                                list.sources.push(Source {
+                                    source_type: SourceType::Spotify(source),
+                                    name: String::new(),
+                                });
+                            } else {
+                                return false;
+                            }
+                        }
+                        _ => {
+                            return false;
+                        }
+                    };
+                }
                 let list = list.clone();
                 ctx.link().send_future(async move {
                     crate::update_list(&list.id, list.clone()).await.unwrap();
@@ -211,7 +294,7 @@ impl Component for Edit {
             // Update the rating and hidden state values if the save request is successful.
             // We check if the values are the same to avoid no-op requests.
             Msg::SaveSuccess(updates) => {
-                let EditState::Success(_, items, _, _) = &mut self.state else { unreachable!() };
+                let EditState::Success(_, _, items, _, _) = &mut self.state else { unreachable!() };
                 for (i, update) in updates {
                     for (k, v) in update {
                         let (_item, rating, hidden, _rating_ref, _hidden_ref) = &mut items[i];

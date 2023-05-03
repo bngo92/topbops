@@ -16,7 +16,7 @@ rustup run nightly wasm-pack build --target web
 - [x] Support hiding items
 - [ ] Support deleting lists
 ### P1
-- [ ] Support user lists
+- [x] Support user lists
 - [ ] Add dedicated import page
 - [ ] Add documentation
 - [ ] Support resetting items
