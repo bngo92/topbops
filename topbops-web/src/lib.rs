@@ -1,6 +1,7 @@
 use azure_data_cosmos::prelude::CosmosEntity;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use topbops::ItemMetadata;
 
 pub mod query;
 pub mod spotify;
@@ -44,6 +45,13 @@ impl CosmosEntity for Item {
     fn partition_key(&self) -> Self::Entity {
         self.user_id.clone()
     }
+}
+
+pub fn convert_items(items: &[Item]) -> Vec<ItemMetadata> {
+    items
+        .iter()
+        .map(|i| ItemMetadata::new(i.id.clone(), i.name.clone(), i.iframe.clone()))
+        .collect()
 }
 
 #[allow(clippy::enum_variant_names)]

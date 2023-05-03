@@ -20,7 +20,7 @@ use std::sync::{Arc, RwLock};
 use tokio::fs::File;
 #[cfg(feature = "dev")]
 use tokio::io::AsyncReadExt;
-use topbops::{ItemQuery, List, ListMode, Lists};
+use topbops::{ItemQuery, List, ListMode, Lists, SourceType};
 use topbops_web::{Error, Item, Token, UserId};
 use uuid::Uuid;
 
@@ -453,17 +453,35 @@ async fn create_list(
 
 async fn update_list(
     db: DatabaseClient,
-    _: Arc<SessionClient>,
+    session: Arc<SessionClient>,
     user_id: UserId,
     id: &str,
     body: &mut Body,
 ) -> Result<Response<Body>, Error> {
+    let current_list = get_list_doc(&db, &session, &user_id, id).await?;
     let client = db
         .clone()
         .collection_client("lists")
         .document_client(id, &user_id.0)?;
+    let session_copy = session
+        .session
+        .read()
+        .unwrap()
+        .clone()
+        .expect("session should be set by get_list_doc");
     let got = hyper::body::to_bytes(body).await?;
-    let list = serde_json::from_slice(&got)?;
+    let mut list: List = serde_json::from_slice(&got)?;
+    if current_list.sources != list.sources {
+        list.items.clear();
+        for source in &mut list.sources {
+            let SourceType::Spotify(spotify_source) = &source.source_type;
+            let (updated_source, items) =
+                topbops_web::spotify::get_source_and_items(&user_id, spotify_source).await?;
+            list.items.extend(topbops_web::convert_items(&items));
+            create_items(db.clone(), session_copy.clone(), items, false).await?;
+            *source = updated_source;
+        }
+    }
     client.replace_document::<List>(list).into_future().await?;
     get_response_builder()
         .status(StatusCode::NO_CONTENT)
@@ -794,6 +812,19 @@ async fn create_external_list(
         *session.session.write().unwrap() = Some(session_copy.clone());
         session_copy
     };
+    create_items(db, session, items, is_upsert).await?;
+    get_response_builder()
+        .status(StatusCode::CREATED)
+        .body(Body::empty())
+        .map_err(Error::from)
+}
+
+async fn create_items(
+    db: DatabaseClient,
+    session: ConsistencyLevel,
+    items: Vec<Item>,
+    is_upsert: bool,
+) -> Result<(), Error> {
     let items_client = db.clone().collection_client("items");
     futures::stream::iter(items.into_iter().map(move |item| {
         let items_client = items_client.clone();
@@ -817,10 +848,7 @@ async fn create_external_list(
     .buffered(5)
     .try_collect::<()>()
     .await?;
-    get_response_builder()
-        .status(StatusCode::CREATED)
-        .body(Body::empty())
-        .map_err(Error::from)
+    Ok(())
 }
 
 async fn update_items(
