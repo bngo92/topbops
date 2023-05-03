@@ -443,7 +443,7 @@ async fn create_list(
         favorite: false,
         query: String::from("SELECT name, user_score FROM tracks"),
     };
-    create_user_list(db, session, list.clone(), false).await?;
+    create_list_doc(db, session, list.clone(), false).await?;
     get_response_builder()
         .header("Content-Type", HeaderValue::from_static("application/json"))
         .status(StatusCode::CREATED)
@@ -720,7 +720,11 @@ async fn import_list(
         _ => todo!(),
     };
     list.favorite = favorite;
-    create_external_list(db, session, list, items, user_id.0 == DEMO_USER).await
+    create_external_list(db, session, list, items, user_id.0 == DEMO_USER).await?;
+    get_response_builder()
+        .status(StatusCode::CREATED)
+        .body(Body::empty())
+        .map_err(Error::from)
 }
 
 async fn get_item_doc(
@@ -756,25 +760,25 @@ fn update_stats(
     *lose_losses += 1;
 }
 
-async fn create_user_list(
+async fn create_list_doc(
     db: DatabaseClient,
     session: Arc<SessionClient>,
     list: List,
     is_upsert: bool,
 ) -> Result<(), Error> {
-    let list_client = db.clone().collection_client("lists");
+    let list_client = db.collection_client("lists");
     let session_copy = session.session.read().unwrap().clone();
     if let Some(session) = session_copy {
         list_client
             .create_document(list)
-            .is_upsert(true)
+            .is_upsert(is_upsert)
             .consistency_level(session.clone())
             .into_future()
             .await?;
     } else {
         let resp = list_client
             .create_document(list)
-            .is_upsert(true)
+            .is_upsert(is_upsert)
             .into_future()
             .await
             .unwrap();
@@ -783,6 +787,7 @@ async fn create_user_list(
     Ok(())
 }
 
+// TODO: inline
 async fn create_external_list(
     db: DatabaseClient,
     session: Arc<SessionClient>,
@@ -790,33 +795,15 @@ async fn create_external_list(
     items: Vec<Item>,
     // Used to reset demo user data
     is_upsert: bool,
-) -> Result<Response<Body>, Error> {
-    let list_client = db.clone().collection_client("lists");
-    let session_copy = session.session.read().unwrap().clone();
-    let session = if let Some(session) = session_copy {
-        list_client
-            .create_document(list)
-            .is_upsert(true)
-            .consistency_level(session.clone())
-            .into_future()
-            .await?;
-        session
-    } else {
-        let resp = list_client
-            .create_document(list)
-            .is_upsert(true)
-            .into_future()
-            .await
-            .unwrap();
-        let session_copy = ConsistencyLevel::Session(resp.session_token);
-        *session.session.write().unwrap() = Some(session_copy.clone());
-        session_copy
-    };
-    create_items(db, session, items, is_upsert).await?;
-    get_response_builder()
-        .status(StatusCode::CREATED)
-        .body(Body::empty())
-        .map_err(Error::from)
+) -> Result<(), Error> {
+    create_list_doc(db.clone(), Arc::clone(&session), list, is_upsert).await?;
+    let session = session
+        .session
+        .read()
+        .unwrap()
+        .clone()
+        .expect("session should be set by create_list_doc");
+    create_items(db, session, items, is_upsert).await
 }
 
 async fn create_items(
@@ -830,25 +817,28 @@ async fn create_items(
         let items_client = items_client.clone();
         let session = session.clone();
         async move {
-            items_client
+            match items_client
                 .create_document(item)
                 .is_upsert(is_upsert)
                 .consistency_level(session)
                 .into_future()
                 .await
-                .map(|_| ())
-                .or_else(|e| {
+            {
+                Ok(_) => Ok(()),
+                Err(e) => {
                     if let azure_core::StatusCode::Conflict = e.as_http_error().unwrap().status() {
-                        return Ok(());
+                        Ok(())
+                    } else {
+                        Err(e)
                     }
-                    Err(e)
-                })
+                }
+            }
         }
     }))
     .buffered(5)
-    .try_collect::<()>()
-    .await?;
-    Ok(())
+    .try_collect()
+    .await
+    .map_err(Error::from)
 }
 
 async fn update_items(
@@ -925,7 +915,7 @@ async fn main() {
         .await
         .unwrap();
         // Generate IDs using random but constant UUIDs
-        create_user_list(
+        create_list_doc(
             client.clone().database_client("topbops"),
             Arc::clone(&session),
             List {
@@ -943,7 +933,7 @@ async fn main() {
         )
         .await
         .unwrap();
-        create_user_list(
+        create_list_doc(
             client.clone().database_client("topbops"),
             Arc::clone(&session),
             List {
