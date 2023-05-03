@@ -4,7 +4,7 @@ use hyper::{Body, Client, Method, Request, Uri};
 use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use topbops::{ItemMetadata, List, ListMode, Source, SourceType, Spotify};
+use topbops::{List, ListMode, Source, SourceType, Spotify};
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Playlists {
@@ -66,6 +66,16 @@ pub struct User {
     pub id: String,
 }
 
+pub async fn get_source_and_items(
+    user_id: &UserId,
+    source: &Spotify,
+) -> Result<(Source, Vec<super::Item>), Error> {
+    match source {
+        Spotify::Playlist(id) => get_playlist(user_id, id).await,
+        Spotify::Album(id) => get_album(user_id, id).await,
+    }
+}
+
 pub async fn import(user_id: &UserId, id: &str) -> Result<(List, Vec<super::Item>), Error> {
     match id.split_once(':') {
         Some(("playlist", id)) => import_playlist(user_id, id).await,
@@ -74,10 +84,10 @@ pub async fn import(user_id: &UserId, id: &str) -> Result<(List, Vec<super::Item
     }
 }
 
-pub async fn import_playlist(
+async fn get_playlist(
     user_id: &UserId,
     playlist_id: &str,
-) -> Result<(List, Vec<super::Item>), Error> {
+) -> Result<(Source, Vec<super::Item>), Error> {
     let token = get_token().await?;
 
     let https = HttpsConnector::new();
@@ -138,30 +148,38 @@ pub async fn import_playlist(
                 .map(|i| new_spotify_item(i.track, user_id)),
         );
     }
+    Ok((
+        Source {
+            source_type: SourceType::Spotify(Spotify::Playlist(playlist_id.to_owned())),
+            name: playlist.name,
+        },
+        items,
+    ))
+}
+
+pub async fn import_playlist(
+    user_id: &UserId,
+    playlist_id: &str,
+) -> Result<(List, Vec<super::Item>), Error> {
+    let (source, items) = get_playlist(user_id, playlist_id).await?;
     let list = List {
         id: playlist_id.to_owned(),
         user_id: user_id.0.clone(),
         mode: ListMode::External,
-        name: playlist.name.clone(),
-        sources: vec![Source {
-            source_type: SourceType::Spotify(Spotify::Playlist(playlist.href)),
-            name: playlist.name,
-        }],
+        name: source.name.clone(),
+        sources: vec![source],
         iframe: Some(format!(
             "https://open.spotify.com/embed/playlist/{}?utm_source=generator",
             playlist_id
         )),
-        items: items
-            .iter()
-            .map(|i| ItemMetadata::new(i.id.clone(), i.name.clone(), i.iframe.clone()))
-            .collect(),
+        items: super::convert_items(&items),
         favorite: false,
         query: String::from("SELECT name, user_score FROM tracks"),
     };
     Ok((list, items))
 }
 
-pub async fn import_album(user_id: &UserId, id: &str) -> Result<(List, Vec<super::Item>), Error> {
+async fn get_album(user_id: &UserId, id: &str) -> Result<(Source, Vec<super::Item>), Error> {
     let token = get_token().await?;
 
     let https = HttpsConnector::new();
@@ -220,24 +238,28 @@ pub async fn import_album(user_id: &UserId, id: &str) -> Result<(List, Vec<super
     .buffered(5)
     .try_collect()
     .await?;
+    Ok((
+        Source {
+            source_type: SourceType::Spotify(Spotify::Album(id.to_owned())),
+            name: album.name,
+        },
+        items,
+    ))
+}
 
+pub async fn import_album(user_id: &UserId, id: &str) -> Result<(List, Vec<super::Item>), Error> {
+    let (source, items) = get_album(user_id, id).await?;
     let list = List {
         id: id.to_owned(),
         user_id: user_id.0.clone(),
         mode: ListMode::External,
-        name: album.name.clone(),
-        sources: vec![Source {
-            source_type: SourceType::Spotify(Spotify::Album(album.href)),
-            name: album.name,
-        }],
+        name: source.name.clone(),
+        sources: vec![source],
         iframe: Some(format!(
             "https://open.spotify.com/embed/album/{}?utm_source=generator",
             id
         )),
-        items: items
-            .iter()
-            .map(|i| ItemMetadata::new(i.id.clone(), i.name.clone(), i.iframe.clone()))
-            .collect(),
+        items: super::convert_items(&items),
         favorite: false,
         query: String::from("SELECT name, user_score FROM tracks"),
     };
