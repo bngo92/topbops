@@ -8,7 +8,7 @@ use regex::Regex;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::rc::Rc;
-use topbops::{ItemQuery, List, ListMode, Lists};
+use topbops::{ItemQuery, List, ListMode, Lists, Spotify};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
@@ -255,17 +255,17 @@ impl Component for Home {
             }
             HomeMsg::Import => {
                 let input = self.import_ref.cast::<HtmlSelectElement>().unwrap().value();
-                let playlist_re =
-                    Regex::new(r"https://open.spotify.com/playlist/([[:alnum:]]*)").unwrap();
-                let album_re =
-                    Regex::new(r"https://open.spotify.com/album/([[:alnum:]]*)").unwrap();
                 // TODO: handle bad input
-                let id = if let Some(input) = playlist_re.captures_iter(&input).next() {
-                    format!("spotify:playlist:{}", &input[1])
-                } else if let Some(input) = album_re.captures_iter(&input).next() {
-                    format!("spotify:album:{}", &input[1])
-                } else {
-                    return false;
+                let id = match parse_spotify_source(&input) {
+                    Some(Spotify::Playlist(id)) => {
+                        format!("spotify:playlist:{}", id)
+                    }
+                    Some(Spotify::Album(id)) => {
+                        format!("spotify:album:{}", id)
+                    }
+                    None => {
+                        return false;
+                    }
                 };
                 let favorite = ctx.props().favorite;
                 ctx.link().send_future(async move {
@@ -283,6 +283,18 @@ impl Component for Home {
             .send_future(Home::fetch_lists(ctx.props().favorite));
         true
     }
+}
+
+fn parse_spotify_source(input: &str) -> Option<Spotify> {
+    let playlist_re = Regex::new(r"https://open.spotify.com/playlist/([[:alnum:]]*)").unwrap();
+    let album_re = Regex::new(r"https://open.spotify.com/album/([[:alnum:]]*)").unwrap();
+    return if let Some(mat) = playlist_re.find_iter(input).next() {
+        Some(Spotify::Playlist(mat.as_str().to_owned()))
+    } else if let Some(mat) = album_re.find_iter(input).next() {
+        Some(Spotify::Album(mat.as_str().to_owned()))
+    } else {
+        None
+    };
 }
 
 impl Home {
