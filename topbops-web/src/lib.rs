@@ -4,7 +4,7 @@ use serde_json::{Map, Value};
 use topbops::ItemMetadata;
 
 pub mod query;
-pub mod spotify;
+pub mod source;
 
 #[derive(Clone)]
 pub struct UserId(pub String);

@@ -66,17 +66,7 @@ pub struct User {
     pub id: String,
 }
 
-pub async fn get_source_and_items(
-    user_id: &UserId,
-    source: &Spotify,
-) -> Result<(Source, Vec<super::Item>), Error> {
-    match source {
-        Spotify::Playlist(id) => get_playlist(user_id, id).await,
-        Spotify::Album(id) => get_album(user_id, id).await,
-    }
-}
-
-pub async fn import(user_id: &UserId, id: &str) -> Result<(List, Vec<super::Item>), Error> {
+pub async fn import(user_id: &UserId, id: &str) -> Result<(List, Vec<crate::Item>), Error> {
     match id.split_once(':') {
         Some(("playlist", id)) => import_playlist(user_id, id).await,
         Some(("album", id)) => import_album(user_id, id).await,
@@ -84,10 +74,10 @@ pub async fn import(user_id: &UserId, id: &str) -> Result<(List, Vec<super::Item
     }
 }
 
-async fn get_playlist(
+pub async fn get_playlist(
     user_id: &UserId,
     playlist_id: &str,
-) -> Result<(Source, Vec<super::Item>), Error> {
+) -> Result<(Source, Vec<crate::Item>), Error> {
     let token = get_token().await?;
 
     let https = HttpsConnector::new();
@@ -160,7 +150,7 @@ async fn get_playlist(
 pub async fn import_playlist(
     user_id: &UserId,
     playlist_id: &str,
-) -> Result<(List, Vec<super::Item>), Error> {
+) -> Result<(List, Vec<crate::Item>), Error> {
     let (source, items) = get_playlist(user_id, playlist_id).await?;
     let list = List {
         id: playlist_id.to_owned(),
@@ -172,14 +162,14 @@ pub async fn import_playlist(
             "https://open.spotify.com/embed/playlist/{}?utm_source=generator",
             playlist_id
         )),
-        items: super::convert_items(&items),
+        items: crate::convert_items(&items),
         favorite: false,
         query: String::from("SELECT name, user_score FROM tracks"),
     };
     Ok((list, items))
 }
 
-async fn get_album(user_id: &UserId, id: &str) -> Result<(Source, Vec<super::Item>), Error> {
+pub async fn get_album(user_id: &UserId, id: &str) -> Result<(Source, Vec<crate::Item>), Error> {
     let token = get_token().await?;
 
     let https = HttpsConnector::new();
@@ -247,7 +237,7 @@ async fn get_album(user_id: &UserId, id: &str) -> Result<(Source, Vec<super::Ite
     ))
 }
 
-pub async fn import_album(user_id: &UserId, id: &str) -> Result<(List, Vec<super::Item>), Error> {
+pub async fn import_album(user_id: &UserId, id: &str) -> Result<(List, Vec<crate::Item>), Error> {
     let (source, items) = get_album(user_id, id).await?;
     let list = List {
         id: id.to_owned(),
@@ -259,14 +249,14 @@ pub async fn import_album(user_id: &UserId, id: &str) -> Result<(List, Vec<super
             "https://open.spotify.com/embed/album/{}?utm_source=generator",
             id
         )),
-        items: super::convert_items(&items),
+        items: crate::convert_items(&items),
         favorite: false,
         query: String::from("SELECT name, user_score FROM tracks"),
     };
     Ok((list, items))
 }
 
-async fn get_token() -> Result<super::Token, Error> {
+async fn get_token() -> Result<crate::Token, Error> {
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
     let uri: Uri = "https://accounts.spotify.com/api/token".parse().unwrap();
@@ -290,7 +280,7 @@ async fn get_token() -> Result<super::Token, Error> {
     serde_json::from_slice(&got).map_err(Error::from)
 }
 
-fn new_spotify_item(track: Track, user_id: &UserId) -> super::Item {
+fn new_spotify_item(track: Track, user_id: &UserId) -> crate::Item {
     let metadata: Map<_, _> = [
         (String::from("album"), Value::String(track.album.name)),
         (
@@ -318,7 +308,7 @@ fn new_spotify_item(track: Track, user_id: &UserId) -> super::Item {
     ]
     .into_iter()
     .collect();
-    super::Item {
+    crate::Item {
         iframe: Some(format!(
             "https://open.spotify.com/embed/track/{}?utm_source=generator",
             track.id
