@@ -21,7 +21,7 @@ use tokio::fs::File;
 #[cfg(feature = "dev")]
 use tokio::io::AsyncReadExt;
 use topbops::{ItemQuery, List, ListMode, Lists, SourceType};
-use topbops_web::{Error, Item, Token, UserId};
+use topbops_web::{query, source, Error, Item, Token, UserId};
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -298,7 +298,7 @@ async fn login(
         )
         .await?;
     let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let spotify_user: topbops_web::spotify::User = serde_json::from_slice(&got)?;
+    let spotify_user: source::spotify::User = serde_json::from_slice(&got)?;
 
     let user = User {
         id: Uuid::new_v4().to_hyphenated().to_string(),
@@ -367,8 +367,7 @@ async fn get_list_items(
         }
     } else {
         let db = db.collection_client("items");
-        let (query, fields, map, ids) =
-            topbops_web::query::rewrite_list_query(&list, &user_id).unwrap();
+        let (query, fields, map, ids) = query::rewrite_list_query(&list, &user_id).unwrap();
         let items: HashMap<_, _> = session
             .query_documents(db, query.to_string())
             .await?
@@ -476,7 +475,7 @@ async fn update_list(
         for source in &mut list.sources {
             let SourceType::Spotify(spotify_source) = &source.source_type;
             let (updated_source, items) =
-                topbops_web::spotify::get_source_and_items(&user_id, spotify_source).await?;
+                source::get_source_and_items(&user_id, spotify_source).await?;
             list.items.extend(topbops_web::convert_items(&items));
             create_items(db.clone(), session_copy.clone(), items, false).await?;
             *source = updated_source;
@@ -531,7 +530,7 @@ async fn _find_items(
         .collect::<Vec<_>>()[..] else { return Err("invalid finder".into()); };
 
     let db = db.collection_client("items");
-    let (query, fields) = topbops_web::query::rewrite_query(query, &user_id)?;
+    let (query, fields) = query::rewrite_query(query, &user_id)?;
     let values: Vec<Map<String, Value>> = session
         .query_documents(db, query.to_string())
         .await
@@ -716,7 +715,7 @@ async fn import_list(
     favorite: bool,
 ) -> Result<Response<Body>, Error> {
     let (mut list, items) = match id.split_once(':') {
-        Some(("spotify", id)) => topbops_web::spotify::import(&user_id, id).await?,
+        Some(("spotify", id)) => source::spotify::import(&user_id, id).await?,
         _ => todo!(),
     };
     list.favorite = favorite;
