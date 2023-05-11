@@ -43,8 +43,8 @@ enum Route {
 
 fn switch(routes: Route) -> Html {
     match routes {
-        Route::Home => html! { <Home favorite=true/> },
-        Route::Lists => html! { <Home favorite=false/> },
+        Route::Home => html! { <Home show_all_lists=false/> },
+        Route::Lists => html! { <Home show_all_lists=true/> },
         Route::Edit { id } => html! { <Edit {id}/> },
         Route::Match { id } => html! { <Match {id}/> },
         Route::Tournament { id } => html! {
@@ -140,7 +140,7 @@ pub enum HomeMsg {
 
 #[derive(PartialEq, Properties)]
 pub struct HomeProps {
-    favorite: bool,
+    show_all_lists: bool,
 }
 
 pub struct Home {
@@ -157,7 +157,7 @@ impl Component for Home {
     fn create(ctx: &Context<Self>) -> Self {
         let select_ref = NodeRef::default();
         ctx.link()
-            .send_future(Home::fetch_lists(ctx.props().favorite));
+            .send_future(Home::fetch_lists(!ctx.props().show_all_lists));
         Home {
             help_collapsed: get_user().is_some(),
             lists: Vec::new(),
@@ -218,17 +218,19 @@ impl Component for Home {
             {for self.lists.iter().map(|l| html! {<Widget list={l.clone()} select_ref={self.select_ref.clone()}/>})}
             </div>
             <button type="button" class="btn btn-primary" onclick={create} {disabled}>{"Create List"}</button>
-            <h1>{"My Spotify Playlists"}</h1>
-            <form>
-              <div class="row">
-                <div class="col-12 col-md-8 col-lg-9 pt-1">
-                  <input ref={self.import_ref.clone()} type="text" class="col-12" value={default_import} {disabled}/>
+            if ctx.props().show_all_lists {
+              <h1>{"My Spotify Playlists"}</h1>
+              <form>
+                <div class="row">
+                  <div class="col-12 col-md-8 col-lg-9 pt-1">
+                    <input ref={self.import_ref.clone()} type="text" class="col-12" value={default_import} {disabled}/>
+                  </div>
+                  <div class="col-2 col-lg-1 pe-2">
+                    <button type="button" class="col-12 btn btn-success" onclick={import} {disabled}>{"Save"}</button>
+                  </div>
                 </div>
-                <div class="col-2 col-lg-1 pe-2">
-                  <button type="button" class="col-12 btn btn-success" onclick={import} {disabled}>{"Save"}</button>
-                </div>
-              </div>
-            </form>
+              </form>
+            }
           </div>
         }
     }
@@ -267,10 +269,9 @@ impl Component for Home {
                         return false;
                     }
                 };
-                let favorite = ctx.props().favorite;
                 ctx.link().send_future(async move {
                     import_list(&id).await.unwrap();
-                    Home::fetch_lists(favorite).await
+                    Home::fetch_lists(false).await
                 });
                 false
             }
@@ -280,7 +281,7 @@ impl Component for Home {
     // Changing the favorite prop using BrowserRouter doesn't re-render so manually do it
     fn changed(&mut self, ctx: &Context<Self>, _: &Self::Properties) -> bool {
         ctx.link()
-            .send_future(Home::fetch_lists(ctx.props().favorite));
+            .send_future(Home::fetch_lists(!ctx.props().show_all_lists));
         true
     }
 }
