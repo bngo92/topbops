@@ -289,10 +289,10 @@ impl Component for Home {
 fn parse_spotify_source(input: &str) -> Option<Spotify> {
     let playlist_re = Regex::new(r"https://open.spotify.com/playlist/([[:alnum:]]*)").unwrap();
     let album_re = Regex::new(r"https://open.spotify.com/album/([[:alnum:]]*)").unwrap();
-    return if let Some(mat) = playlist_re.find_iter(input).next() {
-        Some(Spotify::Playlist(mat.as_str().to_owned()))
-    } else if let Some(mat) = album_re.find_iter(input).next() {
-        Some(Spotify::Album(mat.as_str().to_owned()))
+    return if let Some(caps) = playlist_re.captures_iter(input).next() {
+        Some(Spotify::Playlist(caps[1].to_owned()))
+    } else if let Some(caps) = album_re.captures_iter(input).next() {
+        Some(Spotify::Album(caps[1].to_owned()))
     } else {
         None
     };
