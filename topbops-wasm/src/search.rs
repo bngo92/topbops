@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use topbops::ItemQuery;
-use web_sys::HtmlSelectElement;
+use web_sys::{HtmlSelectElement, KeyboardEvent};
 use yew::{html, Component, Context, Html, NodeRef, Properties};
 use yew_router::scope_ext::RouterScopeExt;
 
 pub enum Msg {
+    None,
     Fetching,
     Success(ItemQuery),
     Failed(String),
@@ -56,9 +57,17 @@ impl Component for Search {
         } else {
             ("col-12", None)
         };
+        let onkeydown = ctx.link().callback(|event: KeyboardEvent| {
+            if event.key_code() == 13 {
+                event.prevent_default();
+                Msg::Fetching
+            } else {
+                Msg::None
+            }
+        });
         html! {
             <div>
-                <form>
+                <form {onkeydown}>
                     <div class="row">
                         <div class="col-12 col-md-10 col-xl-11 pt-1">
                             <input ref={self.search_ref.clone()} type="text" {class} placeholder={default_search}/>
@@ -87,6 +96,7 @@ impl Component for Search {
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
+            Msg::None => false,
             Msg::Fetching => {
                 let input = self.search_ref.cast::<HtmlSelectElement>().unwrap().value();
                 ctx.link().send_future(async move {
