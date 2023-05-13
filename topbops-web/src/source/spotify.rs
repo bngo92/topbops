@@ -313,7 +313,7 @@ fn new_spotify_item(track: Track, user_id: &UserId) -> crate::Item {
             "https://open.spotify.com/embed/track/{}?utm_source=generator",
             track.id
         )),
-        id: track.id,
+        id: format!("track:{}", track.id),
         user_id: user_id.0.clone(),
         r#type: String::from("track"),
         name: track.name,

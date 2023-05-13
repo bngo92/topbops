@@ -62,17 +62,17 @@ fn rewrite_query_impl(
     let mut query = parse_select(s)?;
     let SetExpr::Select(select) = &mut query.body else { return Err("Only SELECT queries are supported".into()) };
 
+    // TODO: do we still need this
     // TODO: support having via subquery
     let Some(from) = select.from.get_mut(0) else { return Err("FROM clause is omitted".into()); };
-    let from = if let TableFactor::Table { name, alias, .. } = &mut from.relation {
+    if let TableFactor::Table { name, alias, .. } = &mut from.relation {
         if alias.is_some() {
             return Err("alias is not supported".into());
         }
-        std::mem::replace(&mut name.0[0].value, String::from("c"))
+        name.0[0].value = String::from("c");
     } else {
         todo!();
     };
-    let from = &from[..from.len() - 1];
 
     let column_names = select.projection.iter().map(ToString::to_string).collect();
     for expr in &mut select.projection {
@@ -94,14 +94,6 @@ fn rewrite_query_impl(
         ])),
         op: BinaryOperator::Eq,
         right: Box::new(Expr::Identifier(Ident::new(format!("\"{}\"", user_id.0)))),
-    });
-    let table_column_map = Box::new(Expr::BinaryOp {
-        left: Box::new(Expr::CompoundIdentifier(vec![
-            Ident::new("c"),
-            Ident::new("type"),
-        ])),
-        op: BinaryOperator::Eq,
-        right: Box::new(Expr::Identifier(Ident::new(format!("\"{}\"", from)))),
     });
     // If the query doesn't filter on hidden, default to hiding hidden items
     let hidden = || {
@@ -132,11 +124,7 @@ fn rewrite_query_impl(
     select.selection = Some(Expr::BinaryOp {
         left: required_user_id,
         op: BinaryOperator::And,
-        right: Box::new(Expr::BinaryOp {
-            left: table_column_map,
-            op: BinaryOperator::And,
-            right: sanitized_select,
-        }),
+        right: sanitized_select,
     });
     for expr in &mut select.group_by {
         rewrite_expr(expr);
@@ -249,7 +237,7 @@ mod test {
         let (query, column_names) = rewrite_query("SELECT name, user_score FROM tracks").unwrap();
         assert_eq!(
             query.to_string(),
-            "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.hidden = false"
+            "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.hidden = false"
         );
         assert_eq!(column_names, vec!["name", "user_score"]);
     }
@@ -258,9 +246,9 @@ mod test {
     fn test_where() {
         for (input, expected) in [
             ("SELECT name, user_score FROM tracks WHERE user_score >= 1500",
-             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.user_score >= 1500 AND c.hidden = false"),
+             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.user_score >= 1500 AND c.hidden = false"),
             ("SELECT name, user_score FROM tracks WHERE user_score IN (1500)",
-             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.user_score IN (1500) AND c.hidden = false"),
+             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.user_score IN (1500) AND c.hidden = false"),
         ] {
             let (query, column_names) = rewrite_query(input).unwrap();
             assert_eq!(query.to_string(), expected);
@@ -272,7 +260,7 @@ mod test {
     fn test_group_by() {
         let (query, column_names) =
             rewrite_query("SELECT artists, AVG(user_score) FROM tracks GROUP BY artists").unwrap();
-        assert_eq!(query.to_string(), "SELECT c.metadata.artists, AVG(c.user_score) FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.hidden = false GROUP BY c.metadata.artists");
+        assert_eq!(query.to_string(), "SELECT c.metadata.artists, AVG(c.user_score) FROM c WHERE c.user_id = \"demo\" AND c.hidden = false GROUP BY c.metadata.artists");
         assert_eq!(column_names, vec!["artists", "AVG(user_score)"]);
     }
 
@@ -280,7 +268,7 @@ mod test {
     fn test_order_by() {
         let (query, column_names) =
             rewrite_query("SELECT name, user_score FROM tracks ORDER BY user_score").unwrap();
-        assert_eq!(query.to_string(), "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.hidden = false ORDER BY c.user_score");
+        assert_eq!(query.to_string(), "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.hidden = false ORDER BY c.user_score");
         assert_eq!(column_names, vec!["name", "user_score"]);
     }
 
@@ -289,7 +277,7 @@ mod test {
         let (query, column_names) = rewrite_query("SELECT COUNT(1) FROM tracks").unwrap();
         assert_eq!(
             query.to_string(),
-            "SELECT COUNT(1) FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.hidden = false"
+            "SELECT COUNT(1) FROM c WHERE c.user_id = \"demo\" AND c.hidden = false"
         );
         assert_eq!(column_names, vec!["COUNT(1)"]);
     }
@@ -300,7 +288,7 @@ mod test {
             rewrite_query("SELECT name, user_score FROM tracks WHERE hidden = false").unwrap();
         assert_eq!(
             query.to_string(),
-            "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.hidden = false"
+            "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.hidden = false"
         );
         assert_eq!(column_names, vec!["name", "user_score"]);
     }
@@ -311,7 +299,7 @@ mod test {
             rewrite_query("SELECT name, user_score FROM tracks WHERE hidden = true").unwrap();
         assert_eq!(
             query.to_string(),
-            "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.type = \"track\" AND c.hidden = true"
+            "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.hidden = true"
         );
         assert_eq!(column_names, vec!["name", "user_score"]);
     }

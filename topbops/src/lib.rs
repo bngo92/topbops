@@ -1,6 +1,7 @@
 #[cfg(feature = "azure")]
 use azure_data_cosmos::prelude::CosmosEntity;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Lists {
@@ -69,6 +70,7 @@ pub struct Source {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum SourceType {
+    Custom(Value),
     Spotify(Spotify),
 }
 
