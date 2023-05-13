@@ -20,7 +20,7 @@ use std::sync::{Arc, RwLock};
 use tokio::fs::File;
 #[cfg(feature = "dev")]
 use tokio::io::AsyncReadExt;
-use topbops::{ItemQuery, List, ListMode, Lists};
+use topbops::{ItemQuery, List, ListMode, Lists, Source, SourceType};
 use topbops_web::{query, source, Error, Item, Token, UserId};
 use uuid::Uuid;
 
@@ -132,7 +132,7 @@ async fn route(
                 (["items"], &Method::GET) => {
                     find_items(db, session, user_id, req.uri().query()).await
                 }
-                ([""], &Method::POST) => handle_action(db, session, user_id, req).await,
+                ([""], &Method::POST) => handle_action(db, session, user_id, req, "").await,
                 (_, _) => get_response_builder()
                     .status(StatusCode::METHOD_NOT_ALLOWED)
                     .body(Body::empty())
@@ -183,7 +183,9 @@ async fn route(
                 (["items"], &Method::GET) => {
                     find_items(db, session, user_id, req.uri().query()).await
                 }
-                ([""], &Method::POST) => handle_action(db, session, user_id, req).await,
+                ([""], &Method::POST) => {
+                    handle_action(db, session, user_id, req, &access_token).await
+                }
                 (_, _) => get_response_builder()
                     .status(StatusCode::METHOD_NOT_ALLOWED)
                     .body(Body::empty())
@@ -595,6 +597,7 @@ async fn handle_action(
     session: Arc<SessionClient>,
     user_id: UserId,
     req: Request<Body>,
+    access_token: &str,
 ) -> Result<Response<Body>, Error> {
     let query = req.uri().query();
     if let Some(query) = query.and_then(|q| {
@@ -605,6 +608,9 @@ async fn handle_action(
         match query[..] {
             [("action", "update"), ("list", id), ("win", win), ("lose", lose)] => {
                 return handle_stats_update(db, session, user_id, id, win, lose).await;
+            }
+            [("action", "push"), ("list", id)] => {
+                return push_list(db, session, user_id, id, access_token).await;
             }
             [("action", "import"), ("id", id)] => {
                 return import_list(db, session, user_id, id, false).await;
@@ -703,6 +709,69 @@ async fn handle_stats_update(
         .status(StatusCode::OK)
         .body(Body::empty())
         .map_err(Error::from)
+}
+
+async fn push_list(
+    db: DatabaseClient,
+    session: Arc<SessionClient>,
+    user_id: UserId,
+    id: &str,
+    access_token: &str,
+) -> Result<Response<Body>, Error> {
+    let list = get_list_doc(&db, &session, &user_id, id).await?;
+    // TODO: create new playlist if one doesn't exist
+    let ListMode::User(Some(external_id)) = list.mode else {
+        return get_response_builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from("Push is not supported for this list type"))
+            .map_err(Error::from);
+    };
+    let mut iter = list.sources.iter().map(get_source_id);
+    let source = if let Some(source) = iter.next() {
+        if source.is_none() {
+            return get_response_builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::from("Push is not supported for the source"))
+                .map_err(Error::from);
+        }
+        source
+    } else {
+        return get_response_builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from("List has no sources"))
+            .map_err(Error::from);
+    };
+    for s in iter {
+        if s != source {
+            return get_response_builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::from("List has multiple sources"))
+                .map_err(Error::from);
+        }
+    }
+    // TODO: filter hidden items
+    source::spotify::update_list(
+        access_token,
+        &external_id,
+        &list
+            .items
+            .into_iter()
+            .map(|i| i.id)
+            .collect::<Vec<_>>()
+            .join(","),
+    )
+    .await?;
+    get_response_builder()
+        .status(StatusCode::OK)
+        .body(Body::empty())
+        .map_err(Error::from)
+}
+
+fn get_source_id(source: &Source) -> Option<&str> {
+    match source.source_type {
+        SourceType::Spotify(_) => Some("spotify"),
+        _ => None,
+    }
 }
 
 async fn import_list(

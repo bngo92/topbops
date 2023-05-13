@@ -43,6 +43,7 @@ struct Track {
     pub duration_ms: i32,
     pub popularity: i32,
     pub track_number: i32,
+    pub uri: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -256,6 +257,29 @@ pub async fn import_album(user_id: &UserId, id: &str) -> Result<(List, Vec<crate
     Ok((list, items))
 }
 
+pub async fn update_list(access_token: &str, playlist_id: &str, ids: &str) -> Result<(), Error> {
+    let https = HttpsConnector::new();
+    let client = Client::builder().build::<_, hyper::Body>(https);
+    let uri: Uri = format!(
+        "https://api.spotify.com/v1/playlists/{}/tracks?uris={}",
+        playlist_id, ids
+    )
+    .parse()
+    .unwrap();
+    // TODO: error handling
+    client
+        .request(
+            Request::builder()
+                .method(Method::PUT)
+                .uri(uri)
+                .header("Authorization", format!("Bearer {}", access_token))
+                .header("Content-Length", "0")
+                .body(Body::empty())?,
+        )
+        .await?;
+    Ok(())
+}
+
 async fn get_token() -> Result<crate::Token, Error> {
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
@@ -313,7 +337,7 @@ fn new_spotify_item(track: Track, user_id: &UserId) -> crate::Item {
             "https://open.spotify.com/embed/track/{}?utm_source=generator",
             track.id
         )),
-        id: format!("track:{}", track.id),
+        id: track.uri,
         user_id: user_id.0.clone(),
         r#type: String::from("track"),
         name: track.name,
