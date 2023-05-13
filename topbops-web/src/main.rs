@@ -20,7 +20,7 @@ use std::sync::{Arc, RwLock};
 use tokio::fs::File;
 #[cfg(feature = "dev")]
 use tokio::io::AsyncReadExt;
-use topbops::{ItemQuery, List, ListMode, Lists, SourceType};
+use topbops::{ItemQuery, List, ListMode, Lists};
 use topbops_web::{query, source, Error, Item, Token, UserId};
 use uuid::Uuid;
 
@@ -473,9 +473,7 @@ async fn update_list(
     if current_list.sources != list.sources {
         list.items.clear();
         for source in &mut list.sources {
-            let SourceType::Spotify(spotify_source) = &source.source_type;
-            let (updated_source, items) =
-                source::get_source_and_items(&user_id, spotify_source).await?;
+            let (updated_source, items) = source::get_source_and_items(&user_id, source).await?;
             list.items.extend(topbops_web::convert_items(&items));
             create_items(db.clone(), session_copy.clone(), items, false).await?;
             *source = updated_source;

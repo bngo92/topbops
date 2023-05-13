@@ -1272,6 +1272,7 @@ version = "0.1.0"
 dependencies = [
  "azure_data_cosmos",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
