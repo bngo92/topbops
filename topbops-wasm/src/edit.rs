@@ -76,6 +76,7 @@ impl Component for Edit {
                         <div class="row mb-1">
                             <div class="col-2">
                                 <select ref={source} class="form-select">
+                                    <option>{"Custom"}</option>
                                     <option>{"Spotify"}</option>
                                 </select>
                             </div>
@@ -227,6 +228,16 @@ impl Component for Edit {
                             if let Some(source) = crate::parse_spotify_source(&id) {
                                 list.sources.push(Source {
                                     source_type: SourceType::Spotify(source),
+                                    name: String::new(),
+                                });
+                            } else {
+                                return false;
+                            }
+                        }
+                        "Custom" => {
+                            if let Ok(json) = serde_json::from_str(&id) {
+                                list.sources.push(Source {
+                                    source_type: SourceType::Custom(json),
                                     name: String::new(),
                                 });
                             } else {
