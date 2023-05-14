@@ -1,6 +1,6 @@
 use serde_json::Value;
 use std::collections::HashMap;
-use topbops::{ItemMetadata, ItemQuery, List, ListMode, Source, SourceType};
+use topbops::{ItemMetadata, ItemQuery, List, ListMode, Source, SourceType, Spotify};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlInputElement, HtmlSelectElement, Request, RequestInit, RequestMode};
@@ -14,6 +14,7 @@ enum EditState {
         Vec<(ItemMetadata, String, String, NodeRef, NodeRef)>,
         NodeRef,
         NodeRef,
+        NodeRef,
     ),
 }
 
@@ -25,6 +26,7 @@ pub enum Msg {
     DeleteNewSource(usize),
     Save,
     SaveSuccess(Vec<(usize, HashMap<String, Value>)>),
+    Push,
 }
 
 #[derive(Eq, PartialEq, Properties)]
@@ -56,7 +58,7 @@ impl Component for Edit {
         let disabled = crate::get_user().is_none();
         match &self.state {
             EditState::Fetching => html! {},
-            EditState::Success(list, new_sources, items, name_ref, favorite_ref) => {
+            EditState::Success(list, new_sources, items, name_ref, external_ref, favorite_ref) => {
                 let source_html = list.sources.iter().enumerate().map(|(i, source)| {
                     let onclick = ctx.link().callback(move |_| Msg::DeleteSource(i));
                     html! {
@@ -117,6 +119,7 @@ impl Component for Edit {
                 let checked = list.favorite;
                 let add_source = ctx.link().callback(|_| Msg::AddSource);
                 let save = ctx.link().callback(|_| Msg::Save);
+                let push = ctx.link().callback(|_| Msg::Push);
                 html! {
                     <div>
                         if matches!(list.mode, ListMode::External) {
@@ -127,6 +130,9 @@ impl Component for Edit {
                                 <div class="row mb-3">
                                     <div class="col-md-6">
                                         <input class="form-control" value={Some(list.name.clone())} ref={name_ref.clone()} placeholder="Name"/>
+                                        if let ListMode::User(external_id) = &list.mode {
+                                            <input class="form-control" value={external_id.clone()} ref={external_ref.clone()} placeholder="External ID"/>
+                                        }
                                     </div>
                                 </div>
                             }
@@ -145,8 +151,10 @@ impl Component for Edit {
                         <form>
                             {for source_html}
                             {for new_source_html}
+                            // TODO: Add edit mode and toggle
                             if !matches!(list.mode, ListMode::External) {
                                 <button type="button" class="btn btn-primary" onclick={add_source}>{"Add source"}</button>
+                                <button type="button" class="btn btn-secondary" onclick={push} {disabled}>{"Push"}</button>
                             }
                         </form>
                         <div class="row">
@@ -196,28 +204,37 @@ impl Component for Edit {
                     items,
                     NodeRef::default(),
                     NodeRef::default(),
+                    NodeRef::default(),
                 );
                 true
             }
             Msg::AddSource => {
-                let EditState::Success(_, new_sources, _, _, _) = &mut self.state else { unreachable!() };
+                let EditState::Success(_, new_sources, _, _, _, _) = &mut self.state else { unreachable!() };
                 new_sources.push((NodeRef::default(), NodeRef::default()));
                 true
             }
             Msg::DeleteSource(i) => {
-                let EditState::Success(list, _, _, _, _) = &mut self.state else { unreachable!() };
+                let EditState::Success(list, _, _, _, _, _) = &mut self.state else { unreachable!() };
                 list.sources.remove(i);
                 true
             }
             Msg::DeleteNewSource(i) => {
-                let EditState::Success(_, new_sources, _, _, _) = &mut self.state else { unreachable!() };
+                let EditState::Success(_, new_sources, _, _, _, _) = &mut self.state else { unreachable!() };
                 new_sources.remove(i);
                 true
             }
             Msg::Save => {
-                let EditState::Success(list, new_refs, items, name_ref, favorite_ref) = &mut self.state else { unreachable!() };
+                let EditState::Success(list, new_refs, items, name_ref, external_ref, favorite_ref) = &mut self.state else { unreachable!() };
                 if !matches!(list.mode, ListMode::External) {
                     list.name = name_ref.cast::<HtmlInputElement>().unwrap().value();
+                }
+                if let ListMode::User(external_id) = &mut list.mode {
+                    let id = external_ref.cast::<HtmlInputElement>().unwrap().value();
+                    if id.is_empty() {
+                        *external_id = None;
+                    } else if let Some(Spotify::Playlist(id)) = crate::parse_spotify_source(&id) {
+                        *external_id = Some(id);
+                    }
                 }
                 list.favorite = favorite_ref.cast::<HtmlInputElement>().unwrap().checked();
                 for (source, id) in new_refs {
@@ -305,7 +322,7 @@ impl Component for Edit {
             // Update the rating and hidden state values if the save request is successful.
             // We check if the values are the same to avoid no-op requests.
             Msg::SaveSuccess(updates) => {
-                let EditState::Success(_, _, items, _, _) = &mut self.state else { unreachable!() };
+                let EditState::Success(_, _, items, _,_ , _) = &mut self.state else { unreachable!() };
                 for (i, update) in updates {
                     for (k, v) in update {
                         let (_item, rating, hidden, _rating_ref, _hidden_ref) = &mut items[i];
@@ -321,6 +338,15 @@ impl Component for Edit {
                         }
                     }
                 }
+                false
+            }
+            Msg::Push => {
+                let EditState::Success(list, _,_ , _, _, _) = &mut self.state else { unreachable!() };
+                let id = list.id.clone();
+                ctx.link().send_future(async move {
+                    crate::push_list(&id).await.unwrap();
+                    Msg::None
+                });
                 false
             }
         }
