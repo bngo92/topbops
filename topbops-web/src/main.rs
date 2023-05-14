@@ -481,6 +481,7 @@ async fn update_list(
             *source = updated_source;
         }
     }
+    // TODO: update iframe if possible
     client.replace_document::<List>(list).into_future().await?;
     get_response_builder()
         .status(StatusCode::NO_CONTENT)

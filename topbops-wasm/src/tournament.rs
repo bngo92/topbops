@@ -324,6 +324,7 @@ impl Component for Tournament {
                     <div>
                         if let Some(winner) = winner {
                             <h2>{format!("Winner: {}", winner.name)}</h2>
+                            // TODO: only show if iframe exists
                             <div class="row">
                                 <div class="col-6">
                                     <iframe width="100%" height="380" frameborder="0" src={winner.iframe.clone()}></iframe>
