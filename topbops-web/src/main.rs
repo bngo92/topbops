@@ -1,3 +1,4 @@
+use axum::Router;
 use azure_data_cosmos::prelude::{
     AuthorizationToken, CollectionClient, ConsistencyLevel, CosmosClient, CosmosEntity,
     DatabaseClient, GetDocumentResponse, Query,
@@ -5,8 +6,8 @@ use azure_data_cosmos::prelude::{
 use futures::{StreamExt, TryStreamExt};
 use hyper::header::HeaderValue;
 use hyper::http::response::Builder;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Client, Method, Request, Response, Server, StatusCode, Uri};
+use hyper::service::service_fn;
+use hyper::{Body, Client, Method, Request, Response, StatusCode, Uri};
 use hyper_tls::HttpsConnector;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -1021,23 +1022,14 @@ async fn main() {
         println!("Demo lists were created");
     }
 
-    let make_svc = make_service_fn(move |_conn| {
-        let client_ref = client.clone();
-        let session = Arc::clone(&session);
-        async {
-            // service_fn converts our function into a `Service`
-            Ok::<_, Infallible>(service_fn(move |r| {
-                handle(client_ref.clone(), r, Arc::clone(&session))
-            }))
-        }
-    });
+    let make_svc = service_fn(move |r| handle(client.clone(), r, Arc::clone(&session)));
 
-    let server = Server::bind(&addr).serve(make_svc);
+    let app = Router::new().fallback_service(make_svc);
 
-    // Run this server for... forever!
-    if let Err(e) = server.await {
-        eprintln!("server error: {}", e);
-    }
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
 }
 
 fn unauthorized() -> Result<Response<Body>, Error> {
