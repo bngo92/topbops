@@ -98,7 +98,7 @@ impl Component for App {
                                     if let Some(user) = get_user() {
                                         <a class="nav-link" href="/api/logout">{format!("{} Logout", user)}</a>
                                     } else {
-                                        <a class="nav-link" href={format!("https://accounts.spotify.com/authorize?client_id=ee3d1b4f8d80477ea48743a511ef3018&redirect_uri={}/api/login&response_type=code", location.origin().unwrap().as_str())}>{"Login"}</a>
+                                        <a class="nav-link" href={format!("https://accounts.spotify.com/authorize?client_id=ee3d1b4f8d80477ea48743a511ef3018&redirect_uri={}/api/login&response_type=code&scope=playlist-modify-public playlist-modify-private", location.origin().unwrap().as_str())}>{"Login"}</a>
                                     }
                                 </li>
                             </ul>
@@ -521,6 +521,13 @@ async fn update_stats(list: &str, win: &str, lose: &str) -> Result<(), JsValue> 
         ),
         "POST",
     )?;
+    JsFuture::from(window.fetch_with_request(&request)).await?;
+    Ok(())
+}
+
+async fn push_list(id: &str) -> Result<(), JsValue> {
+    let window = web_sys::window().expect("no global `window` exists");
+    let request = query(&format!("/api/?action=push&list={}", id), "POST")?;
     JsFuture::from(window.fetch_with_request(&request)).await?;
     Ok(())
 }
