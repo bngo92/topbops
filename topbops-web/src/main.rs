@@ -1,4 +1,9 @@
-use axum::Router;
+use axum::{
+    http::{header, HeaderName},
+    response::IntoResponse,
+    routing::get,
+    Router,
+};
 use azure_data_cosmos::prelude::{
     AuthorizationToken, CollectionClient, ConsistencyLevel, CosmosClient, CosmosEntity,
     DatabaseClient, GetDocumentResponse, Query,
@@ -70,20 +75,6 @@ async fn route(
     eprintln!("{}", req.uri().path());
     if let Some(path) = req.uri().clone().path().strip_prefix("/api/") {
         let path: Vec<_> = path.split('/').collect();
-        if req.method() == Method::OPTIONS {
-            return get_response_builder()
-                .header(
-                    "Access-Control-Allow-Headers",
-                    HeaderValue::from_static("Authorization"),
-                )
-                .header(
-                    "Access-Control-Allow-Methods",
-                    HeaderValue::from_static("GET,POST,DELETE"),
-                )
-                .status(StatusCode::OK)
-                .body(Body::empty())
-                .map_err(Error::from);
-        }
         // TODO: fix rerender on logout
         if let (["logout"], &Method::GET) = (&path[..], req.method()) {
             return get_response_builder()
@@ -196,18 +187,11 @@ async fn route(
             unauthorized()
         }
     } else {
+        // TODO: migrate to use read_file after API migration is complete
         #[cfg(feature = "dev")]
-        if let Some((file, mime)) = match req.uri().path() {
-            "/topbops_wasm.js" => Some((
-                File::open("../topbops-wasm/pkg/topbops_wasm.js"),
-                "application/javascript",
-            )),
-            "/topbops_wasm_bg.wasm" => Some((
-                File::open("../topbops-wasm/pkg/topbops_wasm_bg.wasm"),
-                "application/wasm",
-            )),
-            _ => Some((File::open("../topbops-wasm/www/index.html"), "text/html")),
-        } {
+        {
+            let file = File::open("../topbops-wasm/www/index.html");
+            let mime = "text/html";
             let mut contents = Vec::new();
             file.await?.read_to_end(&mut contents).await?;
             return get_response_builder()
@@ -216,14 +200,17 @@ async fn route(
                 .body(Body::from(contents))
                 .map_err(Error::from);
         }
-        get_response_builder()
-            .header(
-                "Access-Control-Allow-Headers",
-                HeaderValue::from_static("Authorization"),
-            )
-            .status(StatusCode::NOT_FOUND)
-            .body(Body::empty())
-            .map_err(Error::from)
+        #[cfg(not(feature = "dev"))]
+        {
+            get_response_builder()
+                .header(
+                    "Access-Control-Allow-Headers",
+                    HeaderValue::from_static("Authorization"),
+                )
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::empty())
+                .map_err(Error::from)
+        }
     }
 }
 
@@ -1025,11 +1012,51 @@ async fn main() {
     let make_svc = service_fn(move |r| handle(client.clone(), r, Arc::clone(&session)));
 
     let app = Router::new().fallback_service(make_svc);
+    #[cfg(feature = "dev")]
+    let app = {
+        app.route(
+            "/topbops_wasm.js",
+            get(|| async {
+                read_file(
+                    "../topbops-wasm/pkg/topbops_wasm.js",
+                    "application/javascript",
+                )
+                .await
+            }),
+        )
+        .route(
+            "/topbops_wasm_bg.wasm",
+            get(|| async {
+                read_file(
+                    "../topbops-wasm/pkg/topbops_wasm_bg.wasm",
+                    "application/wasm",
+                )
+                .await
+            }),
+        )
+    };
 
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await
         .unwrap();
+}
+
+#[cfg(feature = "dev")]
+async fn read_file(path: &'static str, content_type: &'static str) -> impl IntoResponse + 'static {
+    read_file_impl(path, content_type)
+        .await
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+#[cfg(feature = "dev")]
+async fn read_file_impl(
+    path: &'static str,
+    content_type: &'static str,
+) -> Result<([(HeaderName, &'static str); 1], Vec<u8>), std::io::Error> {
+    let mut contents = Vec::new();
+    File::open(path).await?.read_to_end(&mut contents).await?;
+    Ok(([(header::CONTENT_TYPE, content_type)], contents))
 }
 
 fn unauthorized() -> Result<Response<Body>, Error> {
