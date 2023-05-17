@@ -30,7 +30,7 @@ use topbops::{ItemQuery, List, ListMode, Lists, Source, SourceType};
 use topbops_web::{query, source, Error, Item, Token, UserId};
 use uuid::Uuid;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct User {
     id: String,
     user_id: String,
@@ -100,22 +100,26 @@ async fn route(state: Arc<AppState>, mut req: Request<Body>) -> Result<Response<
             }
         };
         if auth == DEMO_USER {
-            let user_id = UserId(String::from(DEMO_USER));
+            let user = User {
+                id: String::new(),
+                user_id: DEMO_USER.to_owned(),
+                auth: String::new(),
+                access_token: String::new(),
+                refresh_token: String::new(),
+            };
             match (&path[..], req.method()) {
-                (["lists"], &Method::GET) => get_lists(state, user_id, req.uri().query()).await,
-                (["lists", id], &Method::GET) => get_list(state, user_id, id).await,
-                (["lists", id], &Method::PUT) => {
-                    update_list(state, user_id, id, req.body_mut()).await
-                }
-                (["lists", id, "items"], &Method::GET) => get_list_items(state, user_id, id).await,
-                (["items"], &Method::GET) => find_items(state, user_id, req.uri().query()).await,
-                ([""], &Method::POST) => handle_action(state, user_id, req, "").await,
+                (["lists"], &Method::GET) => get_lists(state, user, req.uri().query()).await,
+                (["lists", id], &Method::GET) => get_list(state, user, id).await,
+                (["lists", id], &Method::PUT) => update_list(state, user, id, req.body_mut()).await,
+                (["lists", id, "items"], &Method::GET) => get_list_items(state, user, id).await,
+                (["items"], &Method::GET) => find_items(state, user, req.uri().query()).await,
+                ([""], &Method::POST) => handle_action(state, user, req).await,
                 (_, _) => get_response_builder()
                     .status(StatusCode::METHOD_NOT_ALLOWED)
                     .body(Body::empty())
                     .map_err(Error::from),
             }
-        } else if let Ok((user_id, access_token)) = login(&state, auth, {
+        } else if let Ok(user) = login(&state, auth, {
             let host = req.headers()["Host"].to_str().expect("Host to be ASCII");
             #[cfg(feature = "dev")]
             {
@@ -141,20 +145,18 @@ async fn route(state: Arc<AppState>, mut req: Request<Body>) -> Result<Response<
                     )
                     .header(
                         "Set-Cookie",
-                        &format!("user={}; Max-Age=31536000; Path=/", user_id.0),
+                        &format!("user={}; Max-Age=31536000; Path=/", user.user_id),
                     )
                     .status(StatusCode::FOUND)
                     .body(Body::empty())
                     .map_err(Error::from),
-                (["lists"], &Method::GET) => get_lists(state, user_id, req.uri().query()).await,
-                (["lists"], &Method::POST) => create_list(state, user_id).await,
-                (["lists", id], &Method::GET) => get_list(state, user_id, id).await,
-                (["lists", id], &Method::PUT) => {
-                    update_list(state, user_id, id, req.body_mut()).await
-                }
-                (["lists", id, "items"], &Method::GET) => get_list_items(state, user_id, id).await,
-                (["items"], &Method::GET) => find_items(state, user_id, req.uri().query()).await,
-                ([""], &Method::POST) => handle_action(state, user_id, req, &access_token).await,
+                (["lists"], &Method::GET) => get_lists(state, user, req.uri().query()).await,
+                (["lists"], &Method::POST) => create_list(state, user).await,
+                (["lists", id], &Method::GET) => get_list(state, user, id).await,
+                (["lists", id], &Method::PUT) => update_list(state, user, id, req.body_mut()).await,
+                (["lists", id, "items"], &Method::GET) => get_list_items(state, user, id).await,
+                (["items"], &Method::GET) => find_items(state, user, req.uri().query()).await,
+                ([""], &Method::POST) => handle_action(state, user, req).await,
                 (_, _) => get_response_builder()
                     .status(StatusCode::METHOD_NOT_ALLOWED)
                     .body(Body::empty())
@@ -191,7 +193,7 @@ async fn route(state: Arc<AppState>, mut req: Request<Body>) -> Result<Response<
     }
 }
 
-async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<(UserId, String), Error> {
+async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, Error> {
     let db = state.db.collection_client("users");
     let query = Query::new(format!("SELECT * FROM c WHERE c.auth = \"{}\"", auth));
     // TODO: debug why session token isn't working here
@@ -221,7 +223,7 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<(UserI
         (resp, token)
     };
     if let Some((user, _)) = resp.results.pop() {
-        return Ok((UserId(user.user_id), user.access_token));
+        return Ok(user);
     }
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
@@ -271,16 +273,16 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<(UserI
             .refresh_token
             .expect("Spotify should return refresh token"),
     };
-    db.create_document(user)
+    db.create_document(user.clone())
         .consistency_level(session)
         .into_future()
         .await?;
-    Ok((UserId(spotify_user.id), token.access_token))
+    Ok(user)
 }
 
 async fn get_lists(
     state: Arc<AppState>,
-    user_id: UserId,
+    user: User,
     query: Option<&str>,
 ) -> Result<Response<Body>, Error> {
     let db = state.db.collection_client("lists");
@@ -289,10 +291,10 @@ async fn get_lists(
     {
         format!(
             "SELECT * FROM c WHERE c.user_id = \"{}\" AND c.favorite = true",
-            user_id.0
+            user.user_id
         )
     } else {
-        format!("SELECT * FROM c WHERE c.user_id = \"{}\"", user_id.0)
+        format!("SELECT * FROM c WHERE c.user_id = \"{}\"", user.user_id)
     };
     let lists = Lists {
         lists: state.session.query_documents(db, query).await?,
@@ -302,12 +304,8 @@ async fn get_lists(
         .map_err(Error::from)
 }
 
-async fn get_list(
-    state: Arc<AppState>,
-    user_id: UserId,
-    id: &str,
-) -> Result<Response<Body>, Error> {
-    let list = get_list_doc(&state, &user_id, id).await?;
+async fn get_list(state: Arc<AppState>, user: User, id: &str) -> Result<Response<Body>, Error> {
+    let list = get_list_doc(&state, &UserId(user.user_id), id).await?;
     get_response_builder()
         .body(Body::from(serde_json::to_string(&list)?))
         .map_err(Error::from)
@@ -315,9 +313,10 @@ async fn get_list(
 
 async fn get_list_items(
     state: Arc<AppState>,
-    user_id: UserId,
+    user: User,
     id: &str,
 ) -> Result<Response<Body>, Error> {
+    let user_id = UserId(user.user_id);
     let list = get_list_doc(&state, &user_id, id).await?;
     let response = if list.items.is_empty() {
         ItemQuery {
@@ -382,10 +381,10 @@ async fn get_list_doc(state: &Arc<AppState>, user_id: &UserId, id: &str) -> Resu
     }
 }
 
-async fn create_list(state: Arc<AppState>, user_id: UserId) -> Result<Response<Body>, Error> {
+async fn create_list(state: Arc<AppState>, user: User) -> Result<Response<Body>, Error> {
     let list = List {
         id: Uuid::new_v4().to_hyphenated().to_string(),
-        user_id: user_id.0,
+        user_id: user.user_id,
         mode: ListMode::User(None),
         name: String::from("New List"),
         sources: Vec::new(),
@@ -404,10 +403,11 @@ async fn create_list(state: Arc<AppState>, user_id: UserId) -> Result<Response<B
 
 async fn update_list(
     state: Arc<AppState>,
-    user_id: UserId,
+    user: User,
     id: &str,
     body: &mut Body,
 ) -> Result<Response<Body>, Error> {
+    let user_id = UserId(user.user_id);
     let current_list = get_list_doc(&state, &user_id, id).await?;
     let client = state
         .db
@@ -442,7 +442,7 @@ async fn update_list(
 
 async fn find_items(
     state: Arc<AppState>,
-    user_id: UserId,
+    user: User,
     query: Option<&str>,
 ) -> Result<Response<Body>, Error> {
     let Some(query) = query else {
@@ -451,7 +451,7 @@ async fn find_items(
             .body(Body::empty())
             .map_err(Error::from);
     };
-    let response = match _find_items(state, user_id, query).await {
+    let response = match _find_items(state, UserId(user.user_id), query).await {
         Ok(query) => query,
         Err(Error::SqlError(error)) => {
             return get_response_builder()
@@ -546,10 +546,10 @@ impl SessionClient {
 
 async fn handle_action(
     state: Arc<AppState>,
-    user_id: UserId,
+    user: User,
     req: Request<Body>,
-    access_token: &str,
 ) -> Result<Response<Body>, Error> {
+    let user_id = UserId(user.user_id);
     let query = req.uri().query();
     if let Some(query) = query.and_then(|q| {
         q.split('&')
@@ -561,7 +561,7 @@ async fn handle_action(
                 return handle_stats_update(state, user_id, id, win, lose).await;
             }
             [("action", "push"), ("list", id)] => {
-                return push_list(state, user_id, id, access_token).await;
+                return push_list(state, user_id, id, &user.access_token).await;
             }
             [("action", "import"), ("id", id)] => {
                 return import_list(state, user_id, id, false).await;
