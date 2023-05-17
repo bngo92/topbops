@@ -49,12 +49,8 @@ impl CosmosEntity for User {
 
 const DEMO_USER: &str = "demo";
 
-async fn handle(
-    db: CosmosClient,
-    req: Request<Body>,
-    session: Arc<SessionClient>,
-) -> Result<Response<Body>, Infallible> {
-    Ok(match route(db, req, session).await {
+async fn handle(state: Arc<AppState>, req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    Ok(match route(state, req).await {
         Err(e) => {
             eprintln!("server error: {:?}", e);
             Response::builder()
@@ -66,12 +62,7 @@ async fn handle(
     })
 }
 
-async fn route(
-    db: CosmosClient,
-    mut req: Request<Body>,
-    session: Arc<SessionClient>,
-) -> Result<Response<Body>, Error> {
-    let db = db.database_client("topbops");
+async fn route(state: Arc<AppState>, mut req: Request<Body>) -> Result<Response<Body>, Error> {
     eprintln!("{}", req.uri().path());
     if let Some(path) = req.uri().clone().path().strip_prefix("/api/") {
         let path: Vec<_> = path.split('/').collect();
@@ -111,26 +102,20 @@ async fn route(
         if auth == DEMO_USER {
             let user_id = UserId(String::from(DEMO_USER));
             match (&path[..], req.method()) {
-                (["lists"], &Method::GET) => {
-                    get_lists(db, session, user_id, req.uri().query()).await
-                }
-                (["lists", id], &Method::GET) => get_list(db, session, user_id, id).await,
+                (["lists"], &Method::GET) => get_lists(state, user_id, req.uri().query()).await,
+                (["lists", id], &Method::GET) => get_list(state, user_id, id).await,
                 (["lists", id], &Method::PUT) => {
-                    update_list(db, session, user_id, id, req.body_mut()).await
+                    update_list(state, user_id, id, req.body_mut()).await
                 }
-                (["lists", id, "items"], &Method::GET) => {
-                    get_list_items(db, session, user_id, id).await
-                }
-                (["items"], &Method::GET) => {
-                    find_items(db, session, user_id, req.uri().query()).await
-                }
-                ([""], &Method::POST) => handle_action(db, session, user_id, req, "").await,
+                (["lists", id, "items"], &Method::GET) => get_list_items(state, user_id, id).await,
+                (["items"], &Method::GET) => find_items(state, user_id, req.uri().query()).await,
+                ([""], &Method::POST) => handle_action(state, user_id, req, "").await,
                 (_, _) => get_response_builder()
                     .status(StatusCode::METHOD_NOT_ALLOWED)
                     .body(Body::empty())
                     .map_err(Error::from),
             }
-        } else if let Ok((user_id, access_token)) = login(db.clone(), &session, auth, {
+        } else if let Ok((user_id, access_token)) = login(&state, auth, {
             let host = req.headers()["Host"].to_str().expect("Host to be ASCII");
             #[cfg(feature = "dev")]
             {
@@ -161,23 +146,15 @@ async fn route(
                     .status(StatusCode::FOUND)
                     .body(Body::empty())
                     .map_err(Error::from),
-                (["lists"], &Method::GET) => {
-                    get_lists(db, session, user_id, req.uri().query()).await
-                }
-                (["lists"], &Method::POST) => create_list(db, session, user_id).await,
-                (["lists", id], &Method::GET) => get_list(db, session, user_id, id).await,
+                (["lists"], &Method::GET) => get_lists(state, user_id, req.uri().query()).await,
+                (["lists"], &Method::POST) => create_list(state, user_id).await,
+                (["lists", id], &Method::GET) => get_list(state, user_id, id).await,
                 (["lists", id], &Method::PUT) => {
-                    update_list(db, session, user_id, id, req.body_mut()).await
+                    update_list(state, user_id, id, req.body_mut()).await
                 }
-                (["lists", id, "items"], &Method::GET) => {
-                    get_list_items(db, session, user_id, id).await
-                }
-                (["items"], &Method::GET) => {
-                    find_items(db, session, user_id, req.uri().query()).await
-                }
-                ([""], &Method::POST) => {
-                    handle_action(db, session, user_id, req, &access_token).await
-                }
+                (["lists", id, "items"], &Method::GET) => get_list_items(state, user_id, id).await,
+                (["items"], &Method::GET) => find_items(state, user_id, req.uri().query()).await,
+                ([""], &Method::POST) => handle_action(state, user_id, req, &access_token).await,
                 (_, _) => get_response_builder()
                     .status(StatusCode::METHOD_NOT_ALLOWED)
                     .body(Body::empty())
@@ -214,13 +191,8 @@ async fn route(
     }
 }
 
-async fn login(
-    db: DatabaseClient,
-    session: &Arc<SessionClient>,
-    auth: &str,
-    origin: &str,
-) -> Result<(UserId, String), Error> {
-    let db = db.collection_client("users");
+async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<(UserId, String), Error> {
+    let db = state.db.collection_client("users");
     let query = Query::new(format!("SELECT * FROM c WHERE c.auth = \"{}\"", auth));
     // TODO: debug why session token isn't working here
     //let session_copy = session.session.read().unwrap().clone();
@@ -245,7 +217,7 @@ async fn login(
             .await
             .expect("response from database")?;
         let token = ConsistencyLevel::Session(resp.session_token.clone());
-        *session.session.write().unwrap() = Some(token.clone());
+        *state.session.session.write().unwrap() = Some(token.clone());
         (resp, token)
     };
     if let Some((user, _)) = resp.results.pop() {
@@ -307,12 +279,11 @@ async fn login(
 }
 
 async fn get_lists(
-    db: DatabaseClient,
-    session: Arc<SessionClient>,
+    state: Arc<AppState>,
     user_id: UserId,
     query: Option<&str>,
 ) -> Result<Response<Body>, Error> {
-    let db = db.collection_client("lists");
+    let db = state.db.collection_client("lists");
     let query = query.map(|q| url::form_urlencoded::parse(q.as_bytes()).collect::<Vec<_>>());
     let query = if let Some([(Cow::Borrowed("favorite"), Cow::Borrowed("true"))]) = query.as_deref()
     {
@@ -324,7 +295,7 @@ async fn get_lists(
         format!("SELECT * FROM c WHERE c.user_id = \"{}\"", user_id.0)
     };
     let lists = Lists {
-        lists: session.query_documents(db, query).await?,
+        lists: state.session.query_documents(db, query).await?,
     };
     get_response_builder()
         .body(Body::from(serde_json::to_string(&lists)?))
@@ -332,33 +303,32 @@ async fn get_lists(
 }
 
 async fn get_list(
-    db: DatabaseClient,
-    session: Arc<SessionClient>,
+    state: Arc<AppState>,
     user_id: UserId,
     id: &str,
 ) -> Result<Response<Body>, Error> {
-    let list = get_list_doc(&db, &session, &user_id, id).await?;
+    let list = get_list_doc(&state, &user_id, id).await?;
     get_response_builder()
         .body(Body::from(serde_json::to_string(&list)?))
         .map_err(Error::from)
 }
 
 async fn get_list_items(
-    db: DatabaseClient,
-    session: Arc<SessionClient>,
+    state: Arc<AppState>,
     user_id: UserId,
     id: &str,
 ) -> Result<Response<Body>, Error> {
-    let list = get_list_doc(&db, &session, &user_id, id).await?;
+    let list = get_list_doc(&state, &user_id, id).await?;
     let response = if list.items.is_empty() {
         ItemQuery {
             fields: Vec::new(),
             items: Vec::new(),
         }
     } else {
-        let db = db.collection_client("items");
+        let db = state.db.collection_client("items");
         let (query, fields, map, ids) = query::rewrite_list_query(&list, &user_id).unwrap();
-        let items: HashMap<_, _> = session
+        let items: HashMap<_, _> = state
+            .session
             .query_documents(db, query.to_string())
             .await?
             .into_iter()
@@ -399,13 +369,9 @@ fn format_value(v: &Value) -> String {
     }
 }
 
-async fn get_list_doc(
-    db: &DatabaseClient,
-    _: &Arc<SessionClient>,
-    user_id: &UserId,
-    id: &str,
-) -> Result<List, Error> {
-    let client = db
+async fn get_list_doc(state: &Arc<AppState>, user_id: &UserId, id: &str) -> Result<List, Error> {
+    let client = state
+        .db
         .clone()
         .collection_client("lists")
         .document_client(id, &user_id.0)?;
@@ -416,11 +382,7 @@ async fn get_list_doc(
     }
 }
 
-async fn create_list(
-    db: DatabaseClient,
-    session: Arc<SessionClient>,
-    user_id: UserId,
-) -> Result<Response<Body>, Error> {
+async fn create_list(state: Arc<AppState>, user_id: UserId) -> Result<Response<Body>, Error> {
     let list = List {
         id: Uuid::new_v4().to_hyphenated().to_string(),
         user_id: user_id.0,
@@ -432,7 +394,7 @@ async fn create_list(
         favorite: false,
         query: String::from("SELECT name, user_score FROM tracks"),
     };
-    create_list_doc(db, session, list.clone(), false).await?;
+    create_list_doc(state, list.clone(), false).await?;
     get_response_builder()
         .header("Content-Type", HeaderValue::from_static("application/json"))
         .status(StatusCode::CREATED)
@@ -441,18 +403,19 @@ async fn create_list(
 }
 
 async fn update_list(
-    db: DatabaseClient,
-    session: Arc<SessionClient>,
+    state: Arc<AppState>,
     user_id: UserId,
     id: &str,
     body: &mut Body,
 ) -> Result<Response<Body>, Error> {
-    let current_list = get_list_doc(&db, &session, &user_id, id).await?;
-    let client = db
+    let current_list = get_list_doc(&state, &user_id, id).await?;
+    let client = state
+        .db
         .clone()
         .collection_client("lists")
         .document_client(id, &user_id.0)?;
-    let session_copy = session
+    let session_copy = state
+        .session
         .session
         .read()
         .unwrap()
@@ -465,7 +428,7 @@ async fn update_list(
         for source in &mut list.sources {
             let (updated_source, items) = source::get_source_and_items(&user_id, source).await?;
             list.items.extend(topbops_web::convert_items(&items));
-            create_items(db.clone(), session_copy.clone(), items, false).await?;
+            create_items(&state.db, session_copy.clone(), items, false).await?;
             *source = updated_source;
         }
     }
@@ -478,8 +441,7 @@ async fn update_list(
 }
 
 async fn find_items(
-    db: DatabaseClient,
-    session: Arc<SessionClient>,
+    state: Arc<AppState>,
     user_id: UserId,
     query: Option<&str>,
 ) -> Result<Response<Body>, Error> {
@@ -489,7 +451,7 @@ async fn find_items(
             .body(Body::empty())
             .map_err(Error::from);
     };
-    let response = match _find_items(db, session, user_id, query).await {
+    let response = match _find_items(state, user_id, query).await {
         Ok(query) => query,
         Err(Error::SqlError(error)) => {
             return get_response_builder()
@@ -510,17 +472,17 @@ async fn find_items(
 }
 
 async fn _find_items(
-    db: DatabaseClient,
-    session: Arc<SessionClient>,
+    state: Arc<AppState>,
     user_id: UserId,
     query: &str,
 ) -> Result<ItemQuery, Error> {
     let [(Cow::Borrowed("q"), Cow::Borrowed("search")), (Cow::Borrowed("query"), query)] = &url::form_urlencoded::parse(query.as_bytes())
         .collect::<Vec<_>>()[..] else { return Err("invalid finder".into()); };
 
-    let db = db.collection_client("items");
+    let db = state.db.collection_client("items");
     let (query, fields) = query::rewrite_query(query, &user_id)?;
-    let values: Vec<Map<String, Value>> = session
+    let values: Vec<Map<String, Value>> = state
+        .session
         .query_documents(db, query.to_string())
         .await
         .map_err(|e| {
@@ -539,6 +501,7 @@ async fn _find_items(
     })
 }
 
+#[derive(Clone)]
 struct SessionClient {
     session: Arc<RwLock<Option<ConsistencyLevel>>>,
 }
@@ -582,8 +545,7 @@ impl SessionClient {
 }
 
 async fn handle_action(
-    db: DatabaseClient,
-    session: Arc<SessionClient>,
+    state: Arc<AppState>,
     user_id: UserId,
     req: Request<Body>,
     access_token: &str,
@@ -596,16 +558,16 @@ async fn handle_action(
     }) {
         match query[..] {
             [("action", "update"), ("list", id), ("win", win), ("lose", lose)] => {
-                return handle_stats_update(db, session, user_id, id, win, lose).await;
+                return handle_stats_update(state, user_id, id, win, lose).await;
             }
             [("action", "push"), ("list", id)] => {
-                return push_list(db, session, user_id, id, access_token).await;
+                return push_list(state, user_id, id, access_token).await;
             }
             [("action", "import"), ("id", id)] => {
-                return import_list(db, session, user_id, id, false).await;
+                return import_list(state, user_id, id, false).await;
             }
             [("action", "updateItems")] => {
-                return update_items(db, session, user_id, req).await;
+                return update_items(state, user_id, req).await;
             }
             _ => {}
         }
@@ -617,22 +579,22 @@ async fn handle_action(
 }
 
 async fn handle_stats_update(
-    db: DatabaseClient,
-    session: Arc<SessionClient>,
+    state: Arc<AppState>,
     user_id: UserId,
     id: &str,
     win: &str,
     lose: &str,
 ) -> Result<Response<Body>, Error> {
-    let list_client = db
+    let list_client = state
+        .db
         .clone()
         .collection_client("lists")
         .document_client(id, &user_id.0)?;
-    let client = db.clone().collection_client("items");
+    let client = state.db.clone().collection_client("items");
     let (Ok(list_response), Ok(mut win_item), Ok(mut lose_item)) = futures::future::join3(
         list_client.get_document::<List>().into_future(),
-        get_item_doc(client.clone(), &session, user_id.clone(), win),
-        get_item_doc(client.clone(), &session, user_id.clone(), lose),
+        get_item_doc(client.clone(), &state.session, user_id.clone(), win),
+        get_item_doc(client.clone(), &state.session, user_id.clone(), lose),
     ).await else {
         return get_response_builder()
             .status(StatusCode::BAD_REQUEST)
@@ -673,7 +635,8 @@ async fn handle_stats_update(
         .clone()
         .document_client(win_item.id.clone(), &win_item.user_id)?;
     let lose_client = client.document_client(lose_item.id.clone(), &lose_item.user_id)?;
-    let session_copy = session
+    let session_copy = state
+        .session
         .session
         .read()
         .unwrap()
@@ -701,13 +664,12 @@ async fn handle_stats_update(
 }
 
 async fn push_list(
-    db: DatabaseClient,
-    session: Arc<SessionClient>,
+    state: Arc<AppState>,
     user_id: UserId,
     id: &str,
     access_token: &str,
 ) -> Result<Response<Body>, Error> {
-    let list = get_list_doc(&db, &session, &user_id, id).await?;
+    let list = get_list_doc(&state, &user_id, id).await?;
     // TODO: create new playlist if one doesn't exist
     let ListMode::User(Some(external_id)) = list.mode else {
         return get_response_builder()
@@ -764,8 +726,7 @@ fn get_source_id(source: &Source) -> Option<&str> {
 }
 
 async fn import_list(
-    db: DatabaseClient,
-    session: Arc<SessionClient>,
+    state: Arc<AppState>,
     user_id: UserId,
     id: &str,
     favorite: bool,
@@ -775,7 +736,7 @@ async fn import_list(
         _ => todo!(),
     };
     list.favorite = favorite;
-    create_external_list(db, session, list, items, user_id.0 == DEMO_USER).await?;
+    create_external_list(state, list, items, user_id.0 == DEMO_USER).await?;
     get_response_builder()
         .status(StatusCode::CREATED)
         .body(Body::empty())
@@ -784,7 +745,7 @@ async fn import_list(
 
 async fn get_item_doc(
     client: CollectionClient,
-    session: &Arc<SessionClient>,
+    session: &SessionClient,
     user_id: UserId,
     id: &str,
 ) -> Result<Item, Error> {
@@ -815,14 +776,9 @@ fn update_stats(
     *lose_losses += 1;
 }
 
-async fn create_list_doc(
-    db: DatabaseClient,
-    session: Arc<SessionClient>,
-    list: List,
-    is_upsert: bool,
-) -> Result<(), Error> {
-    let list_client = db.collection_client("lists");
-    let session_copy = session.session.read().unwrap().clone();
+async fn create_list_doc(state: Arc<AppState>, list: List, is_upsert: bool) -> Result<(), Error> {
+    let list_client = state.db.collection_client("lists");
+    let session_copy = state.session.session.read().unwrap().clone();
     if let Some(session) = session_copy {
         list_client
             .create_document(list)
@@ -837,32 +793,33 @@ async fn create_list_doc(
             .into_future()
             .await
             .unwrap();
-        *session.session.write().unwrap() = Some(ConsistencyLevel::Session(resp.session_token));
+        *state.session.session.write().unwrap() =
+            Some(ConsistencyLevel::Session(resp.session_token));
     };
     Ok(())
 }
 
 // TODO: inline
 async fn create_external_list(
-    db: DatabaseClient,
-    session: Arc<SessionClient>,
+    state: Arc<AppState>,
     list: List,
     items: Vec<Item>,
     // Used to reset demo user data
     is_upsert: bool,
 ) -> Result<(), Error> {
-    create_list_doc(db.clone(), Arc::clone(&session), list, is_upsert).await?;
-    let session = session
+    create_list_doc(Arc::clone(&state), list, is_upsert).await?;
+    let session = state
+        .session
         .session
         .read()
         .unwrap()
         .clone()
         .expect("session should be set by create_list_doc");
-    create_items(db, session, items, is_upsert).await
+    create_items(&state.db, session, items, is_upsert).await
 }
 
 async fn create_items(
-    db: DatabaseClient,
+    db: &DatabaseClient,
     session: ConsistencyLevel,
     items: Vec<Item>,
     is_upsert: bool,
@@ -897,16 +854,15 @@ async fn create_items(
 }
 
 async fn update_items(
-    db: DatabaseClient,
-    session: Arc<SessionClient>,
+    state: Arc<AppState>,
     user_id: UserId,
     req: Request<Body>,
 ) -> Result<Response<Body>, Error> {
     let body = &hyper::body::to_bytes(req.into_body()).await?;
     let updates: HashMap<String, HashMap<String, Value>> = serde_json::from_slice(body)?;
-    let client = db.collection_client("items");
+    let client = state.db.collection_client("items");
     let client = &client;
-    let session = &session;
+    let session = &state.session;
     let user_id = &user_id;
     futures::stream::iter(updates.into_iter().map(move |(id, update)| async {
         let mut item = get_item_doc(client.clone(), session, user_id.clone(), &id).await?;
@@ -940,6 +896,12 @@ async fn update_items(
         .map_err(Error::from)
 }
 
+#[derive(Clone)]
+struct AppState {
+    db: DatabaseClient,
+    session: SessionClient,
+}
+
 #[tokio::main]
 async fn main() {
     // We'll bind to 127.0.0.1:3000
@@ -952,17 +914,17 @@ async fn main() {
     let account = std::env::var("COSMOS_ACCOUNT").expect("Set env variable COSMOS_ACCOUNT first!");
     let authorization_token =
         AuthorizationToken::primary_from_base64(&master_key).expect("cosmos config");
-    let client = CosmosClient::new(account.clone(), authorization_token);
-    let session = Arc::new(SessionClient {
+    let db = CosmosClient::new(account, authorization_token).database_client("topbops");
+    let session = SessionClient {
         session: Arc::new(RwLock::new(None)),
-    });
+    };
+    let shared_state = Arc::new(AppState { db, session });
 
     // Reset demo user data during startup in production
     if cfg!(not(feature = "dev")) {
         let demo_user = String::from(DEMO_USER);
         import_list(
-            client.clone().database_client("topbops"),
-            Arc::clone(&session),
+            Arc::clone(&shared_state),
             UserId(demo_user.clone()),
             "spotify:playlist:5MztFbRbMpyxbVYuOSfQV9",
             true,
@@ -971,8 +933,7 @@ async fn main() {
         .unwrap();
         // Generate IDs using random but constant UUIDs
         create_list_doc(
-            client.clone().database_client("topbops"),
-            Arc::clone(&session),
+            Arc::clone(&shared_state),
             List {
                 id: String::from("3c16df67-582d-449a-9862-0540f516d6b5"),
                 user_id: demo_user.clone(),
@@ -989,8 +950,7 @@ async fn main() {
         .await
         .unwrap();
         create_list_doc(
-            client.clone().database_client("topbops"),
-            Arc::clone(&session),
+            Arc::clone(&shared_state),
             List {
                 id: String::from("4539f893-8471-4e23-b815-cd7c8b722016"),
                 user_id: demo_user.clone(),
@@ -1009,9 +969,14 @@ async fn main() {
         println!("Demo lists were created");
     }
 
-    let make_svc = service_fn(move |r| handle(client.clone(), r, Arc::clone(&session)));
+    let make_svc = {
+        let shared_state = Arc::clone(&shared_state);
+        service_fn(move |r| handle(Arc::clone(&shared_state), r))
+    };
 
-    let app = Router::new().fallback_service(make_svc);
+    let app = Router::new()
+        .fallback_service(make_svc)
+        .with_state(shared_state);
     #[cfg(feature = "dev")]
     let app = {
         app.route(
