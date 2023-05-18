@@ -1,8 +1,13 @@
 use axum::{
-    http::{header, HeaderName},
+    http::header::{self, HeaderName},
     response::IntoResponse,
     routing::get,
     Router,
+};
+use axum_login::{
+    axum_sessions::{async_session::MemoryStore, SessionLayer},
+    secrecy::SecretVec,
+    AuthLayer, AuthUser,
 };
 use azure_data_cosmos::prelude::{
     AuthorizationToken, CollectionClient, ConsistencyLevel, CosmosClient, CosmosEntity,
@@ -14,6 +19,7 @@ use hyper::http::response::Builder;
 use hyper::service::service_fn;
 use hyper::{Body, Client, Method, Request, Response, StatusCode, Uri};
 use hyper_tls::HttpsConnector;
+use rand::Rng;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -38,6 +44,22 @@ struct User {
     access_token: String,
     refresh_token: String,
 }
+
+impl AuthUser<String> for User {
+    fn get_id(&self) -> String {
+        self.id.clone()
+    }
+
+    fn get_password_hash(&self) -> SecretVec<u8> {
+        SecretVec::new(self.refresh_token.clone().into())
+    }
+}
+
+type AuthContext = axum_login::extractors::AuthContext<
+    String,
+    User,
+    axum_login::memory_store::MemoryStore<String, User>,
+>;
 
 impl CosmosEntity for User {
     type Entity = String;
@@ -66,20 +88,6 @@ async fn route(state: Arc<AppState>, mut req: Request<Body>) -> Result<Response<
     eprintln!("{}", req.uri().path());
     if let Some(path) = req.uri().clone().path().strip_prefix("/api/") {
         let path: Vec<_> = path.split('/').collect();
-        // TODO: fix rerender on logout
-        if let (["logout"], &Method::GET) = (&path[..], req.method()) {
-            return get_response_builder()
-                .header(
-                    "Access-Control-Allow-Headers",
-                    HeaderValue::from_static("Authorization"),
-                )
-                .header("Set-Cookie", "session=; Max-Age=0; Path=/; HttpOnly")
-                .header("Set-Cookie", "user=; Max-Age=0; Path=/")
-                .header("Location", "/")
-                .status(StatusCode::FOUND)
-                .body(Body::empty())
-                .map_err(Error::from);
-        }
         let cookies: HashMap<_, _> = req.headers().get("Cookie").map_or_else(HashMap::new, |c| {
             c.to_str()
                 .expect("cookie to be ASCII")
@@ -191,6 +199,20 @@ async fn route(state: Arc<AppState>, mut req: Request<Body>) -> Result<Response<
                 .map_err(Error::from)
         }
     }
+}
+
+// TODO: fix rerender on logout
+async fn logout_handler(mut auth: AuthContext) -> impl IntoResponse {
+    auth.logout().await;
+    (
+        StatusCode::FOUND,
+        [
+            (header::ACCESS_CONTROL_ALLOW_HEADERS, "Authorization"),
+            (header::SET_COOKIE, "session=; Max-Age=0; Path=/; HttpOnly"),
+            (header::SET_COOKIE, "user=; Max-Age=0; Path=/"),
+            (header::LOCATION, "/"),
+        ],
+    )
 }
 
 async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, Error> {
@@ -974,9 +996,30 @@ async fn main() {
         service_fn(move |r| handle(Arc::clone(&shared_state), r))
     };
 
+    let secret = rand::thread_rng().gen::<[u8; 64]>();
+
+    let session_store = MemoryStore::new();
+    let session_layer = SessionLayer::new(session_store, &secret).with_secure(false);
+
+    let user_store =
+        axum_login::memory_store::MemoryStore::new(&Arc::new(tokio::sync::RwLock::new(HashMap::<
+            String,
+            User,
+        >::new(
+        ))));
+    let auth_layer = AuthLayer::new(user_store, &secret);
+
+    let api_router = Router::new().route("/logout", get(logout_handler));
+
     let app = Router::new()
         .fallback_service(make_svc)
-        .with_state(shared_state);
+        .with_state(shared_state)
+        .nest(
+            if cfg!(feature = "dev") { "/api/" } else { "/" },
+            api_router,
+        )
+        .layer(auth_layer)
+        .layer(session_layer);
     #[cfg(feature = "dev")]
     let app = {
         app.route(
