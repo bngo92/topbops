@@ -35,6 +35,7 @@ use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use topbops::{ItemQuery, List, ListMode, Lists, Source, SourceType};
 use topbops_web::{query, source, Error, Item, Token, UserId};
+use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -86,7 +87,6 @@ async fn handle(state: Arc<AppState>, req: Request<Body>) -> Result<Response<Bod
 }
 
 async fn route(state: Arc<AppState>, mut req: Request<Body>) -> Result<Response<Body>, Error> {
-    eprintln!("{}", req.uri().path());
     if let Some(path) = req.uri().clone().path().strip_prefix("/api/") {
         let path: Vec<_> = path.split('/').collect();
         let cookies: HashMap<_, _> = req.headers().get("Cookie").map_or_else(HashMap::new, |c| {
@@ -966,6 +966,8 @@ struct AppState {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::init();
+
     // We'll bind to 127.0.0.1:3000
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
 
@@ -1061,7 +1063,8 @@ async fn main() {
             api_router,
         )
         .layer(auth_layer)
-        .layer(session_layer);
+        .layer(session_layer)
+        .layer(TraceLayer::new_for_http());
     #[cfg(feature = "dev")]
     let app = {
         app.route(
