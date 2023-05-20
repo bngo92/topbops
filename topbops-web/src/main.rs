@@ -1,6 +1,7 @@
 use axum::{
+    extract::{OriginalUri, State},
     http::header::{self, HeaderName},
-    response::IntoResponse,
+    response::{AppendHeaders, IntoResponse},
     routing::get,
     Router,
 };
@@ -91,7 +92,7 @@ async fn route(state: Arc<AppState>, mut req: Request<Body>) -> Result<Response<
         let cookies: HashMap<_, _> = req.headers().get("Cookie").map_or_else(HashMap::new, |c| {
             c.to_str()
                 .expect("cookie to be ASCII")
-                .split(';')
+                .split("; ")
                 .filter_map(|c| c.split_once('='))
                 .collect()
         });
@@ -141,23 +142,6 @@ async fn route(state: Arc<AppState>, mut req: Request<Body>) -> Result<Response<
         .await
         {
             match (&path[..], req.method()) {
-                (["login"], &Method::GET) => get_response_builder()
-                    .header(
-                        "Access-Control-Allow-Headers",
-                        HeaderValue::from_static("Authorization"),
-                    )
-                    .header("Location", "/")
-                    .header(
-                        "Set-Cookie",
-                        &format!("session={}; Max-Age=31536000; Path=/; HttpOnly", auth),
-                    )
-                    .header(
-                        "Set-Cookie",
-                        &format!("user={}; Max-Age=31536000; Path=/", user.user_id),
-                    )
-                    .status(StatusCode::FOUND)
-                    .body(Body::empty())
-                    .map_err(Error::from),
                 (["lists"], &Method::GET) => get_lists(state, user, req.uri().query()).await,
                 (["lists"], &Method::POST) => create_list(state, user).await,
                 (["lists", id], &Method::GET) => get_list(state, user, id).await,
@@ -201,14 +185,70 @@ async fn route(state: Arc<AppState>, mut req: Request<Body>) -> Result<Response<
     }
 }
 
+async fn login_handler(
+    OriginalUri(original_uri): OriginalUri,
+    State(state): State<Arc<AppState>>,
+    mut auth: AuthContext,
+    req: axum::http::Request<axum::body::Body>,
+) -> Result<impl IntoResponse, axum::response::Response> {
+    let cookies: HashMap<_, _> = req.headers().get("Cookie").map_or_else(HashMap::new, |c| {
+        c.to_str()
+            .expect("cookie to be ASCII")
+            .split(';')
+            .filter_map(|c| c.split_once('='))
+            .collect()
+    });
+    let _auth = if let Some(auth) = cookies.get("session") {
+        auth
+    } else {
+        let query: HashMap<_, _> = req.uri().query().map_or_else(HashMap::new, |q| {
+            q.split('&').filter_map(|p| p.split_once('=')).collect()
+        });
+        query
+            .get("code")
+            .ok_or_else(|| StatusCode::BAD_REQUEST.into_response())?
+            .to_owned()
+    };
+    let host = req.headers()["Host"].to_str().expect("Host to be ASCII");
+    let origin;
+    #[cfg(feature = "dev")]
+    {
+        origin = format!("http://{}{}", host, original_uri.path());
+    }
+    #[cfg(not(feature = "dev"))]
+    {
+        origin = format!("https://{}{}", host, original_uri.path());
+    }
+    let user = login(&state, _auth, &origin).await?;
+    auth.login(&user).await.unwrap();
+    Ok((
+        StatusCode::FOUND,
+        AppendHeaders([(
+            header::SET_COOKIE,
+            format!("session={}; Max-Age=31536000; Path=/; HttpOnly", _auth),
+        )]),
+        [
+            (
+                header::ACCESS_CONTROL_ALLOW_HEADERS,
+                String::from("Authorization"),
+            ),
+            (header::LOCATION, String::from("/")),
+            (
+                header::SET_COOKIE,
+                format!("user={}; Max-Age=31536000; Path=/", user.user_id),
+            ),
+        ],
+    ))
+}
+
 // TODO: fix rerender on logout
 async fn logout_handler(mut auth: AuthContext) -> impl IntoResponse {
     auth.logout().await;
     (
         StatusCode::FOUND,
+        AppendHeaders([(header::SET_COOKIE, "session=; Max-Age=0; Path=/; HttpOnly")]),
         [
             (header::ACCESS_CONTROL_ALLOW_HEADERS, "Authorization"),
-            (header::SET_COOKIE, "session=; Max-Age=0; Path=/; HttpOnly"),
             (header::SET_COOKIE, "user=; Max-Age=0; Path=/"),
             (header::LOCATION, "/"),
         ],
@@ -475,7 +515,7 @@ async fn find_items(
     };
     let response = match _find_items(state, UserId(user.user_id), query).await {
         Ok(query) => query,
-        Err(Error::SqlError(error)) => {
+        Err(Error::ClientError(error)) => {
             return get_response_builder()
                 .status(StatusCode::BAD_REQUEST)
                 .body(Body::from(error))
@@ -1009,11 +1049,13 @@ async fn main() {
         ))));
     let auth_layer = AuthLayer::new(user_store, &secret);
 
-    let api_router = Router::new().route("/logout", get(logout_handler));
+    let api_router = Router::new()
+        .route("/login", get(login_handler))
+        .route("/logout", get(logout_handler))
+        .with_state(shared_state);
 
     let app = Router::new()
         .fallback_service(make_svc)
-        .with_state(shared_state)
         .nest(
             if cfg!(feature = "dev") { "/api/" } else { "/" },
             api_router,

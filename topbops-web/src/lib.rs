@@ -1,3 +1,7 @@
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
 use azure_data_cosmos::prelude::CosmosEntity;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -57,47 +61,52 @@ pub fn convert_items(items: &[Item]) -> Vec<ItemMetadata> {
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug)]
 pub enum Error {
+    ClientError(String),
+    InternalError(InternalError),
+}
+
+#[derive(Debug)]
+pub enum InternalError {
     HyperError(hyper::Error),
     RequestError(hyper::http::Error),
     JSONError(serde_json::Error),
     CosmosError(azure_core::error::Error),
     IOError(std::io::Error),
-    SqlError(String),
 }
 
 impl From<hyper::Error> for Error {
     fn from(e: hyper::Error) -> Error {
-        Error::HyperError(e)
+        Error::InternalError(InternalError::HyperError(e))
     }
 }
 
 impl From<hyper::http::Error> for Error {
     fn from(e: hyper::http::Error) -> Error {
-        Error::RequestError(e)
+        Error::InternalError(InternalError::RequestError(e))
     }
 }
 
 impl From<serde_json::Error> for Error {
     fn from(e: serde_json::Error) -> Error {
-        Error::JSONError(e)
+        Error::InternalError(InternalError::JSONError(e))
     }
 }
 
 impl From<azure_core::error::Error> for Error {
     fn from(e: azure_core::error::Error) -> Error {
-        Error::CosmosError(e)
+        Error::InternalError(InternalError::CosmosError(e))
     }
 }
 
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Error {
-        Error::IOError(e)
+        Error::InternalError(InternalError::IOError(e))
     }
 }
 
 impl From<sqlparser::parser::ParserError> for Error {
     fn from(e: sqlparser::parser::ParserError) -> Error {
-        Error::SqlError(match e {
+        Error::ClientError(match e {
             sqlparser::parser::ParserError::TokenizerError(e) => e,
             sqlparser::parser::ParserError::ParserError(e) => e,
         })
@@ -106,6 +115,18 @@ impl From<sqlparser::parser::ParserError> for Error {
 
 impl From<&'static str> for Error {
     fn from(e: &'static str) -> Error {
-        Error::SqlError(e.to_owned())
+        Error::ClientError(e.to_owned())
+    }
+}
+
+impl From<Error> for Response {
+    fn from(e: Error) -> Response {
+        match e {
+            Error::ClientError(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+            Error::InternalError(e) => {
+                eprintln!("server error: {:?}", e);
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            }
+        }
     }
 }
