@@ -1,7 +1,7 @@
 use axum::{
     extract::{OriginalUri, Path, Query, State},
-    http::header::{self, HeaderName},
-    response::{AppendHeaders, IntoResponse, Json},
+    http::header,
+    response::{AppendHeaders, IntoResponse, Json, Response},
     routing::{get, post},
     Router,
 };
@@ -24,12 +24,10 @@ use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
-#[cfg(feature = "dev")]
-use tokio::fs::File;
-#[cfg(feature = "dev")]
-use tokio::io::AsyncReadExt;
 use topbops::{ItemQuery, List, ListMode, Lists, Source, SourceType};
 use topbops_web::{query, source, Error, Item, Token, UserId};
+#[cfg(feature = "dev")]
+use tower_http::services::ServeFile;
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
@@ -62,7 +60,7 @@ async fn get_user_or_demo_user(
     state: &Arc<AppState>,
     req: &Request<Body>,
     original_uri: &Uri,
-) -> Result<UserId, axum::response::Response> {
+) -> Result<UserId, Response> {
     if let Some(user) = get_user(state, req, original_uri).await? {
         Ok(UserId(user.user_id))
     } else {
@@ -74,7 +72,7 @@ async fn require_user(
     state: &Arc<AppState>,
     req: &Request<Body>,
     original_uri: &Uri,
-) -> Result<User, axum::response::Response> {
+) -> Result<User, Response> {
     if let Some(user) = get_user(state, req, original_uri).await? {
         Ok(user)
     } else {
@@ -86,7 +84,7 @@ async fn get_user(
     state: &Arc<AppState>,
     req: &Request<Body>,
     original_uri: &Uri,
-) -> Result<Option<User>, axum::response::Response> {
+) -> Result<Option<User>, Response> {
     let cookies: HashMap<_, _> = req.headers().get("Cookie").map_or_else(HashMap::new, |c| {
         c.to_str()
             .expect("cookie to be ASCII")
@@ -134,8 +132,8 @@ async fn login_handler(
     OriginalUri(original_uri): OriginalUri,
     State(state): State<Arc<AppState>>,
     mut auth: AuthContext,
-    req: axum::http::Request<axum::body::Body>,
-) -> Result<impl IntoResponse, axum::response::Response> {
+    req: Request<Body>,
+) -> Result<impl IntoResponse, Response> {
     let Some(user) = get_user(&state, &req, &original_uri).await? else { return Err(Error::from("auth wasn't provided").into()) };
     auth.login(&user).await.unwrap();
     Ok((
@@ -266,8 +264,8 @@ async fn get_lists(
     OriginalUri(original_uri): OriginalUri,
     State(state): State<Arc<AppState>>,
     Query(params): Query<HashMap<String, String>>,
-    req: axum::http::Request<axum::body::Body>,
-) -> Result<Json<Lists>, axum::response::Response> {
+    req: Request<Body>,
+) -> Result<Json<Lists>, Response> {
     let user_id = get_user_or_demo_user(&state, &req, &original_uri).await?;
     let db = state.db.collection_client("lists");
     let query = if let Some("true") = params.get("favorite").map(String::as_ref) {
@@ -287,8 +285,8 @@ async fn get_list(
     Path(id): Path<String>,
     OriginalUri(original_uri): OriginalUri,
     State(state): State<Arc<AppState>>,
-    req: axum::http::Request<axum::body::Body>,
-) -> Result<Json<List>, axum::response::Response> {
+    req: Request<Body>,
+) -> Result<Json<List>, Response> {
     let user_id = get_user_or_demo_user(&state, &req, &original_uri).await?;
     let list = get_list_doc(&state, &user_id, &id).await?;
     Ok(Json(list))
@@ -298,8 +296,8 @@ async fn get_list_items(
     Path(id): Path<String>,
     OriginalUri(original_uri): OriginalUri,
     State(state): State<Arc<AppState>>,
-    req: axum::http::Request<axum::body::Body>,
-) -> Result<Json<ItemQuery>, axum::response::Response> {
+    req: Request<Body>,
+) -> Result<Json<ItemQuery>, Response> {
     let user_id = get_user_or_demo_user(&state, &req, &original_uri).await?;
     let list = get_list_doc(&state, &user_id, &id).await?;
     if list.items.is_empty() {
@@ -365,8 +363,8 @@ async fn get_list_doc(state: &Arc<AppState>, user_id: &UserId, id: &str) -> Resu
 async fn create_list(
     OriginalUri(original_uri): OriginalUri,
     State(state): State<Arc<AppState>>,
-    req: axum::http::Request<axum::body::Body>,
-) -> Result<impl IntoResponse, axum::response::Response> {
+    req: Request<Body>,
+) -> Result<impl IntoResponse, Response> {
     let user = require_user(&state, &req, &original_uri).await?;
     let list = List {
         id: Uuid::new_v4().to_hyphenated().to_string(),
@@ -387,8 +385,8 @@ async fn update_list(
     Path(id): Path<String>,
     OriginalUri(original_uri): OriginalUri,
     State(state): State<Arc<AppState>>,
-    req: axum::http::Request<axum::body::Body>,
-) -> Result<StatusCode, axum::response::Response> {
+    req: Request<Body>,
+) -> Result<StatusCode, Response> {
     let user = require_user(&state, &req, &original_uri).await?;
     let user_id = UserId(user.user_id);
     let current_list = get_list_doc(&state, &user_id, &id).await?;
@@ -431,8 +429,8 @@ async fn find_items(
     OriginalUri(original_uri): OriginalUri,
     State(state): State<Arc<AppState>>,
     Query(params): Query<HashMap<String, String>>,
-    req: axum::http::Request<axum::body::Body>,
-) -> Result<impl IntoResponse, axum::response::Response> {
+    req: Request<Body>,
+) -> Result<impl IntoResponse, Response> {
     let user_id = get_user_or_demo_user(&state, &req, &original_uri).await?;
     let Some(query) = params.get("query") else { return Err(Error::from("invalid finder").into()); };
 
@@ -507,8 +505,8 @@ async fn handle_action(
     OriginalUri(original_uri): OriginalUri,
     State(state): State<Arc<AppState>>,
     Query(params): Query<HashMap<String, String>>,
-    req: axum::http::Request<axum::body::Body>,
-) -> Result<StatusCode, axum::response::Response> {
+    req: Request<Body>,
+) -> Result<StatusCode, Response> {
     let user = get_user(&state, &req, &original_uri).await?;
     let user_id = if let Some(user) = &user {
         UserId(user.user_id.clone())
@@ -941,52 +939,21 @@ async fn main() {
         .layer(TraceLayer::new_for_http());
     #[cfg(feature = "dev")]
     let app = {
-        app.route(
+        app.route_service(
             "/topbops_wasm.js",
-            get(|| async {
-                read_file(
-                    "../topbops-wasm/pkg/topbops_wasm.js",
-                    "application/javascript",
-                )
-                .await
-            }),
+            ServeFile::new("../topbops-wasm/pkg/topbops_wasm.js"),
         )
-        .route(
+        .route_service(
             "/topbops_wasm_bg.wasm",
-            get(|| async {
-                read_file(
-                    "../topbops-wasm/pkg/topbops_wasm_bg.wasm",
-                    "application/wasm",
-                )
-                .await
-            }),
+            ServeFile::new("../topbops-wasm/pkg/topbops_wasm_bg.wasm"),
         )
-        .fallback(get(|| async {
-            read_file("../topbops-wasm/www/index.html", "text/html").await
-        }))
+        .fallback_service(ServeFile::new("../topbops-wasm/www/index.html"))
     };
 
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await
         .unwrap();
-}
-
-#[cfg(feature = "dev")]
-async fn read_file(path: &'static str, content_type: &'static str) -> impl IntoResponse + 'static {
-    read_file_impl(path, content_type)
-        .await
-        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)
-}
-
-#[cfg(feature = "dev")]
-async fn read_file_impl(
-    path: &'static str,
-    content_type: &'static str,
-) -> Result<([(HeaderName, &'static str); 1], Vec<u8>), std::io::Error> {
-    let mut contents = Vec::new();
-    File::open(path).await?.read_to_end(&mut contents).await?;
-    Ok(([(header::CONTENT_TYPE, content_type)], contents))
 }
 
 #[cfg(test)]
