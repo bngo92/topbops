@@ -15,18 +15,13 @@ use azure_data_cosmos::prelude::{
     DatabaseClient, GetDocumentResponse,
 };
 use futures::{StreamExt, TryStreamExt};
-use hyper::header::HeaderValue;
-use hyper::http::response::Builder;
-use hyper::service::service_fn;
-use hyper::{Body, Client, Method, Request, Response, StatusCode, Uri};
+use hyper::{Body, Client, Method, Request, StatusCode, Uri};
 use hyper_tls::HttpsConnector;
 use rand::Rng;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::borrow::Cow;
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 #[cfg(feature = "dev")]
@@ -134,108 +129,6 @@ impl CosmosEntity for User {
 }
 
 const DEMO_USER: &str = "demo";
-
-async fn handle(state: Arc<AppState>, req: Request<Body>) -> Result<Response<Body>, Infallible> {
-    Ok(match route(state, req).await {
-        Err(e) => {
-            eprintln!("server error: {:?}", e);
-            Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Body::empty())
-                .expect("empty response builder should work")
-        }
-        Ok(resp) => resp,
-    })
-}
-
-async fn route(state: Arc<AppState>, req: Request<Body>) -> Result<Response<Body>, Error> {
-    if let Some(path) = req.uri().clone().path().strip_prefix("/api/") {
-        let path: Vec<_> = path.split('/').collect();
-        let cookies: HashMap<_, _> = req.headers().get("Cookie").map_or_else(HashMap::new, |c| {
-            c.to_str()
-                .expect("cookie to be ASCII")
-                .split("; ")
-                .filter_map(|c| c.split_once('='))
-                .collect()
-        });
-        let auth = if let Some(auth) = cookies.get("session") {
-            auth
-        } else {
-            let query: HashMap<_, _> = req.uri().query().map_or_else(HashMap::new, |q| {
-                q.split('&').filter_map(|p| p.split_once('=')).collect()
-            });
-            if let Some(code) = query.get("code") {
-                code
-            } else {
-                DEMO_USER
-            }
-        };
-        if auth == DEMO_USER {
-            let user = User {
-                id: String::new(),
-                user_id: DEMO_USER.to_owned(),
-                auth: String::new(),
-                access_token: String::new(),
-                refresh_token: String::new(),
-            };
-            match (&path[..], req.method()) {
-                (["lists"], &Method::GET) => get_lists(state, user, req.uri().query()).await,
-                (_, _) => get_response_builder()
-                    .status(StatusCode::METHOD_NOT_ALLOWED)
-                    .body(Body::empty())
-                    .map_err(Error::from),
-            }
-        } else if let Ok(user) = login(&state, auth, {
-            let host = req.headers()["Host"].to_str().expect("Host to be ASCII");
-            #[cfg(feature = "dev")]
-            {
-                &format!("http://{}{}", host, req.uri().path())
-            }
-            #[cfg(not(feature = "dev"))]
-            {
-                &format!("https://{}{}", host, req.uri().path())
-            }
-        })
-        .await
-        {
-            match (&path[..], req.method()) {
-                (["lists"], &Method::GET) => get_lists(state, user, req.uri().query()).await,
-                (["lists"], &Method::POST) => create_list(state, user).await,
-                (_, _) => get_response_builder()
-                    .status(StatusCode::METHOD_NOT_ALLOWED)
-                    .body(Body::empty())
-                    .map_err(Error::from),
-            }
-        } else {
-            unauthorized()
-        }
-    } else {
-        // TODO: migrate to use read_file after API migration is complete
-        #[cfg(feature = "dev")]
-        {
-            let file = File::open("../topbops-wasm/www/index.html");
-            let mime = "text/html";
-            let mut contents = Vec::new();
-            file.await?.read_to_end(&mut contents).await?;
-            return get_response_builder()
-                .header("Content-Type", HeaderValue::from_static(mime))
-                .status(StatusCode::OK)
-                .body(Body::from(contents))
-                .map_err(Error::from);
-        }
-        #[cfg(not(feature = "dev"))]
-        {
-            get_response_builder()
-                .header(
-                    "Access-Control-Allow-Headers",
-                    HeaderValue::from_static("Authorization"),
-                )
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::empty())
-                .map_err(Error::from)
-        }
-    }
-}
 
 async fn login_handler(
     OriginalUri(original_uri): OriginalUri,
@@ -370,27 +263,24 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, 
 }
 
 async fn get_lists(
-    state: Arc<AppState>,
-    user: User,
-    query: Option<&str>,
-) -> Result<Response<Body>, Error> {
+    OriginalUri(original_uri): OriginalUri,
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<HashMap<String, String>>,
+    req: axum::http::Request<axum::body::Body>,
+) -> Result<Json<Lists>, axum::response::Response> {
+    let user_id = get_user_or_demo_user(&state, &req, &original_uri).await?;
     let db = state.db.collection_client("lists");
-    let query = query.map(|q| url::form_urlencoded::parse(q.as_bytes()).collect::<Vec<_>>());
-    let query = if let Some([(Cow::Borrowed("favorite"), Cow::Borrowed("true"))]) = query.as_deref()
-    {
+    let query = if let Some("true") = params.get("favorite").map(String::as_ref) {
         format!(
             "SELECT * FROM c WHERE c.user_id = \"{}\" AND c.favorite = true",
-            user.user_id
+            user_id.0
         )
     } else {
-        format!("SELECT * FROM c WHERE c.user_id = \"{}\"", user.user_id)
+        format!("SELECT * FROM c WHERE c.user_id = \"{}\"", user_id.0)
     };
-    let lists = Lists {
+    Ok(Json(Lists {
         lists: state.session.query_documents(db, query).await?,
-    };
-    get_response_builder()
-        .body(Body::from(serde_json::to_string(&lists)?))
-        .map_err(Error::from)
+    }))
 }
 
 async fn get_list(
@@ -472,7 +362,12 @@ async fn get_list_doc(state: &Arc<AppState>, user_id: &UserId, id: &str) -> Resu
     }
 }
 
-async fn create_list(state: Arc<AppState>, user: User) -> Result<Response<Body>, Error> {
+async fn create_list(
+    OriginalUri(original_uri): OriginalUri,
+    State(state): State<Arc<AppState>>,
+    req: axum::http::Request<axum::body::Body>,
+) -> Result<impl IntoResponse, axum::response::Response> {
+    let user = require_user(&state, &req, &original_uri).await?;
     let list = List {
         id: Uuid::new_v4().to_hyphenated().to_string(),
         user_id: user.user_id,
@@ -485,11 +380,7 @@ async fn create_list(state: Arc<AppState>, user: User) -> Result<Response<Body>,
         query: String::from("SELECT name, user_score FROM tracks"),
     };
     create_list_doc(state, list.clone(), false).await?;
-    get_response_builder()
-        .header("Content-Type", HeaderValue::from_static("application/json"))
-        .status(StatusCode::CREATED)
-        .body(Body::from(serde_json::to_string(&list)?))
-        .map_err(Error::from)
+    Ok((StatusCode::CREATED, Json(list)))
 }
 
 async fn update_list(
@@ -1017,11 +908,6 @@ async fn main() {
         println!("Demo lists were created");
     }
 
-    let make_svc = {
-        let shared_state = Arc::clone(&shared_state);
-        service_fn(move |r| handle(Arc::clone(&shared_state), r))
-    };
-
     let secret = rand::thread_rng().gen::<[u8; 64]>();
 
     let session_store = MemoryStore::new();
@@ -1038,6 +924,7 @@ async fn main() {
     let api_router = Router::new()
         .route("/login", get(login_handler))
         .route("/logout", get(logout_handler))
+        .route("/lists", get(get_lists).put(create_list))
         .route("/lists/:id", get(get_list).put(update_list))
         .route("/lists/:id/items", get(get_list_items))
         .route("/items", get(find_items))
@@ -1045,7 +932,6 @@ async fn main() {
         .with_state(shared_state);
 
     let app = Router::new()
-        .fallback_service(make_svc)
         .nest(
             if cfg!(feature = "dev") { "/api/" } else { "/" },
             api_router,
@@ -1075,6 +961,9 @@ async fn main() {
                 .await
             }),
         )
+        .fallback(get(|| async {
+            read_file("../topbops-wasm/www/index.html", "text/html").await
+        }))
     };
 
     axum::Server::bind(&addr)
@@ -1098,17 +987,6 @@ async fn read_file_impl(
     let mut contents = Vec::new();
     File::open(path).await?.read_to_end(&mut contents).await?;
     Ok(([(header::CONTENT_TYPE, content_type)], contents))
-}
-
-fn unauthorized() -> Result<Response<Body>, Error> {
-    get_response_builder()
-        .status(StatusCode::UNAUTHORIZED)
-        .body(Body::empty())
-        .map_err(Error::from)
-}
-
-fn get_response_builder() -> Builder {
-    Response::builder().header("Access-Control-Allow-Origin", HeaderValue::from_static("*"))
 }
 
 #[cfg(test)]
