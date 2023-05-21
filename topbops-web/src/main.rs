@@ -1,7 +1,7 @@
 use axum::{
-    extract::{OriginalUri, State},
+    extract::{OriginalUri, Query, State},
     http::header::{self, HeaderName},
-    response::{AppendHeaders, IntoResponse},
+    response::{AppendHeaders, IntoResponse, Json},
     routing::get,
     Router,
 };
@@ -12,7 +12,7 @@ use axum_login::{
 };
 use azure_data_cosmos::prelude::{
     AuthorizationToken, CollectionClient, ConsistencyLevel, CosmosClient, CosmosEntity,
-    DatabaseClient, GetDocumentResponse, Query,
+    DatabaseClient, GetDocumentResponse,
 };
 use futures::{StreamExt, TryStreamExt};
 use hyper::header::HeaderValue;
@@ -62,6 +62,56 @@ type AuthContext = axum_login::extractors::AuthContext<
     User,
     axum_login::memory_store::MemoryStore<String, User>,
 >;
+
+async fn get_user_or_demo_user(
+    state: &Arc<AppState>,
+    req: Request<Body>,
+    original_uri: Uri,
+) -> Result<UserId, axum::response::Response> {
+    if let Some(user) = get_user(state, req, original_uri).await? {
+        Ok(UserId(user.user_id))
+    } else {
+        Ok(UserId(DEMO_USER.to_owned()))
+    }
+}
+
+async fn get_user(
+    state: &Arc<AppState>,
+    req: Request<Body>,
+    original_uri: Uri,
+) -> Result<Option<User>, axum::response::Response> {
+    let cookies: HashMap<_, _> = req.headers().get("Cookie").map_or_else(HashMap::new, |c| {
+        c.to_str()
+            .expect("cookie to be ASCII")
+            .split("; ")
+            .filter_map(|c| c.split_once('='))
+            .collect()
+    });
+    let auth = if let Some(auth) = cookies.get("session") {
+        auth
+    } else {
+        let query: HashMap<_, _> = req.uri().query().map_or_else(HashMap::new, |q| {
+            q.split('&').filter_map(|p| p.split_once('=')).collect()
+        });
+        if let Some(code) = query.get("code") {
+            code.to_owned()
+        } else {
+            return Ok(None);
+        }
+    };
+    let host = req.headers()["Host"].to_str().expect("Host to be ASCII");
+    let origin;
+    #[cfg(feature = "dev")]
+    {
+        origin = format!("http://{}{}", host, original_uri.path());
+    }
+    #[cfg(not(feature = "dev"))]
+    {
+        origin = format!("https://{}{}", host, original_uri.path());
+    }
+    let user = login(state, auth, &origin).await?;
+    Ok(Some(user))
+}
 
 impl CosmosEntity for User {
     type Entity = String;
@@ -121,7 +171,6 @@ async fn route(state: Arc<AppState>, mut req: Request<Body>) -> Result<Response<
                 (["lists", id], &Method::GET) => get_list(state, user, id).await,
                 (["lists", id], &Method::PUT) => update_list(state, user, id, req.body_mut()).await,
                 (["lists", id, "items"], &Method::GET) => get_list_items(state, user, id).await,
-                (["items"], &Method::GET) => find_items(state, user, req.uri().query()).await,
                 ([""], &Method::POST) => handle_action(state, user, req).await,
                 (_, _) => get_response_builder()
                     .status(StatusCode::METHOD_NOT_ALLOWED)
@@ -147,7 +196,6 @@ async fn route(state: Arc<AppState>, mut req: Request<Body>) -> Result<Response<
                 (["lists", id], &Method::GET) => get_list(state, user, id).await,
                 (["lists", id], &Method::PUT) => update_list(state, user, id, req.body_mut()).await,
                 (["lists", id, "items"], &Method::GET) => get_list_items(state, user, id).await,
-                (["items"], &Method::GET) => find_items(state, user, req.uri().query()).await,
                 ([""], &Method::POST) => handle_action(state, user, req).await,
                 (_, _) => get_response_builder()
                     .status(StatusCode::METHOD_NOT_ALLOWED)
@@ -191,41 +239,13 @@ async fn login_handler(
     mut auth: AuthContext,
     req: axum::http::Request<axum::body::Body>,
 ) -> Result<impl IntoResponse, axum::response::Response> {
-    let cookies: HashMap<_, _> = req.headers().get("Cookie").map_or_else(HashMap::new, |c| {
-        c.to_str()
-            .expect("cookie to be ASCII")
-            .split(';')
-            .filter_map(|c| c.split_once('='))
-            .collect()
-    });
-    let _auth = if let Some(auth) = cookies.get("session") {
-        auth
-    } else {
-        let query: HashMap<_, _> = req.uri().query().map_or_else(HashMap::new, |q| {
-            q.split('&').filter_map(|p| p.split_once('=')).collect()
-        });
-        query
-            .get("code")
-            .ok_or_else(|| StatusCode::BAD_REQUEST.into_response())?
-            .to_owned()
-    };
-    let host = req.headers()["Host"].to_str().expect("Host to be ASCII");
-    let origin;
-    #[cfg(feature = "dev")]
-    {
-        origin = format!("http://{}{}", host, original_uri.path());
-    }
-    #[cfg(not(feature = "dev"))]
-    {
-        origin = format!("https://{}{}", host, original_uri.path());
-    }
-    let user = login(&state, _auth, &origin).await?;
+    let Some(user) = get_user(&state, req, original_uri).await? else { return Err(Error::from("auth wasn't provided").into()) };
     auth.login(&user).await.unwrap();
     Ok((
         StatusCode::FOUND,
         AppendHeaders([(
             header::SET_COOKIE,
-            format!("session={}; Max-Age=31536000; Path=/; HttpOnly", _auth),
+            format!("session={}; Max-Age=31536000; Path=/; HttpOnly", user.auth),
         )]),
         [
             (
@@ -257,7 +277,10 @@ async fn logout_handler(mut auth: AuthContext) -> impl IntoResponse {
 
 async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, Error> {
     let db = state.db.collection_client("users");
-    let query = Query::new(format!("SELECT * FROM c WHERE c.auth = \"{}\"", auth));
+    let query = azure_data_cosmos::prelude::Query::new(format!(
+        "SELECT * FROM c WHERE c.auth = \"{}\"",
+        auth
+    ));
     // TODO: debug why session token isn't working here
     //let session_copy = session.session.read().unwrap().clone();
     let (mut resp, session) = /*if let Some(session) = session_copy {
@@ -503,43 +526,13 @@ async fn update_list(
 }
 
 async fn find_items(
-    state: Arc<AppState>,
-    user: User,
-    query: Option<&str>,
-) -> Result<Response<Body>, Error> {
-    let Some(query) = query else {
-        return get_response_builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(Body::empty())
-            .map_err(Error::from);
-    };
-    let response = match _find_items(state, UserId(user.user_id), query).await {
-        Ok(query) => query,
-        Err(Error::ClientError(error)) => {
-            return get_response_builder()
-                .status(StatusCode::BAD_REQUEST)
-                .body(Body::from(error))
-                .map_err(Error::from);
-        }
-        Err(_) => {
-            return get_response_builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Body::from("Internal Server Error"))
-                .map_err(Error::from);
-        }
-    };
-    get_response_builder()
-        .body(Body::from(serde_json::to_string(&response)?))
-        .map_err(Error::from)
-}
-
-async fn _find_items(
-    state: Arc<AppState>,
-    user_id: UserId,
-    query: &str,
-) -> Result<ItemQuery, Error> {
-    let [(Cow::Borrowed("q"), Cow::Borrowed("search")), (Cow::Borrowed("query"), query)] = &url::form_urlencoded::parse(query.as_bytes())
-        .collect::<Vec<_>>()[..] else { return Err("invalid finder".into()); };
+    OriginalUri(original_uri): OriginalUri,
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<HashMap<String, String>>,
+    req: axum::http::Request<axum::body::Body>,
+) -> Result<impl IntoResponse, axum::response::Response> {
+    let user_id = get_user_or_demo_user(&state, req, original_uri).await?;
+    let Some(query) = params.get("query") else { return Err(Error::from("invalid finder").into()); };
 
     let db = state.db.collection_client("items");
     let (query, fields) = query::rewrite_query(query, &user_id)?;
@@ -551,7 +544,7 @@ async fn _find_items(
             eprintln!("{}: {:?}", query, e);
             e
         })?;
-    Ok(ItemQuery {
+    Ok(Json(ItemQuery {
         fields,
         items: values
             .iter()
@@ -560,7 +553,7 @@ async fn _find_items(
                 metadata: None,
             })
             .collect(),
-    })
+    }))
 }
 
 #[derive(Clone)]
@@ -578,13 +571,15 @@ impl SessionClient {
         let (stream, results) = if let Some(session) = session_copy {
             println!("{:?}", session);
             let mut stream = db
-                .query_documents(Query::new(query))
+                .query_documents(azure_data_cosmos::prelude::Query::new(query))
                 .consistency_level(session)
                 .into_stream();
             let resp = stream.try_next().await?.map(|r| r.results);
             (stream, resp)
         } else {
-            let mut stream = db.query_documents(Query::new(query)).into_stream();
+            let mut stream = db
+                .query_documents(azure_data_cosmos::prelude::Query::new(query))
+                .into_stream();
             let resp = stream.try_next().await?.map(|r| {
                 *self.session.write().unwrap() = Some(ConsistencyLevel::Session(r.session_token));
                 r.results
@@ -1054,6 +1049,7 @@ async fn main() {
     let api_router = Router::new()
         .route("/login", get(login_handler))
         .route("/logout", get(logout_handler))
+        .route("/items", get(find_items))
         .with_state(shared_state);
 
     let app = Router::new()
