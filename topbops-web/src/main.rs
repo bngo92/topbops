@@ -1,5 +1,5 @@
 use axum::{
-    extract::{OriginalUri, Query, State},
+    extract::{OriginalUri, Path, Query, State},
     http::header::{self, HeaderName},
     response::{AppendHeaders, IntoResponse, Json},
     routing::{get, post},
@@ -75,6 +75,18 @@ async fn get_user_or_demo_user(
     }
 }
 
+async fn require_user(
+    state: &Arc<AppState>,
+    req: &Request<Body>,
+    original_uri: &Uri,
+) -> Result<User, axum::response::Response> {
+    if let Some(user) = get_user(state, req, original_uri).await? {
+        Ok(user)
+    } else {
+        Err(StatusCode::UNAUTHORIZED.into_response())
+    }
+}
+
 async fn get_user(
     state: &Arc<AppState>,
     req: &Request<Body>,
@@ -136,7 +148,7 @@ async fn handle(state: Arc<AppState>, req: Request<Body>) -> Result<Response<Bod
     })
 }
 
-async fn route(state: Arc<AppState>, mut req: Request<Body>) -> Result<Response<Body>, Error> {
+async fn route(state: Arc<AppState>, req: Request<Body>) -> Result<Response<Body>, Error> {
     if let Some(path) = req.uri().clone().path().strip_prefix("/api/") {
         let path: Vec<_> = path.split('/').collect();
         let cookies: HashMap<_, _> = req.headers().get("Cookie").map_or_else(HashMap::new, |c| {
@@ -168,9 +180,6 @@ async fn route(state: Arc<AppState>, mut req: Request<Body>) -> Result<Response<
             };
             match (&path[..], req.method()) {
                 (["lists"], &Method::GET) => get_lists(state, user, req.uri().query()).await,
-                (["lists", id], &Method::GET) => get_list(state, user, id).await,
-                (["lists", id], &Method::PUT) => update_list(state, user, id, req.body_mut()).await,
-                (["lists", id, "items"], &Method::GET) => get_list_items(state, user, id).await,
                 (_, _) => get_response_builder()
                     .status(StatusCode::METHOD_NOT_ALLOWED)
                     .body(Body::empty())
@@ -192,9 +201,6 @@ async fn route(state: Arc<AppState>, mut req: Request<Body>) -> Result<Response<
             match (&path[..], req.method()) {
                 (["lists"], &Method::GET) => get_lists(state, user, req.uri().query()).await,
                 (["lists"], &Method::POST) => create_list(state, user).await,
-                (["lists", id], &Method::GET) => get_list(state, user, id).await,
-                (["lists", id], &Method::PUT) => update_list(state, user, id, req.body_mut()).await,
-                (["lists", id, "items"], &Method::GET) => get_list_items(state, user, id).await,
                 (_, _) => get_response_builder()
                     .status(StatusCode::METHOD_NOT_ALLOWED)
                     .body(Body::empty())
@@ -387,25 +393,30 @@ async fn get_lists(
         .map_err(Error::from)
 }
 
-async fn get_list(state: Arc<AppState>, user: User, id: &str) -> Result<Response<Body>, Error> {
-    let list = get_list_doc(&state, &UserId(user.user_id), id).await?;
-    get_response_builder()
-        .body(Body::from(serde_json::to_string(&list)?))
-        .map_err(Error::from)
+async fn get_list(
+    Path(id): Path<String>,
+    OriginalUri(original_uri): OriginalUri,
+    State(state): State<Arc<AppState>>,
+    req: axum::http::Request<axum::body::Body>,
+) -> Result<Json<List>, axum::response::Response> {
+    let user_id = get_user_or_demo_user(&state, &req, &original_uri).await?;
+    let list = get_list_doc(&state, &user_id, &id).await?;
+    Ok(Json(list))
 }
 
 async fn get_list_items(
-    state: Arc<AppState>,
-    user: User,
-    id: &str,
-) -> Result<Response<Body>, Error> {
-    let user_id = UserId(user.user_id);
-    let list = get_list_doc(&state, &user_id, id).await?;
-    let response = if list.items.is_empty() {
-        ItemQuery {
+    Path(id): Path<String>,
+    OriginalUri(original_uri): OriginalUri,
+    State(state): State<Arc<AppState>>,
+    req: axum::http::Request<axum::body::Body>,
+) -> Result<Json<ItemQuery>, axum::response::Response> {
+    let user_id = get_user_or_demo_user(&state, &req, &original_uri).await?;
+    let list = get_list_doc(&state, &user_id, &id).await?;
+    if list.items.is_empty() {
+        Ok(Json(ItemQuery {
             fields: Vec::new(),
             items: Vec::new(),
-        }
+        }))
     } else {
         let db = state.db.collection_client("items");
         let (query, fields, map, ids) = query::rewrite_list_query(&list, &user_id).unwrap();
@@ -416,7 +427,7 @@ async fn get_list_items(
             .into_iter()
             .map(|r: Map<String, Value>| (r["id"].to_string(), r))
             .collect();
-        ItemQuery {
+        Ok(Json(ItemQuery {
             fields,
             items: ids
                 .into_iter()
@@ -433,11 +444,8 @@ async fn get_list_items(
                     }
                 })
                 .collect(),
-        }
-    };
-    get_response_builder()
-        .body(Body::from(serde_json::to_string(&response)?))
-        .map_err(Error::from)
+        }))
+    }
 }
 
 fn format_value(v: &Value) -> String {
@@ -485,18 +493,20 @@ async fn create_list(state: Arc<AppState>, user: User) -> Result<Response<Body>,
 }
 
 async fn update_list(
-    state: Arc<AppState>,
-    user: User,
-    id: &str,
-    body: &mut Body,
-) -> Result<Response<Body>, Error> {
+    Path(id): Path<String>,
+    OriginalUri(original_uri): OriginalUri,
+    State(state): State<Arc<AppState>>,
+    req: axum::http::Request<axum::body::Body>,
+) -> Result<StatusCode, axum::response::Response> {
+    let user = require_user(&state, &req, &original_uri).await?;
     let user_id = UserId(user.user_id);
-    let current_list = get_list_doc(&state, &user_id, id).await?;
+    let current_list = get_list_doc(&state, &user_id, &id).await?;
     let client = state
         .db
         .clone()
         .collection_client("lists")
-        .document_client(id, &user_id.0)?;
+        .document_client(id, &user_id.0)
+        .map_err(Error::from)?;
     let session_copy = state
         .session
         .session
@@ -504,8 +514,10 @@ async fn update_list(
         .unwrap()
         .clone()
         .expect("session should be set by get_list_doc");
-    let got = hyper::body::to_bytes(body).await?;
-    let mut list: List = serde_json::from_slice(&got)?;
+    let got = hyper::body::to_bytes(req.into_body())
+        .await
+        .map_err(Error::from)?;
+    let mut list: List = serde_json::from_slice(&got).map_err(Error::from)?;
     if current_list.sources != list.sources {
         list.items.clear();
         for source in &mut list.sources {
@@ -516,11 +528,12 @@ async fn update_list(
         }
     }
     // TODO: update iframe if possible
-    client.replace_document::<List>(list).into_future().await?;
-    get_response_builder()
-        .status(StatusCode::NO_CONTENT)
-        .body(Body::empty())
-        .map_err(Error::from)
+    client
+        .replace_document::<List>(list)
+        .into_future()
+        .await
+        .map_err(Error::from)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn find_items(
@@ -1025,6 +1038,8 @@ async fn main() {
     let api_router = Router::new()
         .route("/login", get(login_handler))
         .route("/logout", get(logout_handler))
+        .route("/lists/:id", get(get_list).put(update_list))
+        .route("/lists/:id/items", get(get_list_items))
         .route("/items", get(find_items))
         .route("/", post(handle_action))
         .with_state(shared_state);
