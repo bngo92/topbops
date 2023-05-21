@@ -2,7 +2,7 @@ use axum::{
     extract::{OriginalUri, Query, State},
     http::header::{self, HeaderName},
     response::{AppendHeaders, IntoResponse, Json},
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use axum_login::{
@@ -65,8 +65,8 @@ type AuthContext = axum_login::extractors::AuthContext<
 
 async fn get_user_or_demo_user(
     state: &Arc<AppState>,
-    req: Request<Body>,
-    original_uri: Uri,
+    req: &Request<Body>,
+    original_uri: &Uri,
 ) -> Result<UserId, axum::response::Response> {
     if let Some(user) = get_user(state, req, original_uri).await? {
         Ok(UserId(user.user_id))
@@ -77,8 +77,8 @@ async fn get_user_or_demo_user(
 
 async fn get_user(
     state: &Arc<AppState>,
-    req: Request<Body>,
-    original_uri: Uri,
+    req: &Request<Body>,
+    original_uri: &Uri,
 ) -> Result<Option<User>, axum::response::Response> {
     let cookies: HashMap<_, _> = req.headers().get("Cookie").map_or_else(HashMap::new, |c| {
         c.to_str()
@@ -171,7 +171,6 @@ async fn route(state: Arc<AppState>, mut req: Request<Body>) -> Result<Response<
                 (["lists", id], &Method::GET) => get_list(state, user, id).await,
                 (["lists", id], &Method::PUT) => update_list(state, user, id, req.body_mut()).await,
                 (["lists", id, "items"], &Method::GET) => get_list_items(state, user, id).await,
-                ([""], &Method::POST) => handle_action(state, user, req).await,
                 (_, _) => get_response_builder()
                     .status(StatusCode::METHOD_NOT_ALLOWED)
                     .body(Body::empty())
@@ -196,7 +195,6 @@ async fn route(state: Arc<AppState>, mut req: Request<Body>) -> Result<Response<
                 (["lists", id], &Method::GET) => get_list(state, user, id).await,
                 (["lists", id], &Method::PUT) => update_list(state, user, id, req.body_mut()).await,
                 (["lists", id, "items"], &Method::GET) => get_list_items(state, user, id).await,
-                ([""], &Method::POST) => handle_action(state, user, req).await,
                 (_, _) => get_response_builder()
                     .status(StatusCode::METHOD_NOT_ALLOWED)
                     .body(Body::empty())
@@ -239,7 +237,7 @@ async fn login_handler(
     mut auth: AuthContext,
     req: axum::http::Request<axum::body::Body>,
 ) -> Result<impl IntoResponse, axum::response::Response> {
-    let Some(user) = get_user(&state, req, original_uri).await? else { return Err(Error::from("auth wasn't provided").into()) };
+    let Some(user) = get_user(&state, &req, &original_uri).await? else { return Err(Error::from("auth wasn't provided").into()) };
     auth.login(&user).await.unwrap();
     Ok((
         StatusCode::FOUND,
@@ -531,7 +529,7 @@ async fn find_items(
     Query(params): Query<HashMap<String, String>>,
     req: axum::http::Request<axum::body::Body>,
 ) -> Result<impl IntoResponse, axum::response::Response> {
-    let user_id = get_user_or_demo_user(&state, req, original_uri).await?;
+    let user_id = get_user_or_demo_user(&state, &req, &original_uri).await?;
     let Some(query) = params.get("query") else { return Err(Error::from("invalid finder").into()); };
 
     let db = state.db.collection_client("items");
@@ -602,46 +600,51 @@ impl SessionClient {
 }
 
 async fn handle_action(
-    state: Arc<AppState>,
-    user: User,
-    req: Request<Body>,
-) -> Result<Response<Body>, Error> {
-    let user_id = UserId(user.user_id);
-    let query = req.uri().query();
-    if let Some(query) = query.and_then(|q| {
-        q.split('&')
-            .map(|s| s.split_once('='))
-            .collect::<Option<Vec<(&str, &str)>>>()
-    }) {
-        match query[..] {
-            [("action", "update"), ("list", id), ("win", win), ("lose", lose)] => {
-                return handle_stats_update(state, user_id, id, win, lose).await;
+    OriginalUri(original_uri): OriginalUri,
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<HashMap<String, String>>,
+    req: axum::http::Request<axum::body::Body>,
+) -> Result<StatusCode, axum::response::Response> {
+    let user = get_user(&state, &req, &original_uri).await?;
+    let user_id = if let Some(user) = &user {
+        UserId(user.user_id.clone())
+    } else {
+        UserId(DEMO_USER.to_owned())
+    };
+    match params.get("action").map(String::as_ref) {
+        Some("update") => {
+            if let (Some(id), Some(win), Some(lose)) =
+                (params.get("list"), params.get("win"), params.get("lose"))
+            {
+                return Ok(handle_stats_update(state, user_id, id, win, lose).await?);
             }
-            [("action", "push"), ("list", id)] => {
-                return push_list(state, user_id, id, &user.access_token).await;
-            }
-            [("action", "import"), ("id", id)] => {
-                return import_list(state, user_id, id, false).await;
-            }
-            [("action", "updateItems")] => {
-                return update_items(state, user_id, req).await;
-            }
-            _ => {}
         }
+        Some("push") => {
+            if let Some(id) = params.get("list") {
+                return Ok(push_list(state, user_id, id, &user.unwrap().access_token).await?);
+            }
+        }
+        Some("import") => {
+            if let Some(id) = params.get("id") {
+                return Ok(import_list(state, user_id, id, false).await?);
+            }
+        }
+        Some("updateItems") => {
+            return Ok(update_items(state, user_id, req).await?);
+        }
+        _ => {}
     }
-    get_response_builder()
-        .status(StatusCode::BAD_REQUEST)
-        .body(Body::empty())
-        .map_err(Error::from)
+    Err(StatusCode::BAD_REQUEST.into_response())
 }
 
+// TODO: handle spaces in IDs
 async fn handle_stats_update(
     state: Arc<AppState>,
     user_id: UserId,
     id: &str,
     win: &str,
     lose: &str,
-) -> Result<Response<Body>, Error> {
+) -> Result<StatusCode, Error> {
     let list_client = state
         .db
         .clone()
@@ -653,10 +656,7 @@ async fn handle_stats_update(
         get_item_doc(client.clone(), &state.session, user_id.clone(), win),
         get_item_doc(client.clone(), &state.session, user_id.clone(), lose),
     ).await else {
-        return get_response_builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(Body::empty())
-            .map_err(Error::from);
+        return Err(Error::from(""));
     };
 
     let mut list = if let GetDocumentResponse::Found(list) = list_response {
@@ -714,10 +714,7 @@ async fn handle_stats_update(
             .into_future(),
     )
     .await?;
-    get_response_builder()
-        .status(StatusCode::OK)
-        .body(Body::empty())
-        .map_err(Error::from)
+    Ok(StatusCode::OK)
 }
 
 async fn push_list(
@@ -725,36 +722,24 @@ async fn push_list(
     user_id: UserId,
     id: &str,
     access_token: &str,
-) -> Result<Response<Body>, Error> {
+) -> Result<StatusCode, Error> {
     let list = get_list_doc(&state, &user_id, id).await?;
     // TODO: create new playlist if one doesn't exist
     let ListMode::User(Some(external_id)) = list.mode else {
-        return get_response_builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(Body::from("Push is not supported for this list type"))
-            .map_err(Error::from);
+        return Err(Error::from("Push is not supported for this list type"));
     };
     let mut iter = list.sources.iter().map(get_source_id);
     let source = if let Some(source) = iter.next() {
         if source.is_none() {
-            return get_response_builder()
-                .status(StatusCode::BAD_REQUEST)
-                .body(Body::from("Push is not supported for the source"))
-                .map_err(Error::from);
+            return Err(Error::from("Push is not supported for the source"));
         }
         source
     } else {
-        return get_response_builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(Body::from("List has no sources"))
-            .map_err(Error::from);
+        return Err(Error::from("List has no sources"));
     };
     for s in iter {
         if s != source {
-            return get_response_builder()
-                .status(StatusCode::BAD_REQUEST)
-                .body(Body::from("List has multiple sources"))
-                .map_err(Error::from);
+            return Err(Error::from("List has multiple sources"));
         }
     }
     // TODO: filter hidden items
@@ -769,10 +754,7 @@ async fn push_list(
             .join(","),
     )
     .await?;
-    get_response_builder()
-        .status(StatusCode::OK)
-        .body(Body::empty())
-        .map_err(Error::from)
+    Ok(StatusCode::OK)
 }
 
 fn get_source_id(source: &Source) -> Option<&str> {
@@ -787,17 +769,14 @@ async fn import_list(
     user_id: UserId,
     id: &str,
     favorite: bool,
-) -> Result<Response<Body>, Error> {
+) -> Result<StatusCode, Error> {
     let (mut list, items) = match id.split_once(':') {
         Some(("spotify", id)) => source::spotify::import(&user_id, id).await?,
         _ => todo!(),
     };
     list.favorite = favorite;
     create_external_list(state, list, items, user_id.0 == DEMO_USER).await?;
-    get_response_builder()
-        .status(StatusCode::CREATED)
-        .body(Body::empty())
-        .map_err(Error::from)
+    Ok(StatusCode::CREATED)
 }
 
 async fn get_item_doc(
@@ -914,7 +893,7 @@ async fn update_items(
     state: Arc<AppState>,
     user_id: UserId,
     req: Request<Body>,
-) -> Result<Response<Body>, Error> {
+) -> Result<StatusCode, Error> {
     let body = &hyper::body::to_bytes(req.into_body()).await?;
     let updates: HashMap<String, HashMap<String, Value>> = serde_json::from_slice(body)?;
     let client = state.db.collection_client("items");
@@ -947,10 +926,7 @@ async fn update_items(
     .buffered(5)
     .try_collect::<()>()
     .await?;
-    get_response_builder()
-        .status(StatusCode::NO_CONTENT)
-        .body(Body::empty())
-        .map_err(Error::from)
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Clone)]
@@ -1050,6 +1026,7 @@ async fn main() {
         .route("/login", get(login_handler))
         .route("/logout", get(logout_handler))
         .route("/items", get(find_items))
+        .route("/", post(handle_action))
         .with_state(shared_state);
 
     let app = Router::new()
