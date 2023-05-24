@@ -9,6 +9,7 @@ use topbops::ItemMetadata;
 
 pub mod query;
 pub mod source;
+pub mod user;
 
 #[derive(Clone)]
 pub struct UserId(pub String);
@@ -58,12 +59,19 @@ pub fn convert_items(items: &[Item]) -> Vec<ItemMetadata> {
         .collect()
 }
 
-#[allow(clippy::enum_variant_names)]
 #[derive(Debug)]
 pub enum Error {
     ClientError(String),
     InternalError(InternalError),
 }
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for Error {}
 
 #[derive(Debug)]
 pub enum InternalError {

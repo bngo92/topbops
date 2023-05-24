@@ -1,110 +1,60 @@
 use axum::{
-    extract::{OriginalUri, Path, Query, State},
+    body::Bytes,
+    extract::{Host, OriginalUri, Path, Query, State},
     http::header,
-    response::{AppendHeaders, IntoResponse, Json, Response},
+    response::{IntoResponse, Json, Response},
     routing::{get, post},
     Router,
 };
-use axum_login::{
-    axum_sessions::{async_session::MemoryStore, SessionLayer},
-    secrecy::SecretVec,
-    AuthLayer, AuthUser,
-};
+use axum_login::{axum_sessions::SessionLayer, AuthLayer};
 use azure_data_cosmos::prelude::{
-    AuthorizationToken, CollectionClient, ConsistencyLevel, CosmosClient, CosmosEntity,
-    DatabaseClient, GetDocumentResponse,
+    AuthorizationToken, CollectionClient, ConsistencyLevel, CosmosClient, DatabaseClient,
+    GetDocumentResponse,
 };
+use base64::prelude::{Engine, BASE64_STANDARD};
 use futures::{StreamExt, TryStreamExt};
 use hyper::{Body, Client, Method, Request, StatusCode, Uri};
 use hyper_tls::HttpsConnector;
-use rand::Rng;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 use topbops::{ItemQuery, List, ListMode, Lists, Source, SourceType};
+use topbops_web::user::{CosmosStore, User};
 use topbops_web::{query, source, Error, Item, Token, UserId};
 #[cfg(feature = "dev")]
 use tower_http::services::ServeFile;
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct User {
-    id: String,
-    user_id: String,
-    auth: String,
-    access_token: String,
-    refresh_token: String,
-}
+type AuthContext = axum_login::extractors::AuthContext<String, User, CosmosStore>;
 
-impl AuthUser<String> for User {
-    fn get_id(&self) -> String {
-        self.id.clone()
-    }
-
-    fn get_password_hash(&self) -> SecretVec<u8> {
-        SecretVec::new(self.refresh_token.clone().into())
-    }
-}
-
-type AuthContext = axum_login::extractors::AuthContext<
-    String,
-    User,
-    axum_login::memory_store::MemoryStore<String, User>,
->;
-
-async fn get_user_or_demo_user(
-    state: &Arc<AppState>,
-    req: &Request<Body>,
-    original_uri: &Uri,
-) -> Result<UserId, Response> {
-    if let Some(user) = get_user(state, req, original_uri).await? {
-        Ok(UserId(user.user_id))
+fn get_user_or_demo_user(auth: AuthContext) -> UserId {
+    if let Some(user) = auth.current_user {
+        UserId(user.user_id)
     } else {
-        Ok(UserId(DEMO_USER.to_owned()))
+        UserId(DEMO_USER.to_owned())
     }
 }
 
-async fn require_user(
-    state: &Arc<AppState>,
-    req: &Request<Body>,
-    original_uri: &Uri,
-) -> Result<User, Response> {
-    if let Some(user) = get_user(state, req, original_uri).await? {
+fn require_user(auth: AuthContext) -> Result<User, Response> {
+    if let Some(user) = auth.current_user {
         Ok(user)
     } else {
         Err(StatusCode::UNAUTHORIZED.into_response())
     }
 }
 
-async fn get_user(
-    state: &Arc<AppState>,
-    req: &Request<Body>,
-    original_uri: &Uri,
-) -> Result<Option<User>, Response> {
-    let cookies: HashMap<_, _> = req.headers().get("Cookie").map_or_else(HashMap::new, |c| {
-        c.to_str()
-            .expect("cookie to be ASCII")
-            .split("; ")
-            .filter_map(|c| c.split_once('='))
-            .collect()
-    });
-    let auth = if let Some(auth) = cookies.get("session") {
-        auth
-    } else {
-        let query: HashMap<_, _> = req.uri().query().map_or_else(HashMap::new, |q| {
-            q.split('&').filter_map(|p| p.split_once('=')).collect()
-        });
-        if let Some(code) = query.get("code") {
-            code.to_owned()
-        } else {
-            return Ok(None);
-        }
-    };
-    let host = req.headers()["Host"].to_str().expect("Host to be ASCII");
+const DEMO_USER: &str = "demo";
+
+async fn login_handler(
+    OriginalUri(original_uri): OriginalUri,
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<HashMap<String, String>>,
+    mut auth: AuthContext,
+    Host(host): Host,
+) -> Result<impl IntoResponse, Response> {
     let origin;
     #[cfg(feature = "dev")]
     {
@@ -114,34 +64,10 @@ async fn get_user(
     {
         origin = format!("https://{}{}", host, original_uri.path());
     }
-    let user = login(state, auth, &origin).await?;
-    Ok(Some(user))
-}
-
-impl CosmosEntity for User {
-    type Entity = String;
-
-    fn partition_key(&self) -> Self::Entity {
-        self.user_id.clone()
-    }
-}
-
-const DEMO_USER: &str = "demo";
-
-async fn login_handler(
-    OriginalUri(original_uri): OriginalUri,
-    State(state): State<Arc<AppState>>,
-    mut auth: AuthContext,
-    req: Request<Body>,
-) -> Result<impl IntoResponse, Response> {
-    let Some(user) = get_user(&state, &req, &original_uri).await? else { return Err(Error::from("auth wasn't provided").into()) };
+    let user = login(&state, &params["code"], &origin).await.unwrap();
     auth.login(&user).await.unwrap();
     Ok((
         StatusCode::FOUND,
-        AppendHeaders([(
-            header::SET_COOKIE,
-            format!("session={}; Max-Age=31536000; Path=/; HttpOnly", user.auth),
-        )]),
         [
             (
                 header::ACCESS_CONTROL_ALLOW_HEADERS,
@@ -161,9 +87,9 @@ async fn logout_handler(mut auth: AuthContext) -> impl IntoResponse {
     auth.logout().await;
     (
         StatusCode::FOUND,
-        AppendHeaders([(header::SET_COOKIE, "session=; Max-Age=0; Path=/; HttpOnly")]),
         [
             (header::ACCESS_CONTROL_ALLOW_HEADERS, "Authorization"),
+            // TODO: also clear cookie if there was an invalid session
             (header::SET_COOKIE, "user=; Max-Age=0; Path=/"),
             (header::LOCATION, "/"),
         ],
@@ -171,40 +97,6 @@ async fn logout_handler(mut auth: AuthContext) -> impl IntoResponse {
 }
 
 async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, Error> {
-    let db = state.db.collection_client("users");
-    let query = azure_data_cosmos::prelude::Query::new(format!(
-        "SELECT * FROM c WHERE c.auth = \"{}\"",
-        auth
-    ));
-    // TODO: debug why session token isn't working here
-    //let session_copy = session.session.read().unwrap().clone();
-    let (mut resp, session) = /*if let Some(session) = session_copy {
-        println!("{:?}", session);
-        (
-            db.query_documents()
-                .query_cross_partition(true)
-                .parallelize_cross_partition_query(true)
-                .consistency_level(session.clone())
-                .execute(&query)
-                .await?,
-            session,
-        )
-    } else */{
-        let resp = db
-            .query_documents(query)
-            .query_cross_partition(true)
-            .parallelize_cross_partition_query(true)
-            .into_stream::<User>()
-            .next()
-            .await
-            .expect("response from database")?;
-        let token = ConsistencyLevel::Session(resp.session_token.clone());
-        *state.session.session.write().unwrap() = Some(token.clone());
-        (resp, token)
-    };
-    if let Some((user, _)) = resp.results.pop() {
-        return Ok(user);
-    }
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
     let uri: Uri = "https://accounts.spotify.com/api/token".parse().unwrap();
@@ -244,10 +136,46 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, 
     let got = hyper::body::to_bytes(resp.into_body()).await?;
     let spotify_user: source::spotify::User = serde_json::from_slice(&got)?;
 
+    let db = state.db.collection_client("users");
+    let query = azure_data_cosmos::prelude::Query::new(format!(
+        "SELECT c.id FROM c WHERE c.user_id = \"{}\"",
+        spotify_user.id
+    ));
+    // TODO: debug why session token isn't working here
+    //let session_copy = session.session.read().unwrap().clone();
+    let (mut resp, session) = /*if let Some(session) = session_copy {
+        println!("{:?}", session);
+        (
+            db.query_documents()
+                .query_cross_partition(true)
+                .parallelize_cross_partition_query(true)
+                .consistency_level(session.clone())
+                .execute(&query)
+                .await?,
+            session,
+        )
+    } else */{
+        let resp = db
+            .query_documents(query)
+            .query_cross_partition(true)
+            .parallelize_cross_partition_query(true)
+            .into_stream::<HashMap<String, String>>()
+            .next()
+            .await
+            .expect("response from database")?;
+        let token = ConsistencyLevel::Session(resp.session_token.clone());
+        *state.session.session.write().unwrap() = Some(token.clone());
+        (resp, token)
+    };
+    let id = if let Some((mut map, _)) = resp.results.pop() {
+        map.remove("id").expect("id should be returned by DB")
+    } else {
+        Uuid::new_v4().to_hyphenated().to_string()
+    };
+
     let user = User {
-        id: Uuid::new_v4().to_hyphenated().to_string(),
-        user_id: spotify_user.id.clone(),
-        auth: auth.to_owned(),
+        id,
+        user_id: spotify_user.id,
         access_token: token.access_token.clone(),
         refresh_token: token
             .refresh_token
@@ -255,18 +183,18 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, 
     };
     db.create_document(user.clone())
         .consistency_level(session)
+        .is_upsert(true)
         .into_future()
         .await?;
     Ok(user)
 }
 
 async fn get_lists(
-    OriginalUri(original_uri): OriginalUri,
     State(state): State<Arc<AppState>>,
     Query(params): Query<HashMap<String, String>>,
-    req: Request<Body>,
+    auth: AuthContext,
 ) -> Result<Json<Lists>, Response> {
-    let user_id = get_user_or_demo_user(&state, &req, &original_uri).await?;
+    let user_id = get_user_or_demo_user(auth);
     let db = state.db.collection_client("lists");
     let query = if let Some("true") = params.get("favorite").map(String::as_ref) {
         format!(
@@ -282,23 +210,21 @@ async fn get_lists(
 }
 
 async fn get_list(
-    Path(id): Path<String>,
-    OriginalUri(original_uri): OriginalUri,
     State(state): State<Arc<AppState>>,
-    req: Request<Body>,
+    Path(id): Path<String>,
+    auth: AuthContext,
 ) -> Result<Json<List>, Response> {
-    let user_id = get_user_or_demo_user(&state, &req, &original_uri).await?;
+    let user_id = get_user_or_demo_user(auth);
     let list = get_list_doc(&state, &user_id, &id).await?;
     Ok(Json(list))
 }
 
 async fn get_list_items(
-    Path(id): Path<String>,
-    OriginalUri(original_uri): OriginalUri,
     State(state): State<Arc<AppState>>,
-    req: Request<Body>,
+    Path(id): Path<String>,
+    auth: AuthContext,
 ) -> Result<Json<ItemQuery>, Response> {
-    let user_id = get_user_or_demo_user(&state, &req, &original_uri).await?;
+    let user_id = get_user_or_demo_user(auth);
     let list = get_list_doc(&state, &user_id, &id).await?;
     if list.items.is_empty() {
         Ok(Json(ItemQuery {
@@ -361,11 +287,10 @@ async fn get_list_doc(state: &Arc<AppState>, user_id: &UserId, id: &str) -> Resu
 }
 
 async fn create_list(
-    OriginalUri(original_uri): OriginalUri,
     State(state): State<Arc<AppState>>,
-    req: Request<Body>,
+    auth: AuthContext,
 ) -> Result<impl IntoResponse, Response> {
-    let user = require_user(&state, &req, &original_uri).await?;
+    let user = require_user(auth)?;
     let list = List {
         id: Uuid::new_v4().to_hyphenated().to_string(),
         user_id: user.user_id,
@@ -383,11 +308,11 @@ async fn create_list(
 
 async fn update_list(
     Path(id): Path<String>,
-    OriginalUri(original_uri): OriginalUri,
     State(state): State<Arc<AppState>>,
-    req: Request<Body>,
+    auth: AuthContext,
+    Json(mut list): Json<List>,
 ) -> Result<StatusCode, Response> {
-    let user = require_user(&state, &req, &original_uri).await?;
+    let user = require_user(auth)?;
     let user_id = UserId(user.user_id);
     let current_list = get_list_doc(&state, &user_id, &id).await?;
     let client = state
@@ -403,10 +328,6 @@ async fn update_list(
         .unwrap()
         .clone()
         .expect("session should be set by get_list_doc");
-    let got = hyper::body::to_bytes(req.into_body())
-        .await
-        .map_err(Error::from)?;
-    let mut list: List = serde_json::from_slice(&got).map_err(Error::from)?;
     if current_list.sources != list.sources {
         list.items.clear();
         for source in &mut list.sources {
@@ -426,12 +347,11 @@ async fn update_list(
 }
 
 async fn find_items(
-    OriginalUri(original_uri): OriginalUri,
     State(state): State<Arc<AppState>>,
     Query(params): Query<HashMap<String, String>>,
-    req: Request<Body>,
+    auth: AuthContext,
 ) -> Result<impl IntoResponse, Response> {
-    let user_id = get_user_or_demo_user(&state, &req, &original_uri).await?;
+    let user_id = get_user_or_demo_user(auth);
     let Some(query) = params.get("query") else { return Err(Error::from("invalid finder").into()); };
 
     let db = state.db.collection_client("items");
@@ -502,17 +422,13 @@ impl SessionClient {
 }
 
 async fn handle_action(
-    OriginalUri(original_uri): OriginalUri,
     State(state): State<Arc<AppState>>,
     Query(params): Query<HashMap<String, String>>,
-    req: Request<Body>,
+    auth: AuthContext,
+    body: Bytes,
 ) -> Result<StatusCode, Response> {
-    let user = get_user(&state, &req, &original_uri).await?;
-    let user_id = if let Some(user) = &user {
-        UserId(user.user_id.clone())
-    } else {
-        UserId(DEMO_USER.to_owned())
-    };
+    let user = auth.current_user.clone();
+    let user_id = get_user_or_demo_user(auth);
     match params.get("action").map(String::as_ref) {
         Some("update") => {
             if let (Some(id), Some(win), Some(lose)) =
@@ -532,7 +448,7 @@ async fn handle_action(
             }
         }
         Some("updateItems") => {
-            return Ok(update_items(state, user_id, req).await?);
+            return Ok(update_items(state, user_id, body).await?);
         }
         _ => {}
     }
@@ -794,10 +710,9 @@ async fn create_items(
 async fn update_items(
     state: Arc<AppState>,
     user_id: UserId,
-    req: Request<Body>,
+    body: Bytes,
 ) -> Result<StatusCode, Error> {
-    let body = &hyper::body::to_bytes(req.into_body()).await?;
-    let updates: HashMap<String, HashMap<String, Value>> = serde_json::from_slice(body)?;
+    let updates: HashMap<String, HashMap<String, Value>> = serde_json::from_slice(&body)?;
     let client = state.db.collection_client("items");
     let client = &client;
     let session = &state.session;
@@ -855,7 +770,10 @@ async fn main() {
     let session = SessionClient {
         session: Arc::new(RwLock::new(None)),
     };
-    let shared_state = Arc::new(AppState { db, session });
+    let shared_state = Arc::new(AppState {
+        db: db.clone(),
+        session,
+    });
 
     // Reset demo user data during startup in production
     if cfg!(not(feature = "dev")) {
@@ -906,27 +824,23 @@ async fn main() {
         println!("Demo lists were created");
     }
 
-    let secret = rand::thread_rng().gen::<[u8; 64]>();
+    let secret = BASE64_STANDARD
+        .decode(std::env::var("SECRET_KEY").expect("SECRET_KEY is missing"))
+        .expect("SECRET_KEY is not base64");
 
-    let session_store = MemoryStore::new();
-    let session_layer = SessionLayer::new(session_store, &secret).with_secure(false);
+    let session_store = CosmosStore { db };
+    let session_layer = SessionLayer::new(session_store.clone(), &secret).with_secure(false);
 
-    let user_store =
-        axum_login::memory_store::MemoryStore::new(&Arc::new(tokio::sync::RwLock::new(HashMap::<
-            String,
-            User,
-        >::new(
-        ))));
-    let auth_layer = AuthLayer::new(user_store, &secret);
+    let auth_layer = AuthLayer::new(session_store, &secret);
 
     let api_router = Router::new()
-        .route("/login", get(login_handler))
-        .route("/logout", get(logout_handler))
-        .route("/lists", get(get_lists).put(create_list))
+        .route("/lists", get(get_lists).post(create_list))
         .route("/lists/:id", get(get_list).put(update_list))
         .route("/lists/:id/items", get(get_list_items))
         .route("/items", get(find_items))
         .route("/", post(handle_action))
+        .route("/login", get(login_handler))
+        .route("/logout", get(logout_handler))
         .with_state(shared_state);
 
     let app = Router::new()
