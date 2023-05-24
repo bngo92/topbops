@@ -64,7 +64,7 @@ async fn login_handler(
     {
         origin = format!("https://{}{}", host, original_uri.path());
     }
-    let user = login(&state, &params["code"], &origin).await.unwrap();
+    let user = login(&state, &params["code"], &origin).await?;
     auth.login(&user).await.unwrap();
     Ok((
         StatusCode::FOUND,
@@ -233,7 +233,7 @@ async fn get_list_items(
         }))
     } else {
         let db = state.db.collection_client("items");
-        let (query, fields, map, ids) = query::rewrite_list_query(&list, &user_id).unwrap();
+        let (query, fields, map, ids) = query::rewrite_list_query(&list, &user_id)?;
         let items: HashMap<_, _> = state
             .session
             .query_documents(db, query.to_string())
@@ -439,7 +439,8 @@ async fn handle_action(
         }
         Some("push") => {
             if let Some(id) = params.get("list") {
-                return Ok(push_list(state, user_id, id, &user.unwrap().access_token).await?);
+                let Some(user) = user else { return Err(StatusCode::UNAUTHORIZED.into_response()); };
+                return Ok(push_list(state, user_id, id, &user.access_token).await?);
             }
         }
         Some("import") => {
@@ -645,8 +646,7 @@ async fn create_list_doc(state: Arc<AppState>, list: List, is_upsert: bool) -> R
             .create_document(list)
             .is_upsert(is_upsert)
             .into_future()
-            .await
-            .unwrap();
+            .await?;
         *state.session.session.write().unwrap() =
             Some(ConsistencyLevel::Session(resp.session_token));
     };
