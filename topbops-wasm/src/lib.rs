@@ -499,6 +499,7 @@ async fn update_list(id: &str, list: List) -> Result<(), JsValue> {
                 &serde_json::to_string(&list).unwrap(),
             ))),
     )?;
+    request.headers().set("Content-Type", "application/json")?;
     JsFuture::from(window.fetch_with_request(&request)).await?;
     Ok(())
 }
