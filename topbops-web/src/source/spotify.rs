@@ -1,4 +1,5 @@
 use crate::{Error, UserId};
+use azure_data_cosmos::prelude::DatabaseClient;
 use futures::{StreamExt, TryStreamExt};
 use hyper::{Body, Client, Method, Request, Uri};
 use hyper_tls::HttpsConnector;
@@ -267,7 +268,7 @@ pub async fn update_list(access_token: &str, playlist_id: &str, ids: &str) -> Re
     .parse()
     .unwrap();
     // TODO: error handling
-    client
+    let resp = client
         .request(
             Request::builder()
                 .method(Method::PUT)
@@ -277,7 +278,17 @@ pub async fn update_list(access_token: &str, playlist_id: &str, ids: &str) -> Re
                 .body(Body::empty())?,
         )
         .await?;
-    Ok(())
+    if resp.status().is_client_error() || resp.status().is_server_error() {
+        let got = hyper::body::to_bytes(resp.into_body()).await?;
+        let error = format!(
+            "Spotify update playlist items error: {}",
+            String::from_utf8(got.to_vec())
+                .unwrap_or_else(|_| "Spotify response should be ASCII".to_owned())
+        );
+        Err(Error::internal(error))
+    } else {
+        Ok(())
+    }
 }
 
 async fn get_token() -> Result<crate::Token, Error> {
@@ -298,6 +309,49 @@ async fn get_token() -> Result<crate::Token, Error> {
                 )
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .body(Body::from("grant_type=client_credentials"))?,
+        )
+        .await?;
+    let got = hyper::body::to_bytes(resp.into_body()).await?;
+    serde_json::from_slice(&got).map_err(Error::from)
+}
+
+// TODO: reuse existing access token if it hasn't expired
+pub async fn get_access_token<'a>(
+    db: &'_ DatabaseClient,
+    user: &'a mut crate::user::User,
+) -> Result<&'a str, Error> {
+    let token = get_user_token(&user.refresh_token).await?;
+    user.access_token = token.access_token;
+    db.collection_client("users")
+        .document_client(&user.id, &user.id)?
+        .replace_document(user.clone())
+        //.consistency_level(session)
+        .into_future()
+        .await?;
+    Ok(&user.access_token)
+}
+
+async fn get_user_token(refresh_token: &str) -> Result<crate::Token, Error> {
+    let https = HttpsConnector::new();
+    let client = Client::builder().build::<_, hyper::Body>(https);
+    let uri: Uri = "https://accounts.spotify.com/api/token".parse().unwrap();
+    let resp = client
+        .request(
+            Request::builder()
+                .method(Method::POST)
+                .uri(uri)
+                .header(
+                    "Authorization",
+                    &format!(
+                        "Basic {}",
+                        std::env::var("SPOTIFY_TOKEN").expect("SPOTIFY_TOKEN is missing")
+                    ),
+                )
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .body(Body::from(format!(
+                    "grant_type=refresh_token&refresh_token={}",
+                    refresh_token
+                )))?,
         )
         .await?;
     let got = hyper::body::to_bytes(resp.into_body()).await?;

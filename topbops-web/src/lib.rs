@@ -80,6 +80,7 @@ pub enum InternalError {
     JSONError(serde_json::Error),
     CosmosError(azure_core::error::Error),
     IOError(std::io::Error),
+    Error(String),
 }
 
 impl From<hyper::Error> for Error {
@@ -124,6 +125,12 @@ impl From<sqlparser::parser::ParserError> for Error {
 impl From<&'static str> for Error {
     fn from(e: &'static str) -> Error {
         Error::ClientError(e.to_owned())
+    }
+}
+
+impl Error {
+    fn internal(e: String) -> Error {
+        Error::InternalError(InternalError::Error(e))
     }
 }
 

@@ -439,8 +439,8 @@ async fn handle_action(
         }
         Some("push") => {
             if let Some(id) = params.get("list") {
-                let Some(user) = user else { return Err(StatusCode::UNAUTHORIZED.into_response()); };
-                return Ok(push_list(state, user_id, id, &user.access_token).await?);
+                let Some(mut user) = user else { return Err(StatusCode::UNAUTHORIZED.into_response()); };
+                return Ok(push_list(state, &mut user, id).await?);
             }
         }
         Some("import") => {
@@ -536,13 +536,8 @@ async fn handle_stats_update(
     Ok(StatusCode::OK)
 }
 
-async fn push_list(
-    state: Arc<AppState>,
-    user_id: UserId,
-    id: &str,
-    access_token: &str,
-) -> Result<StatusCode, Error> {
-    let list = get_list_doc(&state, &user_id, id).await?;
+async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<StatusCode, Error> {
+    let list = get_list_doc(&state, &UserId(user.user_id.clone()), id).await?;
     // TODO: create new playlist if one doesn't exist
     let ListMode::User(Some(external_id)) = list.mode else {
         return Err(Error::from("Push is not supported for this list type"));
@@ -561,6 +556,7 @@ async fn push_list(
             return Err(Error::from("List has multiple sources"));
         }
     }
+    let access_token = source::spotify::get_access_token(&state.db, user).await?;
     // TODO: filter hidden items
     source::spotify::update_list(
         access_token,
