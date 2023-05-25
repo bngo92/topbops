@@ -844,10 +844,7 @@ async fn main() {
         .with_state(shared_state);
 
     let app = Router::new()
-        .nest(
-            if cfg!(feature = "dev") { "/api/" } else { "/" },
-            api_router,
-        )
+        .nest("/api/", api_router)
         .layer(auth_layer)
         .layer(session_layer)
         .layer(TraceLayer::new_for_http());
