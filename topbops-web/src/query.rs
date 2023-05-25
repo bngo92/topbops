@@ -326,7 +326,7 @@ mod test {
             ),
         ] {
             let err = rewrite_query(input).unwrap_err();
-            if let Error::SqlError(error) = err {
+            if let Error::ClientError(error) = err {
                 assert_eq!(error, expected);
             } else {
                 unreachable!()
