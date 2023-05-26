@@ -2,7 +2,7 @@ use axum::{
     body::Bytes,
     extract::{Host, OriginalUri, Path, Query, State},
     http::header,
-    response::{IntoResponse, Json, Response},
+    response::{IntoResponse, Json, Redirect, Response},
     routing::{get, post},
     Router,
 };
@@ -67,18 +67,11 @@ async fn login_handler(
     let user = login(&state, &params["code"], &origin).await?;
     auth.login(&user).await.unwrap();
     Ok((
-        StatusCode::FOUND,
-        [
-            (
-                header::ACCESS_CONTROL_ALLOW_HEADERS,
-                String::from("Authorization"),
-            ),
-            (header::LOCATION, String::from("/")),
-            (
-                header::SET_COOKIE,
-                format!("user={}; Max-Age=31536000; Path=/", user.user_id),
-            ),
-        ],
+        [(
+            header::SET_COOKIE,
+            format!("user={}; Max-Age=31536000; Path=/", user.user_id),
+        )],
+        Redirect::to("/"),
     ))
 }
 
@@ -86,13 +79,9 @@ async fn login_handler(
 async fn logout_handler(mut auth: AuthContext) -> impl IntoResponse {
     auth.logout().await;
     (
-        StatusCode::FOUND,
-        [
-            (header::ACCESS_CONTROL_ALLOW_HEADERS, "Authorization"),
-            // TODO: also clear cookie if there was an invalid session
-            (header::SET_COOKIE, "user=; Max-Age=0; Path=/"),
-            (header::LOCATION, "/"),
-        ],
+        // TODO: also clear cookie if there was an invalid session
+        [(header::SET_COOKIE, "user=; Max-Age=0; Path=/")],
+        Redirect::to("/"),
     )
 }
 
