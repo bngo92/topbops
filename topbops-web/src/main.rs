@@ -137,7 +137,7 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, 
         )],
     );
     let mut results: Vec<HashMap<String, String>> = state
-        .read(move |db| {
+        .query_documents(move |db| {
             db.collection_client("users")
                 .query_documents(query)
                 .query_cross_partition(true)
@@ -174,17 +174,22 @@ async fn get_lists(
     auth: AuthContext,
 ) -> Result<Json<Lists>, Response> {
     let user_id = get_user_or_demo_user(auth);
-    let db = state.db.collection_client("lists");
     let query = if let Some("true") = params.get("favorite").map(String::as_ref) {
-        format!(
-            "SELECT * FROM c WHERE c.user_id = \"{}\" AND c.favorite = true",
-            user_id.0
-        )
+        "SELECT * FROM c WHERE c.user_id = @user_id AND c.favorite = true"
     } else {
-        format!("SELECT * FROM c WHERE c.user_id = \"{}\"", user_id.0)
+        "SELECT * FROM c WHERE c.user_id = @user_id"
     };
     Ok(Json(Lists {
-        lists: state.query_documents(db, query).await?,
+        lists: state
+            .query_documents(|db| {
+                db.collection_client("lists")
+                    .query_documents(CosmosQuery::with_params(
+                        String::from(query),
+                        [Param::new(String::from("@user_id"), user_id.0)],
+                    ))
+            })
+            .await
+            .map_err(Error::from)?,
     }))
 }
 
@@ -211,11 +216,14 @@ async fn get_list_items(
             items: Vec::new(),
         }))
     } else {
-        let db = state.db.collection_client("items");
         let (query, fields, map, ids) = query::rewrite_list_query(&list, &user_id)?;
         let items: HashMap<_, _> = state
-            .query_documents(db, query.to_string())
-            .await?
+            .query_documents(|db| {
+                db.collection_client("items")
+                    .query_documents(CosmosQuery::new(query.to_string()))
+            })
+            .await
+            .map_err(Error::from)?
             .into_iter()
             .map(|r: Map<String, Value>| (r["id"].to_string(), r))
             .collect();
@@ -299,18 +307,12 @@ async fn update_list(
         .collection_client("lists")
         .document_client(id, &user_id.0)
         .map_err(Error::from)?;
-    let session_copy = state
-        .session
-        .read()
-        .unwrap()
-        .clone()
-        .expect("session should be set by get_list_doc");
     if current_list.sources != list.sources {
         list.items.clear();
         for source in &mut list.sources {
             let (updated_source, items) = source::get_source_and_items(&user_id, source).await?;
             list.items.extend(topbops_web::convert_items(&items));
-            create_items(&state.db, session_copy.clone(), items, false).await?;
+            create_items(&state, items, false).await?;
             *source = updated_source;
         }
     }
@@ -331,14 +333,16 @@ async fn find_items(
     let user_id = get_user_or_demo_user(auth);
     let Some(query) = params.get("query") else { return Err(Error::from("invalid finder").into()); };
 
-    let db = state.db.collection_client("items");
     let (query, fields) = query::rewrite_query(query, &user_id)?;
     let values: Vec<Map<String, Value>> = state
-        .query_documents(db, query.to_string())
+        .query_documents(|db| {
+            db.collection_client("items")
+                .query_documents(CosmosQuery::new(query.to_string()))
+        })
         .await
         .map_err(|e| {
             eprintln!("{}: {:?}", query, e);
-            e
+            Error::from(e)
         })?;
     Ok(Json(ItemQuery {
         fields,
@@ -558,23 +562,13 @@ fn update_stats(
 }
 
 async fn create_list_doc(state: Arc<AppState>, list: List, is_upsert: bool) -> Result<(), Error> {
-    let list_client = state.db.collection_client("lists");
-    let session_copy = state.session.read().unwrap().clone();
-    if let Some(session) = session_copy {
-        list_client
-            .create_document(list)
-            .is_upsert(is_upsert)
-            .consistency_level(session.clone())
-            .into_future()
-            .await?;
-    } else {
-        let resp = list_client
-            .create_document(list)
-            .is_upsert(is_upsert)
-            .into_future()
-            .await?;
-        *state.session.write().unwrap() = Some(ConsistencyLevel::Session(resp.session_token));
-    };
+    state
+        .write_document(|db| {
+            db.collection_client("lists")
+                .create_document(list)
+                .is_upsert(is_upsert)
+        })
+        .await?;
     Ok(())
 }
 
@@ -587,40 +581,29 @@ async fn create_external_list(
     is_upsert: bool,
 ) -> Result<(), Error> {
     create_list_doc(Arc::clone(&state), list, is_upsert).await?;
-    let session = state
-        .session
-        .read()
-        .unwrap()
-        .clone()
-        .expect("session should be set by create_list_doc");
-    create_items(&state.db, session, items, is_upsert).await
+    create_items(&state, items, is_upsert).await
 }
 
 async fn create_items(
-    db: &DatabaseClient,
-    session: ConsistencyLevel,
+    state: &Arc<AppState>,
     items: Vec<Item>,
     is_upsert: bool,
 ) -> Result<(), Error> {
-    let items_client = db.clone().collection_client("items");
-    futures::stream::iter(items.into_iter().map(move |item| {
-        let items_client = items_client.clone();
-        let session = session.clone();
-        async move {
-            match items_client
-                .create_document(item)
-                .is_upsert(is_upsert)
-                .consistency_level(session)
-                .into_future()
-                .await
-            {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                    if let azure_core::StatusCode::Conflict = e.as_http_error().unwrap().status() {
-                        Ok(())
-                    } else {
-                        Err(e)
-                    }
+    futures::stream::iter(items.into_iter().map(move |item| async move {
+        match state
+            .write_document(|db| {
+                db.collection_client("items")
+                    .create_document(item)
+                    .is_upsert(is_upsert)
+            })
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                if let azure_core::StatusCode::Conflict = e.as_http_error().unwrap().status() {
+                    Ok(())
+                } else {
+                    Err(e)
                 }
             }
         }
@@ -677,46 +660,8 @@ struct AppState {
 }
 
 impl AppState {
-    async fn query_documents<T: DeserializeOwned + Send + Sync>(
-        &self,
-        db: CollectionClient,
-        query: String,
-    ) -> Result<Vec<T>, Error> {
-        let session_copy = self.session.read().unwrap().clone();
-        let (stream, results) = if let Some(session) = session_copy {
-            println!("{:?}", session);
-            let mut stream = db
-                .query_documents(CosmosQuery::new(query))
-                .consistency_level(session)
-                .into_stream();
-            let resp = stream.try_next().await?.map(|r| r.results);
-            (stream, resp)
-        } else {
-            let mut stream = db.query_documents(CosmosQuery::new(query)).into_stream();
-            let resp = if let Some(r) = stream.try_next().await? {
-                *self.session.write().unwrap() = Some(ConsistencyLevel::Session(r.session_token));
-                Some(r.results)
-            } else {
-                None
-            };
-            (stream, resp)
-        };
-        Ok(results
-            .into_iter()
-            .chain(
-                stream
-                    .try_collect::<Vec<_>>()
-                    .await?
-                    .into_iter()
-                    .map(|r| r.results),
-            )
-            .flatten()
-            .map(|(d, _)| d)
-            .collect())
-    }
-
     /// Use the existing session token if it exists
-    async fn read<F, T>(&self, f: F) -> Result<Vec<T>, Error>
+    async fn query_documents<F, T>(&self, f: F) -> Result<Vec<T>, azure_core::error::Error>
     where
         F: FnOnce(&DatabaseClient) -> QueryDocumentsBuilder,
         T: DeserializeOwned + Send + Sync,
@@ -752,7 +697,7 @@ impl AppState {
     }
 
     /// CosmosDB creates new session tokens after writes
-    async fn write_document<F, T>(&self, f: F) -> Result<(), Error>
+    async fn write_document<F, T>(&self, f: F) -> Result<(), azure_core::error::Error>
     where
         F: FnOnce(&DatabaseClient) -> CreateDocumentBuilder<T>,
         T: Serialize + CosmosEntity + Send + 'static,
