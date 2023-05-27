@@ -7,15 +7,19 @@ use axum::{
     Router,
 };
 use axum_login::{axum_sessions::SessionLayer, AuthLayer};
-use azure_data_cosmos::prelude::{
-    AuthorizationToken, CollectionClient, ConsistencyLevel, CosmosClient, DatabaseClient,
-    GetDocumentResponse,
+use azure_data_cosmos::{
+    prelude::{
+        AuthorizationToken, CollectionClient, ConsistencyLevel, CosmosClient,
+        CreateDocumentBuilder, DatabaseClient, GetDocumentResponse, Param, Query as CosmosQuery,
+        QueryDocumentsBuilder,
+    },
+    CosmosEntity,
 };
 use base64::prelude::{Engine, BASE64_STANDARD};
 use futures::{StreamExt, TryStreamExt};
 use hyper::{Body, Client, Method, Request, StatusCode, Uri};
 use hyper_tls::HttpsConnector;
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -125,38 +129,22 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, 
     let got = hyper::body::to_bytes(resp.into_body()).await?;
     let spotify_user: source::spotify::User = serde_json::from_slice(&got)?;
 
-    let db = state.db.collection_client("users");
-    let query = azure_data_cosmos::prelude::Query::new(format!(
-        "SELECT c.id FROM c WHERE c.user_id = \"{}\"",
-        spotify_user.id
-    ));
-    // TODO: debug why session token isn't working here
-    //let session_copy = session.session.read().unwrap().clone();
-    let (mut resp, session) = /*if let Some(session) = session_copy {
-        println!("{:?}", session);
-        (
-            db.query_documents()
+    let query = CosmosQuery::with_params(
+        String::from("SELECT c.id FROM c WHERE c.user_id = @user_id"),
+        [Param::new(
+            String::from("@user_id"),
+            spotify_user.id.clone(),
+        )],
+    );
+    let mut results: Vec<HashMap<String, String>> = state
+        .read(move |db| {
+            db.collection_client("users")
+                .query_documents(query)
                 .query_cross_partition(true)
                 .parallelize_cross_partition_query(true)
-                .consistency_level(session.clone())
-                .execute(&query)
-                .await?,
-            session,
-        )
-    } else */{
-        let resp = db
-            .query_documents(query)
-            .query_cross_partition(true)
-            .parallelize_cross_partition_query(true)
-            .into_stream::<HashMap<String, String>>()
-            .next()
-            .await
-            .expect("response from database")?;
-        let token = ConsistencyLevel::Session(resp.session_token.clone());
-        *state.session.write().unwrap() = Some(token.clone());
-        (resp, token)
-    };
-    let id = if let Some((mut map, _)) = resp.results.pop() {
+        })
+        .await?;
+    let id = if let Some(mut map) = results.pop() {
         map.remove("id").expect("id should be returned by DB")
     } else {
         Uuid::new_v4().to_hyphenated().to_string()
@@ -170,10 +158,12 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, 
             .refresh_token
             .expect("Spotify should return refresh token"),
     };
-    db.create_document(user.clone())
-        .consistency_level(session)
-        .is_upsert(true)
-        .into_future()
+    state
+        .write_document(|db| {
+            db.collection_client("users")
+                .create_document(user.clone())
+                .is_upsert(true)
+        })
         .await?;
     Ok(user)
 }
@@ -696,19 +686,19 @@ impl AppState {
         let (stream, results) = if let Some(session) = session_copy {
             println!("{:?}", session);
             let mut stream = db
-                .query_documents(azure_data_cosmos::prelude::Query::new(query))
+                .query_documents(CosmosQuery::new(query))
                 .consistency_level(session)
                 .into_stream();
             let resp = stream.try_next().await?.map(|r| r.results);
             (stream, resp)
         } else {
-            let mut stream = db
-                .query_documents(azure_data_cosmos::prelude::Query::new(query))
-                .into_stream();
-            let resp = stream.try_next().await?.map(|r| {
+            let mut stream = db.query_documents(CosmosQuery::new(query)).into_stream();
+            let resp = if let Some(r) = stream.try_next().await? {
                 *self.session.write().unwrap() = Some(ConsistencyLevel::Session(r.session_token));
-                r.results
-            });
+                Some(r.results)
+            } else {
+                None
+            };
             (stream, resp)
         };
         Ok(results
@@ -723,6 +713,59 @@ impl AppState {
             .flatten()
             .map(|(d, _)| d)
             .collect())
+    }
+
+    /// Use the existing session token if it exists
+    async fn read<F, T>(&self, f: F) -> Result<Vec<T>, Error>
+    where
+        F: FnOnce(&DatabaseClient) -> QueryDocumentsBuilder,
+        T: DeserializeOwned + Send + Sync,
+    {
+        let session = self.session.read().unwrap().clone();
+        let (stream, results) = if let Some(session) = session {
+            println!("{:?}", session);
+            let mut stream = f(&self.db).consistency_level(session).into_stream();
+            let resp = stream.try_next().await?.map(|r| r.results);
+            (stream, resp)
+        } else {
+            let mut stream = f(&self.db).into_stream();
+            let resp = if let Some(r) = stream.try_next().await? {
+                *self.session.write().unwrap() = Some(ConsistencyLevel::Session(r.session_token));
+                Some(r.results)
+            } else {
+                None
+            };
+            (stream, resp)
+        };
+        Ok(results
+            .into_iter()
+            .chain(
+                stream
+                    .try_collect::<Vec<_>>()
+                    .await?
+                    .into_iter()
+                    .map(|r| r.results),
+            )
+            .flatten()
+            .map(|(d, _)| d)
+            .collect())
+    }
+
+    /// CosmosDB creates new session tokens after writes
+    async fn write_document<F, T>(&self, f: F) -> Result<(), Error>
+    where
+        F: FnOnce(&DatabaseClient) -> CreateDocumentBuilder<T>,
+        T: Serialize + CosmosEntity + Send + 'static,
+    {
+        let builder = if let Some(session) = self.session.read().unwrap().clone() {
+            println!("{:?}", session);
+            f(&self.db).consistency_level(session)
+        } else {
+            f(&self.db)
+        };
+        let resp = builder.into_future().await?;
+        *self.session.write().unwrap() = Some(ConsistencyLevel::Session(resp.session_token));
+        Ok(())
     }
 }
 
