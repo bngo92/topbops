@@ -153,7 +153,7 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, 
             .await
             .expect("response from database")?;
         let token = ConsistencyLevel::Session(resp.session_token.clone());
-        *state.session.session.write().unwrap() = Some(token.clone());
+        *state.session.write().unwrap() = Some(token.clone());
         (resp, token)
     };
     let id = if let Some((mut map, _)) = resp.results.pop() {
@@ -194,7 +194,7 @@ async fn get_lists(
         format!("SELECT * FROM c WHERE c.user_id = \"{}\"", user_id.0)
     };
     Ok(Json(Lists {
-        lists: state.session.query_documents(db, query).await?,
+        lists: state.query_documents(db, query).await?,
     }))
 }
 
@@ -224,7 +224,6 @@ async fn get_list_items(
         let db = state.db.collection_client("items");
         let (query, fields, map, ids) = query::rewrite_list_query(&list, &user_id)?;
         let items: HashMap<_, _> = state
-            .session
             .query_documents(db, query.to_string())
             .await?
             .into_iter()
@@ -312,7 +311,6 @@ async fn update_list(
         .map_err(Error::from)?;
     let session_copy = state
         .session
-        .session
         .read()
         .unwrap()
         .clone()
@@ -346,7 +344,6 @@ async fn find_items(
     let db = state.db.collection_client("items");
     let (query, fields) = query::rewrite_query(query, &user_id)?;
     let values: Vec<Map<String, Value>> = state
-        .session
         .query_documents(db, query.to_string())
         .await
         .map_err(|e| {
@@ -363,51 +360,6 @@ async fn find_items(
             })
             .collect(),
     }))
-}
-
-#[derive(Clone)]
-struct SessionClient {
-    session: Arc<RwLock<Option<ConsistencyLevel>>>,
-}
-
-impl SessionClient {
-    async fn query_documents<T: DeserializeOwned + Send + Sync>(
-        &self,
-        db: CollectionClient,
-        query: String,
-    ) -> Result<Vec<T>, Error> {
-        let session_copy = self.session.read().unwrap().clone();
-        let (stream, results) = if let Some(session) = session_copy {
-            println!("{:?}", session);
-            let mut stream = db
-                .query_documents(azure_data_cosmos::prelude::Query::new(query))
-                .consistency_level(session)
-                .into_stream();
-            let resp = stream.try_next().await?.map(|r| r.results);
-            (stream, resp)
-        } else {
-            let mut stream = db
-                .query_documents(azure_data_cosmos::prelude::Query::new(query))
-                .into_stream();
-            let resp = stream.try_next().await?.map(|r| {
-                *self.session.write().unwrap() = Some(ConsistencyLevel::Session(r.session_token));
-                r.results
-            });
-            (stream, resp)
-        };
-        Ok(results
-            .into_iter()
-            .chain(
-                stream
-                    .try_collect::<Vec<_>>()
-                    .await?
-                    .into_iter()
-                    .map(|r| r.results),
-            )
-            .flatten()
-            .map(|(d, _)| d)
-            .collect())
-    }
 }
 
 async fn handle_action(
@@ -502,7 +454,6 @@ async fn handle_stats_update(
     let lose_client = client.document_client(lose_item.id.clone(), &lose_item.user_id)?;
     let session_copy = state
         .session
-        .session
         .read()
         .unwrap()
         .clone()
@@ -585,11 +536,11 @@ async fn import_list(
 
 async fn get_item_doc(
     client: CollectionClient,
-    session: &SessionClient,
+    session: &Arc<RwLock<Option<ConsistencyLevel>>>,
     user_id: UserId,
     id: &str,
 ) -> Result<Item, Error> {
-    let session_copy = session.session.read().unwrap().clone().unwrap();
+    let session_copy = session.read().unwrap().clone().unwrap();
     if let GetDocumentResponse::Found(item) = client
         .document_client(id, &user_id.0)?
         .get_document::<Item>()
@@ -618,7 +569,7 @@ fn update_stats(
 
 async fn create_list_doc(state: Arc<AppState>, list: List, is_upsert: bool) -> Result<(), Error> {
     let list_client = state.db.collection_client("lists");
-    let session_copy = state.session.session.read().unwrap().clone();
+    let session_copy = state.session.read().unwrap().clone();
     if let Some(session) = session_copy {
         list_client
             .create_document(list)
@@ -632,8 +583,7 @@ async fn create_list_doc(state: Arc<AppState>, list: List, is_upsert: bool) -> R
             .is_upsert(is_upsert)
             .into_future()
             .await?;
-        *state.session.session.write().unwrap() =
-            Some(ConsistencyLevel::Session(resp.session_token));
+        *state.session.write().unwrap() = Some(ConsistencyLevel::Session(resp.session_token));
     };
     Ok(())
 }
@@ -648,7 +598,6 @@ async fn create_external_list(
 ) -> Result<(), Error> {
     create_list_doc(Arc::clone(&state), list, is_upsert).await?;
     let session = state
-        .session
         .session
         .read()
         .unwrap()
@@ -715,7 +664,7 @@ async fn update_items(
                 _ => {}
             }
         }
-        let session_copy = session.session.read().unwrap().clone().unwrap();
+        let session_copy = session.read().unwrap().clone().unwrap();
         client
             .clone()
             .document_client(id, &user_id.0)?
@@ -734,7 +683,47 @@ async fn update_items(
 #[derive(Clone)]
 struct AppState {
     db: DatabaseClient,
-    session: SessionClient,
+    session: Arc<RwLock<Option<ConsistencyLevel>>>,
+}
+
+impl AppState {
+    async fn query_documents<T: DeserializeOwned + Send + Sync>(
+        &self,
+        db: CollectionClient,
+        query: String,
+    ) -> Result<Vec<T>, Error> {
+        let session_copy = self.session.read().unwrap().clone();
+        let (stream, results) = if let Some(session) = session_copy {
+            println!("{:?}", session);
+            let mut stream = db
+                .query_documents(azure_data_cosmos::prelude::Query::new(query))
+                .consistency_level(session)
+                .into_stream();
+            let resp = stream.try_next().await?.map(|r| r.results);
+            (stream, resp)
+        } else {
+            let mut stream = db
+                .query_documents(azure_data_cosmos::prelude::Query::new(query))
+                .into_stream();
+            let resp = stream.try_next().await?.map(|r| {
+                *self.session.write().unwrap() = Some(ConsistencyLevel::Session(r.session_token));
+                r.results
+            });
+            (stream, resp)
+        };
+        Ok(results
+            .into_iter()
+            .chain(
+                stream
+                    .try_collect::<Vec<_>>()
+                    .await?
+                    .into_iter()
+                    .map(|r| r.results),
+            )
+            .flatten()
+            .map(|(d, _)| d)
+            .collect())
+    }
 }
 
 #[tokio::main]
@@ -752,12 +741,9 @@ async fn main() {
     let authorization_token =
         AuthorizationToken::primary_from_base64(&master_key).expect("cosmos config");
     let db = CosmosClient::new(account, authorization_token).database_client("topbops");
-    let session = SessionClient {
-        session: Arc::new(RwLock::new(None)),
-    };
     let shared_state = Arc::new(AppState {
         db: db.clone(),
-        session,
+        session: Arc::new(RwLock::new(None)),
     });
 
     // Reset demo user data during startup in production
