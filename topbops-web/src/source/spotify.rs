@@ -1,5 +1,4 @@
-use crate::{Error, UserId};
-use azure_data_cosmos::prelude::DatabaseClient;
+use crate::{cosmos::SessionClient, Error, UserId};
 use futures::{StreamExt, TryStreamExt};
 use hyper::{Body, Client, Method, Request, Uri};
 use hyper_tls::HttpsConnector;
@@ -317,16 +316,18 @@ async fn get_token() -> Result<crate::Token, Error> {
 
 // TODO: reuse existing access token if it hasn't expired
 pub async fn get_access_token<'a>(
-    db: &'_ DatabaseClient,
+    client: &'_ SessionClient,
     user: &'a mut crate::user::User,
 ) -> Result<&'a str, Error> {
     let token = get_user_token(&user.refresh_token).await?;
     user.access_token = token.access_token;
-    db.collection_client("users")
-        .document_client(&user.id, &user.id)?
-        .replace_document(user.clone())
-        //.consistency_level(session)
-        .into_future()
+    client
+        .write_document(|db| {
+            Ok(db
+                .collection_client("users")
+                .document_client(&user.id, &user.id)?
+                .replace_document(user.clone()))
+        })
         .await?;
     Ok(&user.access_token)
 }

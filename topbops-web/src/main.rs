@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use axum::{
     body::Bytes,
     extract::{Host, OriginalUri, Path, Query, State},
@@ -8,25 +7,20 @@ use axum::{
     Router,
 };
 use axum_login::{axum_sessions::SessionLayer, AuthLayer};
-use azure_data_cosmos::{
-    prelude::{
-        AuthorizationToken, ConsistencyLevel, CosmosClient, CreateDocumentBuilder, DatabaseClient,
-        GetDocumentBuilder, GetDocumentResponse, Param, Query as CosmosQuery,
-        QueryDocumentsBuilder, ReplaceDocumentBuilder,
-    },
-    CosmosEntity,
-};
+use azure_data_cosmos::prelude::{AuthorizationToken, CosmosClient, Param, Query as CosmosQuery};
 use base64::prelude::{Engine, BASE64_STANDARD};
 use futures::{StreamExt, TryStreamExt};
 use hyper::{Body, Client, Method, Request, StatusCode, Uri};
 use hyper_tls::HttpsConnector;
-use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 use topbops::{ItemQuery, List, ListMode, Lists, Source, SourceType};
-use topbops_web::user::{CosmosStore, User};
+use topbops_web::{
+    cosmos::SessionClient,
+    user::{CosmosStore, User},
+};
 use topbops_web::{query, source, Error, Item, Token, UserId};
 #[cfg(feature = "dev")]
 use tower_http::services::ServeFile;
@@ -138,6 +132,7 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, 
         )],
     );
     let mut results: Vec<HashMap<String, String>> = state
+        .client
         .query_documents(move |db| {
             db.collection_client("users")
                 .query_documents(query)
@@ -160,6 +155,7 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, 
             .expect("Spotify should return refresh token"),
     };
     state
+        .client
         .write_document(|db| {
             Ok(db
                 .collection_client("users")
@@ -183,6 +179,7 @@ async fn get_lists(
     };
     Ok(Json(Lists {
         lists: state
+            .client
             .query_documents(|db| {
                 db.collection_client("lists")
                     .query_documents(CosmosQuery::with_params(
@@ -201,7 +198,7 @@ async fn get_list(
     auth: AuthContext,
 ) -> Result<Json<List>, Response> {
     let user_id = get_user_or_demo_user(auth);
-    let list = get_list_doc(&state, &user_id, &id).await?;
+    let list = get_list_doc(&state.client, &user_id, &id).await?;
     Ok(Json(list))
 }
 
@@ -211,7 +208,7 @@ async fn get_list_items(
     auth: AuthContext,
 ) -> Result<Json<ItemQuery>, Response> {
     let user_id = get_user_or_demo_user(auth);
-    let list = get_list_doc(&state, &user_id, &id).await?;
+    let list = get_list_doc(&state.client, &user_id, &id).await?;
     if list.items.is_empty() {
         Ok(Json(ItemQuery {
             fields: Vec::new(),
@@ -220,6 +217,7 @@ async fn get_list_items(
     } else {
         let (query, fields, map, ids) = query::rewrite_list_query(&list, &user_id)?;
         let items: HashMap<_, _> = state
+            .client
             .query_documents(|db| {
                 db.collection_client("items")
                     .query_documents(CosmosQuery::new(query.to_string()))
@@ -261,8 +259,8 @@ fn format_value(v: &Value) -> String {
     }
 }
 
-async fn get_list_doc(state: &Arc<AppState>, user_id: &UserId, id: &str) -> Result<List, Error> {
-    if let Some(list) = state
+async fn get_list_doc(client: &SessionClient, user_id: &UserId, id: &str) -> Result<List, Error> {
+    if let Some(list) = client
         .get_document(|db| {
             Ok(db
                 .collection_client("lists")
@@ -293,7 +291,7 @@ async fn create_list(
         favorite: false,
         query: String::from("SELECT name, user_score FROM tracks"),
     };
-    create_list_doc(state, list.clone(), false).await?;
+    create_list_doc(&state.client, list.clone(), false).await?;
     Ok((StatusCode::CREATED, Json(list)))
 }
 
@@ -305,18 +303,19 @@ async fn update_list(
 ) -> Result<StatusCode, Response> {
     let user = require_user(auth)?;
     let user_id = UserId(user.user_id);
-    let current_list = get_list_doc(&state, &user_id, &id).await?;
+    let current_list = get_list_doc(&state.client, &user_id, &id).await?;
     if current_list.sources != list.sources {
         list.items.clear();
         for source in &mut list.sources {
             let (updated_source, items) = source::get_source_and_items(&user_id, source).await?;
             list.items.extend(topbops_web::convert_items(&items));
-            create_items(&state, items, false).await?;
+            create_items(&state.client, items, false).await?;
             *source = updated_source;
         }
     }
     // TODO: update iframe if possible
     state
+        .client
         .write_document(|db| {
             Ok(db
                 .collection_client("lists")
@@ -338,6 +337,7 @@ async fn find_items(
 
     let (query, fields) = query::rewrite_query(query, &user_id)?;
     let values: Vec<Map<String, Value>> = state
+        .client
         .query_documents(|db| {
             db.collection_client("items")
                 .query_documents(CosmosQuery::new(query.to_string()))
@@ -402,10 +402,11 @@ async fn handle_stats_update(
     win: &str,
     lose: &str,
 ) -> Result<StatusCode, Error> {
+    let client = &state.client;
     let (Ok(mut list), Ok(mut win_item), Ok(mut lose_item)) = futures::future::join3(
-        get_list_doc(&state, &user_id, id),
-        get_item_doc(&state, &user_id, win),
-        get_item_doc(&state, &user_id, lose),
+        get_list_doc(client, &user_id, id),
+        get_item_doc(client, &user_id, win),
+        get_item_doc(client, &user_id, lose),
     ).await else {
         return Err(Error::from(""));
     };
@@ -435,22 +436,22 @@ async fn handle_stats_update(
     );
 
     futures::future::try_join3(
-        state.write_document(|db| {
+        client.write_document(|db| {
             Ok(db
                 .collection_client("lists")
                 .document_client(id, &user_id.0)?
                 .replace_document(list))
         }),
-        state.write_document(|db| {
+        client.write_document(|db| {
             Ok(db
                 .collection_client("items")
-                .document_client(win_item.id.clone(), &user_id.0)?
+                .document_client(&win_item.id, &user_id.0)?
                 .replace_document(win_item))
         }),
-        state.write_document(|db| {
+        client.write_document(|db| {
             Ok(db
                 .collection_client("items")
-                .document_client(lose_item.id.clone(), &user_id.0)?
+                .document_client(&lose_item.id, &user_id.0)?
                 .replace_document(lose_item))
         }),
     )
@@ -459,7 +460,7 @@ async fn handle_stats_update(
 }
 
 async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<StatusCode, Error> {
-    let list = get_list_doc(&state, &UserId(user.user_id.clone()), id).await?;
+    let list = get_list_doc(&state.client, &UserId(user.user_id.clone()), id).await?;
     // TODO: create new playlist if one doesn't exist
     let ListMode::User(Some(external_id)) = list.mode else {
         return Err(Error::from("Push is not supported for this list type"));
@@ -478,7 +479,7 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
             return Err(Error::from("List has multiple sources"));
         }
     }
-    let access_token = source::spotify::get_access_token(&state.db, user).await?;
+    let access_token = source::spotify::get_access_token(&state.client, user).await?;
     // TODO: filter hidden items
     source::spotify::update_list(
         access_token,
@@ -512,12 +513,12 @@ async fn import_list(
         _ => todo!(),
     };
     list.favorite = favorite;
-    create_external_list(state, list, items, user_id.0 == DEMO_USER).await?;
+    create_external_list(&state.client, list, items, user_id.0 == DEMO_USER).await?;
     Ok(StatusCode::CREATED)
 }
 
-async fn get_item_doc(state: &Arc<AppState>, user_id: &UserId, id: &str) -> Result<Item, Error> {
-    if let Some(item) = state
+async fn get_item_doc(client: &SessionClient, user_id: &UserId, id: &str) -> Result<Item, Error> {
+    if let Some(item) = client
         .get_document(|db| {
             Ok(db
                 .collection_client("items")
@@ -545,37 +546,37 @@ fn update_stats(
     *lose_losses += 1;
 }
 
-async fn create_list_doc(state: Arc<AppState>, list: List, is_upsert: bool) -> Result<(), Error> {
-    state
+async fn create_list_doc(client: &SessionClient, list: List, is_upsert: bool) -> Result<(), Error> {
+    client
         .write_document(|db| {
             Ok(db
                 .collection_client("lists")
                 .create_document(list)
                 .is_upsert(is_upsert))
         })
-        .await?;
-    Ok(())
+        .await
+        .map_err(Error::from)
 }
 
 // TODO: inline
 async fn create_external_list(
-    state: Arc<AppState>,
+    client: &SessionClient,
     list: List,
     items: Vec<Item>,
     // Used to reset demo user data
     is_upsert: bool,
 ) -> Result<(), Error> {
-    create_list_doc(Arc::clone(&state), list, is_upsert).await?;
-    create_items(&state, items, is_upsert).await
+    create_list_doc(client, list, is_upsert).await?;
+    create_items(client, items, is_upsert).await
 }
 
 async fn create_items(
-    state: &Arc<AppState>,
+    client: &SessionClient,
     items: Vec<Item>,
     is_upsert: bool,
 ) -> Result<(), Error> {
-    futures::stream::iter(items.into_iter().map(move |item| async move {
-        match state
+    futures::stream::iter(items.into_iter().map(|item| async move {
+        match client
             .write_document(|db| {
                 Ok(db
                     .collection_client("items")
@@ -606,10 +607,9 @@ async fn update_items(
     body: Bytes,
 ) -> Result<StatusCode, Error> {
     let updates: HashMap<String, HashMap<String, Value>> = serde_json::from_slice(&body)?;
-    let state = &state;
     let user_id = &user_id;
     futures::stream::iter(updates.into_iter().map(|(id, update)| async {
-        let mut item = get_item_doc(state, user_id, &id).await?;
+        let mut item = get_item_doc(&state.client, user_id, &id).await?;
         for (k, v) in update {
             match k.as_str() {
                 "rating" => {
@@ -622,14 +622,15 @@ async fn update_items(
             }
         }
         state
+            .client
             .write_document(move |db| {
                 Ok(db
                     .collection_client("items")
                     .document_client(id, &user_id.0)?
                     .replace_document(item))
             })
-            .await?;
-        Ok::<_, Error>(())
+            .await
+            .map_err(Error::from)
     }))
     .buffered(5)
     .try_collect::<()>()
@@ -637,117 +638,8 @@ async fn update_items(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Clone)]
 struct AppState {
-    db: DatabaseClient,
-    session: Arc<RwLock<Option<ConsistencyLevel>>>,
-}
-
-impl AppState {
-    /// Use the existing session token if it exists
-    async fn get_document<F, T>(&self, f: F) -> Result<Option<T>, azure_core::error::Error>
-    where
-        F: FnOnce(&DatabaseClient) -> Result<GetDocumentBuilder<T>, azure_core::error::Error>,
-        T: DeserializeOwned + Send + Sync,
-    {
-        let session = self.session.read().unwrap().clone();
-        let f = if let Some(session) = session {
-            f(&self.db)?.consistency_level(session)
-        } else {
-            f(&self.db)?
-        };
-        let (t, session_token) = match f.into_future().await? {
-            GetDocumentResponse::Found(resp) => (Some(resp.document.document), resp.session_token),
-            GetDocumentResponse::NotFound(resp) => (None, resp.session_token),
-        };
-        *self.session.write().unwrap() = Some(ConsistencyLevel::Session(session_token));
-        Ok(t)
-    }
-
-    async fn query_documents<F, T>(&self, f: F) -> Result<Vec<T>, azure_core::error::Error>
-    where
-        F: FnOnce(&DatabaseClient) -> QueryDocumentsBuilder,
-        T: DeserializeOwned + Send + Sync,
-    {
-        let session = self.session.read().unwrap().clone();
-        let (stream, results) = if let Some(session) = session {
-            println!("{:?}", session);
-            let mut stream = f(&self.db).consistency_level(session).into_stream();
-            let resp = stream.try_next().await?.map(|r| r.results);
-            (stream, resp)
-        } else {
-            let mut stream = f(&self.db).into_stream();
-            let resp = if let Some(r) = stream.try_next().await? {
-                *self.session.write().unwrap() = Some(ConsistencyLevel::Session(r.session_token));
-                Some(r.results)
-            } else {
-                None
-            };
-            (stream, resp)
-        };
-        Ok(results
-            .into_iter()
-            .chain(
-                stream
-                    .try_collect::<Vec<_>>()
-                    .await?
-                    .into_iter()
-                    .map(|r| r.results),
-            )
-            .flatten()
-            .map(|(d, _)| d)
-            .collect())
-    }
-
-    /// CosmosDB creates new session tokens after writes
-    async fn write_document<F, T1, T2>(&self, f: F) -> Result<(), azure_core::error::Error>
-    where
-        F: FnOnce(&DatabaseClient) -> Result<T1, azure_core::error::Error>,
-        T1: IntoSessionToken<T2>,
-        T2: Serialize + CosmosEntity + Send + 'static,
-    {
-        let builder = if let Some(session) = self.session.read().unwrap().clone() {
-            println!("{:?}", session);
-            f(&self.db)?.consistency_level(session)
-        } else {
-            f(&self.db)?
-        };
-        let session_token = builder.into_session_token().await?;
-        *self.session.write().unwrap() = Some(ConsistencyLevel::Session(session_token));
-        Ok(())
-    }
-}
-
-#[async_trait]
-trait IntoSessionToken<T> {
-    fn consistency_level(self, consistency_level: ConsistencyLevel) -> Self;
-    async fn into_session_token(self) -> Result<String, azure_core::error::Error>;
-}
-
-#[async_trait]
-impl<T: Serialize + CosmosEntity + Send + 'static> IntoSessionToken<T>
-    for CreateDocumentBuilder<T>
-{
-    fn consistency_level(self, consistency_level: ConsistencyLevel) -> Self {
-        self.consistency_level(consistency_level)
-    }
-
-    async fn into_session_token(self) -> Result<String, azure_core::error::Error> {
-        self.into_future().await.map(|r| r.session_token)
-    }
-}
-
-#[async_trait]
-impl<T: Serialize + CosmosEntity + Send + 'static> IntoSessionToken<T>
-    for ReplaceDocumentBuilder<T>
-{
-    fn consistency_level(self, consistency_level: ConsistencyLevel) -> Self {
-        self.consistency_level(consistency_level)
-    }
-
-    async fn into_session_token(self) -> Result<String, azure_core::error::Error> {
-        self.into_future().await.map(|r| r.session_token)
-    }
+    client: SessionClient,
 }
 
 #[tokio::main]
@@ -766,8 +658,7 @@ async fn main() {
         AuthorizationToken::primary_from_base64(&master_key).expect("cosmos config");
     let db = CosmosClient::new(account, authorization_token).database_client("topbops");
     let shared_state = Arc::new(AppState {
-        db: db.clone(),
-        session: Arc::new(RwLock::new(None)),
+        client: SessionClient::new(db.clone(), Arc::new(RwLock::new(None))),
     });
 
     // Reset demo user data during startup in production
@@ -783,7 +674,7 @@ async fn main() {
         .unwrap();
         // Generate IDs using random but constant UUIDs
         create_list_doc(
-            Arc::clone(&shared_state),
+            &shared_state.client,
             List {
                 id: String::from("3c16df67-582d-449a-9862-0540f516d6b5"),
                 user_id: demo_user.clone(),
@@ -800,7 +691,7 @@ async fn main() {
         .await
         .unwrap();
         create_list_doc(
-            Arc::clone(&shared_state),
+            &shared_state.client,
             List {
                 id: String::from("4539f893-8471-4e23-b815-cd7c8b722016"),
                 user_id: demo_user.clone(),
