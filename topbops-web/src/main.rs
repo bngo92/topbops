@@ -9,8 +9,8 @@ use axum::{
 use axum_login::{axum_sessions::SessionLayer, AuthLayer};
 use azure_data_cosmos::{
     prelude::{
-        AuthorizationToken, CollectionClient, ConsistencyLevel, CosmosClient,
-        CreateDocumentBuilder, DatabaseClient, GetDocumentResponse, Param, Query as CosmosQuery,
+        AuthorizationToken, ConsistencyLevel, CosmosClient, CreateDocumentBuilder, DatabaseClient,
+        GetDocumentBuilder, GetDocumentResponse, Param, Query as CosmosQuery,
         QueryDocumentsBuilder,
     },
     CosmosEntity,
@@ -260,13 +260,16 @@ fn format_value(v: &Value) -> String {
 }
 
 async fn get_list_doc(state: &Arc<AppState>, user_id: &UserId, id: &str) -> Result<List, Error> {
-    let client = state
-        .db
-        .clone()
-        .collection_client("lists")
-        .document_client(id, &user_id.0)?;
-    if let GetDocumentResponse::Found(list) = client.get_document::<List>().into_future().await? {
-        Ok(list.document.document)
+    if let Some(list) = state
+        .get_document(|db| {
+            Ok(db
+                .collection_client("lists")
+                .document_client(id, &user_id.0)?
+                .get_document())
+        })
+        .await?
+    {
+        Ok(list)
     } else {
         todo!()
     }
@@ -405,19 +408,14 @@ async fn handle_stats_update(
         .collection_client("lists")
         .document_client(id, &user_id.0)?;
     let client = state.db.clone().collection_client("items");
-    let (Ok(list_response), Ok(mut win_item), Ok(mut lose_item)) = futures::future::join3(
-        list_client.get_document::<List>().into_future(),
-        get_item_doc(client.clone(), &state.session, user_id.clone(), win),
-        get_item_doc(client.clone(), &state.session, user_id.clone(), lose),
+    let (Ok(mut list), Ok(mut win_item), Ok(mut lose_item)) = futures::future::join3(
+        get_list_doc(&state, &user_id, id),
+        get_item_doc(&state, &user_id, win),
+        get_item_doc(&state, &user_id, lose),
     ).await else {
         return Err(Error::from(""));
     };
 
-    let mut list = if let GetDocumentResponse::Found(list) = list_response {
-        list.document.document
-    } else {
-        todo!()
-    };
     let mut win_metadata = None;
     let mut lose_metadata = None;
     for i in &mut list.items {
@@ -528,21 +526,17 @@ async fn import_list(
     Ok(StatusCode::CREATED)
 }
 
-async fn get_item_doc(
-    client: CollectionClient,
-    session: &Arc<RwLock<Option<ConsistencyLevel>>>,
-    user_id: UserId,
-    id: &str,
-) -> Result<Item, Error> {
-    let session_copy = session.read().unwrap().clone().unwrap();
-    if let GetDocumentResponse::Found(item) = client
-        .document_client(id, &user_id.0)?
-        .get_document::<Item>()
-        .consistency_level(session_copy)
-        .into_future()
+async fn get_item_doc(state: &Arc<AppState>, user_id: &UserId, id: &str) -> Result<Item, Error> {
+    if let Some(item) = state
+        .get_document(|db| {
+            Ok(db
+                .collection_client("items")
+                .document_client(id, &user_id.0)?
+                .get_document())
+        })
         .await?
     {
-        Ok(item.document.document)
+        Ok(item)
     } else {
         todo!()
     }
@@ -624,28 +618,31 @@ async fn update_items(
     let client = &client;
     let session = &state.session;
     let user_id = &user_id;
-    futures::stream::iter(updates.into_iter().map(move |(id, update)| async {
-        let mut item = get_item_doc(client.clone(), session, user_id.clone(), &id).await?;
-        for (k, v) in update {
-            match k.as_str() {
-                "rating" => {
-                    item.rating = serde_json::from_value(v)?;
+    futures::stream::iter(updates.into_iter().map(|(id, update)| {
+        let state = state.clone();
+        async move {
+            let mut item = get_item_doc(&state, user_id, &id).await?;
+            for (k, v) in update {
+                match k.as_str() {
+                    "rating" => {
+                        item.rating = serde_json::from_value(v)?;
+                    }
+                    "hidden" => {
+                        item.hidden = serde_json::from_value(v)?;
+                    }
+                    _ => {}
                 }
-                "hidden" => {
-                    item.hidden = serde_json::from_value(v)?;
-                }
-                _ => {}
             }
+            let session_copy = session.read().unwrap().clone().unwrap();
+            client
+                .clone()
+                .document_client(id, &user_id.0)?
+                .replace_document::<Item>(item)
+                .consistency_level(session_copy)
+                .into_future()
+                .await?;
+            Ok::<_, Error>(())
         }
-        let session_copy = session.read().unwrap().clone().unwrap();
-        client
-            .clone()
-            .document_client(id, &user_id.0)?
-            .replace_document::<Item>(item)
-            .consistency_level(session_copy)
-            .into_future()
-            .await?;
-        Ok::<_, Error>(())
     }))
     .buffered(5)
     .try_collect::<()>()
@@ -661,6 +658,25 @@ struct AppState {
 
 impl AppState {
     /// Use the existing session token if it exists
+    async fn get_document<F, T>(&self, f: F) -> Result<Option<T>, azure_core::error::Error>
+    where
+        F: FnOnce(&DatabaseClient) -> Result<GetDocumentBuilder<T>, azure_core::error::Error>,
+        T: DeserializeOwned + Send + Sync,
+    {
+        let session = self.session.read().unwrap().clone();
+        let f = if let Some(session) = session {
+            f(&self.db)?.consistency_level(session)
+        } else {
+            f(&self.db)?
+        };
+        let (t, session_token) = match f.into_future().await? {
+            GetDocumentResponse::Found(resp) => (Some(resp.document.document), resp.session_token),
+            GetDocumentResponse::NotFound(resp) => (None, resp.session_token),
+        };
+        *self.session.write().unwrap() = Some(ConsistencyLevel::Session(session_token));
+        Ok(t)
+    }
+
     async fn query_documents<F, T>(&self, f: F) -> Result<Vec<T>, azure_core::error::Error>
     where
         F: FnOnce(&DatabaseClient) -> QueryDocumentsBuilder,
