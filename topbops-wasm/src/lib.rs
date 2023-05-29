@@ -1,6 +1,7 @@
 #![feature(iter_intersperse)]
 use crate::bootstrap::{Accordion, Collapse};
 use crate::edit::Edit;
+use crate::list::ListComponent;
 use crate::random::Match;
 use crate::search::Search;
 use crate::tournament::Tournament;
@@ -21,6 +22,7 @@ use yew_router::{BrowserRouter, Routable, Switch};
 mod base;
 mod bootstrap;
 mod edit;
+mod list;
 mod random;
 mod search;
 pub mod tournament;
@@ -32,6 +34,8 @@ enum Route {
     #[at("/lists")]
     Lists,
     #[at("/lists/:id")]
+    List { id: String },
+    #[at("/lists/:id/edit")]
     Edit { id: String },
     #[at("/lists/:id/match")]
     Match { id: String },
@@ -45,6 +49,7 @@ fn switch(routes: Route) -> Html {
     match routes {
         Route::Home => html! { <Home show_all_lists=false/> },
         Route::Lists => html! { <Home show_all_lists=true/> },
+        Route::List { id } => html! { <ListComponent {id}/> },
         Route::Edit { id } => html! { <Edit {id}/> },
         Route::Match { id } => html! { <Match {id}/> },
         Route::Tournament { id } => html! {
@@ -342,7 +347,7 @@ impl Component for Widget {
         let select_ref = ctx.props().select_ref.clone();
         let navigator_copy = navigator.clone();
         let id = list.id.clone();
-        let go = Callback::from(move |_| {
+        let compare = Callback::from(move |_| {
             let id = id.clone();
             let mode = select_ref.cast::<HtmlSelectElement>().unwrap().value();
             match mode.as_ref() {
@@ -374,8 +379,8 @@ impl Component for Widget {
             };
         });
         let id = list.id.clone();
-        let edit = Callback::from(move |_| {
-            navigator.push(&Route::Edit { id: id.clone() });
+        let go = Callback::from(move |_| {
+            navigator.push(&Route::List { id: id.clone() });
         });
         // TODO: support actions on views
         let disabled = matches!(list.mode, ListMode::View);
@@ -390,10 +395,10 @@ impl Component for Widget {
                 </Accordion>
                 <div class="row mb-3">
                     <div class="col-auto">
-                        <button type="button" class="btn btn-success" onclick={edit} {disabled}>{"View"}</button>
+                        <button type="button" class="btn btn-success" onclick={go} {disabled}>{"View"}</button>
                     </div>
                     <div class="col-auto">
-                        <button type="button" class="btn btn-warning" onclick={go} {disabled}>{"Compare"}</button>
+                        <button type="button" class="btn btn-warning" onclick={compare} {disabled}>{"Compare"}</button>
                     </div>
                 </div>
             </div>
