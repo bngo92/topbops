@@ -313,7 +313,13 @@ async fn update_list(
             *source = updated_source;
         }
     }
-    // TODO: update iframe if possible
+    let (source, external_id) = get_unique_source(&list)?;
+    if let Some("spotify") = source {
+        list.iframe = Some(format!(
+            "https://open.spotify.com/embed/playlist/{}?utm_source=generator",
+            external_id
+        ));
+    }
     state
         .client
         .write_document(|db| {
@@ -462,7 +468,25 @@ async fn handle_stats_update(
 async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<StatusCode, Error> {
     let list = get_list_doc(&state.client, &UserId(user.user_id.clone()), id).await?;
     // TODO: create new playlist if one doesn't exist
-    let ListMode::User(Some(external_id)) = list.mode else {
+    let (_, external_id) = get_unique_source(&list)?;
+    let access_token = source::spotify::get_access_token(&state.client, user).await?;
+    // TODO: filter hidden items
+    source::spotify::update_list(
+        access_token,
+        &external_id,
+        &list
+            .items
+            .into_iter()
+            .map(|i| i.id)
+            .collect::<Vec<_>>()
+            .join(","),
+    )
+    .await?;
+    Ok(StatusCode::OK)
+}
+
+fn get_unique_source(list: &List) -> Result<(Option<&str>, String), Error> {
+    let ListMode::User(Some(external_id)) = &list.mode else {
         return Err(Error::from("Push is not supported for this list type"));
     };
     let mut iter = list.sources.iter().map(get_source_id);
@@ -479,20 +503,7 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
             return Err(Error::from("List has multiple sources"));
         }
     }
-    let access_token = source::spotify::get_access_token(&state.client, user).await?;
-    // TODO: filter hidden items
-    source::spotify::update_list(
-        access_token,
-        &external_id,
-        &list
-            .items
-            .into_iter()
-            .map(|i| i.id)
-            .collect::<Vec<_>>()
-            .join(","),
-    )
-    .await?;
-    Ok(StatusCode::OK)
+    Ok((source, external_id.clone()))
 }
 
 fn get_source_id(source: &Source) -> Option<&str> {
