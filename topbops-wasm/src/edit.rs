@@ -63,9 +63,9 @@ impl Component for Edit {
                     let onclick = ctx.link().callback(move |_| Msg::DeleteSource(i));
                     html! {
                         <div class="row mb-1">
-                            <label class="col-12 col-lg-9 col-xl-8 col-form-label">{&source.name}</label>
+                            <label class="col-9 col-sm-10 col-form-label">{&source.name}</label>
                             if !matches!(list.mode, ListMode::External) {
-                                <div class="col-1">
+                                <div class="col-2">
                                     <button type="button" class="btn btn-danger" {onclick}>{"Delete"}</button>
                                 </div>
                             }
@@ -76,14 +76,14 @@ impl Component for Edit {
                     let onclick = ctx.link().callback(move |_| Msg::DeleteNewSource(i));
                     html! {
                         <div class="row mb-1">
-                            <div class="col-2">
+                            <div class="col-4 col-sm-3 col-md-2">
                                 <select ref={source} class="form-select">
                                     <option>{"Custom"}</option>
                                     <option>{"Spotify"}</option>
                                 </select>
                             </div>
-                            <input class="col-12 col-lg-9 col-xl-8 col-form-label" ref={id}/>
-                            <div class="col-1">
+                            <input class="col-9 col-sm-7 col-md-8 col-form-label" ref={id}/>
+                            <div class="col-2">
                                 <button type="button" class="btn btn-danger" {onclick}>{"Delete"}</button>
                             </div>
                         </div>
@@ -93,8 +93,8 @@ impl Component for Edit {
                     let checked = hidden == "true";
                     html! {
                         <div class="row mb-1">
-                            <label class="col-12 col-lg-8 col-xl-7 col-form-label">{&item.name}</label>
-                            <div class="col-3 col-lg-2 col-xl-1">
+                            <label class="col-9 col-form-label">{&item.name}</label>
+                            <div class="col-2">
                                 <select ref={rating_ref} class="form-select" {disabled}>
                                     <option selected={rating == "null"}></option>
                                     <option selected={rating == "0"}>{"0"}</option>
@@ -120,46 +120,43 @@ impl Component for Edit {
                 let add_source = ctx.link().callback(|_| Msg::AddSource);
                 let save = ctx.link().callback(|_| Msg::Save);
                 let push = ctx.link().callback(|_| Msg::Push);
-                html! {
-                    <div>
+                let content = html! {
+                    <div class="col-lg-10 col-xl-8">
                         if matches!(list.mode, ListMode::External) {
                             <h1>{&list.name}</h1>
                         }
+                        <h4>{"List Settings"}</h4>
                         <form>
                             if !matches!(list.mode, ListMode::External) {
-                                <div class="row mb-3">
-                                    <div class="col-md-6">
-                                        <input class="form-control" value={Some(list.name.clone())} ref={name_ref.clone()} placeholder="Name"/>
-                                        if let ListMode::User(external_id) = &list.mode {
-                                            <input class="form-control" value={external_id.clone()} ref={external_ref.clone()} placeholder="External ID"/>
-                                        }
-                                    </div>
+                                <div class="form-floating mb-3 col-md-6">
+                                    <input class="form-control" id="name" value={Some(list.name.clone())} ref={name_ref.clone()} placeholder="Name"/>
+                                    <label for="name">{"List name"}</label>
                                 </div>
+                                if let ListMode::User(external_id) = &list.mode {
+                                    <div class="form-floating mb-3 col-md-6">
+                                        <input class="form-control" id="externalId" value={external_id.clone()} ref={external_ref.clone()} placeholder="External ID"/>
+                                        <label for="externalId">{"External ID"}</label>
+                                    </div>
+                                }
                             }
-                            <div class="row">
-                                <label class="col-sm-1">{"Favorite"}</label>
-                                <div class="col-sm-5">
-                                    <div class="form-check">
-                                        <input ref={favorite_ref} class="form-check-input" type="checkbox" {checked}/>
-                                    </div>
-                                </div>
+                            <div class="form-check">
+                                <label class="form-check-label" for="favorite">{"Favorite"}</label>
+                                <input ref={favorite_ref} class="form-check-input" type="checkbox" id="favorite" {checked}/>
                             </div>
                         </form>
+                        <hr/>
+                        <h4>{"Data Sources"}</h4>
+                        {for source_html}
+                        {for new_source_html}
+                        // TODO: Add edit mode and toggle
+                        if !matches!(list.mode, ListMode::External) {
+                            <button type="button" class="btn btn-primary" onclick={add_source}>{"Add source"}</button>
+                            <button type="button" class="btn btn-secondary" onclick={push} {disabled}>{"Push"}</button>
+                        }
+                        <hr/>
                         <div class="row">
-                            <h2>{"Data Sources"}</h2>
-                        </div>
-                        <form>
-                            {for source_html}
-                            {for new_source_html}
-                            // TODO: Add edit mode and toggle
-                            if !matches!(list.mode, ListMode::External) {
-                                <button type="button" class="btn btn-primary" onclick={add_source}>{"Add source"}</button>
-                                <button type="button" class="btn btn-secondary" onclick={push} {disabled}>{"Push"}</button>
-                            }
-                        </form>
-                        <div class="row">
-                            <h2 class="col-lg-8 col-xl-7">{"Items"}</h2>
-                            <p class="col-3 col-lg-2 col-xl-1"><strong>{"Rating"}</strong></p>
+                            <h4 class="col-9">{"Items"}</h4>
+                            <p class="col-2"><strong>{"Rating"}</strong></p>
                             <p class="col-1"><strong>{"Hidden"}</strong></p>
                         </div>
                         <form>
@@ -170,11 +167,16 @@ impl Component for Edit {
                         </form>
                         if let Some(src) = list.iframe.clone() {
                             <div class="row">
-                                <div class="col-12 col-lg-10 col-xl-8">
+                                <div class="col-12 col-lg-10">
                                     <iframe width="100%" height="380" frameborder="0" {src}></iframe>
                                 </div>
                             </div>
                         }
+                        </div>
+                };
+                html! {
+                    <div class="row">
+                        {content}
                     </div>
                 }
             }
