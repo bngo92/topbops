@@ -13,7 +13,7 @@ use futures::{StreamExt, TryStreamExt};
 use hyper::{Body, Client, Method, Request, StatusCode, Uri};
 use hyper_tls::HttpsConnector;
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 use topbops::{ItemQuery, List, ListMode, Lists, Source, SourceType};
@@ -469,19 +469,26 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
     let list = get_list_doc(&state.client, &UserId(user.user_id.clone()), id).await?;
     // TODO: create new playlist if one doesn't exist
     let (_, external_id) = get_unique_source(&list)?;
+    let ids: Vec<_> = list.items.into_iter().map(|i| i.id).collect();
+    let query = String::from("SELECT VALUE c.id FROM c WHERE c.user_id = @user_id AND ARRAY_CONTAINS(@ids, c.id) AND c.hidden = true");
+    let hidden: HashSet<_> = state
+        .client
+        .query_documents::<_, String>(|db| {
+            db.collection_client("items")
+                .query_documents(CosmosQuery::with_params(
+                    query,
+                    [
+                        Param::new(String::from("@user_id"), user.user_id.clone()),
+                        Param::new(String::from("@ids"), ids.clone()),
+                    ],
+                ))
+        })
+        .await?
+        .into_iter()
+        .collect();
+    let ids: Vec<_> = ids.into_iter().filter(|id| !hidden.contains(id)).collect();
     let access_token = source::spotify::get_access_token(&state.client, user).await?;
-    // TODO: filter hidden items
-    source::spotify::update_list(
-        access_token,
-        &external_id,
-        &list
-            .items
-            .into_iter()
-            .map(|i| i.id)
-            .collect::<Vec<_>>()
-            .join(","),
-    )
-    .await?;
+    source::spotify::update_list(access_token, &external_id, &ids.join(",")).await?;
     Ok(StatusCode::OK)
 }
 
