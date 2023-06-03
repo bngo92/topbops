@@ -63,6 +63,16 @@ struct Artist {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+struct Search {
+    pub tracks: SearchTracks,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct SearchTracks {
+    pub items: Vec<Track>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct User {
     pub id: String,
 }
@@ -284,13 +294,13 @@ pub async fn update_list(access_token: &str, playlist_id: &str, ids: &str) -> Re
             String::from_utf8(got.to_vec())
                 .unwrap_or_else(|_| "Spotify response should be ASCII".to_owned())
         );
-        Err(Error::internal(error))
+        Err(Error::internal_error(error))
     } else {
         Ok(())
     }
 }
 
-async fn get_token() -> Result<crate::Token, Error> {
+pub async fn get_token() -> Result<crate::Token, Error> {
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
     let uri: Uri = "https://accounts.spotify.com/api/token".parse().unwrap();
@@ -403,4 +413,49 @@ fn new_spotify_item(track: Track, user_id: &UserId) -> crate::Item {
         metadata,
         hidden: false,
     }
+}
+
+pub async fn search_song(
+    token: &crate::Token,
+    name: String,
+    artist: Option<String>,
+    user_id: &UserId,
+) -> Result<crate::Item, Error> {
+    let https = HttpsConnector::new();
+    let client = Client::builder().build::<_, hyper::Body>(https);
+    let uri: Uri = if let Some(artist) = artist {
+        format!(
+            "https://api.spotify.com/v1/search?q=track:{}%20artist:{}&type=track",
+            urlencoding::encode(&name),
+            urlencoding::encode(&artist)
+        )
+        .parse()
+        .map_err(|e| Error::internal_error(format!("Invalid track or artist from setlist.fm: {e}")))
+    } else {
+        format!(
+            "https://api.spotify.com/v1/search?q=track:{}&type=track",
+            urlencoding::encode(&name),
+        )
+        .parse()
+        .map_err(|e| Error::internal_error(format!("Invalid track from setlist.fm: {e}")))
+    }?;
+    let resp = client
+        .request(
+            Request::builder()
+                .uri(uri)
+                .header("Authorization", format!("Bearer {}", token.access_token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    let got = hyper::body::to_bytes(resp.into_body()).await?;
+    let result: Search = serde_json::from_slice(&got)?;
+    Ok(new_spotify_item(
+        result
+            .tracks
+            .items
+            .into_iter()
+            .next()
+            .ok_or(Error::client_error("Couldn't find song for query"))?,
+        user_id,
+    ))
 }

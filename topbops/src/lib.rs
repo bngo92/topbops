@@ -72,6 +72,7 @@ pub struct Source {
 pub enum SourceType {
     Custom(Value),
     Spotify(Spotify),
+    Setlist(String),
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

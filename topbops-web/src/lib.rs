@@ -66,6 +66,16 @@ pub enum Error {
     InternalError(InternalError),
 }
 
+impl Error {
+    pub fn client_error(e: impl Into<String>) -> Self {
+        Self::ClientError(e.into())
+    }
+
+    pub fn internal_error(e: impl Into<String>) -> Self {
+        Self::InternalError(InternalError::Error(e.into()))
+    }
+}
+
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)
@@ -120,18 +130,6 @@ impl From<sqlparser::parser::ParserError> for Error {
             sqlparser::parser::ParserError::TokenizerError(e) => e,
             sqlparser::parser::ParserError::ParserError(e) => e,
         })
-    }
-}
-
-impl From<&'static str> for Error {
-    fn from(e: &'static str) -> Error {
-        Error::ClientError(e.to_owned())
-    }
-}
-
-impl Error {
-    fn internal(e: String) -> Error {
-        Error::InternalError(InternalError::Error(e))
     }
 }
 

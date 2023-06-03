@@ -313,8 +313,7 @@ async fn update_list(
             *source = updated_source;
         }
     }
-    let (source, external_id) = get_unique_source(&list)?;
-    if let Some("spotify") = source {
+    if let Ok((Some("spotify"), external_id)) = get_unique_source(&list) {
         list.iframe = Some(format!(
             "https://open.spotify.com/embed/playlist/{}?utm_source=generator",
             external_id
@@ -339,7 +338,7 @@ async fn find_items(
     auth: AuthContext,
 ) -> Result<impl IntoResponse, Response> {
     let user_id = get_user_or_demo_user(auth);
-    let Some(query) = params.get("query") else { return Err(Error::from("invalid finder").into()); };
+    let Some(query) = params.get("query") else { return Err(Error::client_error("invalid finder").into()); };
 
     let (query, fields) = query::rewrite_query(query, &user_id)?;
     let values: Vec<Map<String, Value>> = state
@@ -409,13 +408,15 @@ async fn handle_stats_update(
     lose: &str,
 ) -> Result<StatusCode, Error> {
     let client = &state.client;
-    let (Ok(mut list), Ok(mut win_item), Ok(mut lose_item)) = futures::future::join3(
+    let (list, win_item, lose_item) = futures::future::join3(
         get_list_doc(client, &user_id, id),
         get_item_doc(client, &user_id, win),
         get_item_doc(client, &user_id, lose),
-    ).await else {
-        return Err(Error::from(""));
-    };
+    )
+    .await;
+    let mut list = list?;
+    let mut win_item = win_item?;
+    let mut lose_item = lose_item?;
 
     let mut win_metadata = None;
     let mut lose_metadata = None;
@@ -494,20 +495,20 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
 
 fn get_unique_source(list: &List) -> Result<(Option<&str>, String), Error> {
     let ListMode::User(Some(external_id)) = &list.mode else {
-        return Err(Error::from("Push is not supported for this list type"));
+        return Err(Error::client_error("Push is not supported for this list type"));
     };
     let mut iter = list.sources.iter().map(get_source_id);
     let source = if let Some(source) = iter.next() {
         if source.is_none() {
-            return Err(Error::from("Push is not supported for the source"));
+            return Err(Error::client_error("Push is not supported for the source"));
         }
         source
     } else {
-        return Err(Error::from("List has no sources"));
+        return Err(Error::client_error("List has no sources"));
     };
     for s in iter {
         if s != source {
-            return Err(Error::from("List has multiple sources"));
+            return Err(Error::client_error("List has multiple sources"));
         }
     }
     Ok((source, external_id.clone()))
@@ -516,6 +517,7 @@ fn get_unique_source(list: &List) -> Result<(Option<&str>, String), Error> {
 fn get_source_id(source: &Source) -> Option<&str> {
     match source.source_type {
         SourceType::Spotify(_) => Some("spotify"),
+        SourceType::Setlist(_) => Some("spotify"),
         _ => None,
     }
 }

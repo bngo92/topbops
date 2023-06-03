@@ -22,7 +22,7 @@ pub fn rewrite_list_query<'a>(
 > {
     // TODO: clean up column parsing
     let mut query = parse_select(&list.query)?;
-    let SetExpr::Select(select) = &mut query.body else { return Err("Only SELECT queries are supported".into()) };
+    let SetExpr::Select(select) = &mut query.body else { return Err(Error::client_error("Only SELECT queries are supported")) };
     let fields = select.projection.iter().map(ToString::to_string).collect();
 
     let mut map = HashMap::new();
@@ -60,14 +60,14 @@ fn rewrite_query_impl(
     disable_hidden_filter: bool,
 ) -> Result<(Query, Vec<String>), Error> {
     let mut query = parse_select(s)?;
-    let SetExpr::Select(select) = &mut query.body else { return Err("Only SELECT queries are supported".into()) };
+    let SetExpr::Select(select) = &mut query.body else { return Err(Error::client_error("Only SELECT queries are supported")) };
 
     // TODO: do we still need this
     // TODO: support having via subquery
-    let Some(from) = select.from.get_mut(0) else { return Err("FROM clause is omitted".into()); };
+    let Some(from) = select.from.get_mut(0) else { return Err(Error::client_error("FROM clause is omitted")); };
     if let TableFactor::Table { name, alias, .. } = &mut from.relation {
         if alias.is_some() {
-            return Err("alias is not supported".into());
+            return Err(Error::client_error("alias is not supported"));
         }
         name.0[0].value = String::from("c");
     } else {
@@ -80,10 +80,10 @@ fn rewrite_query_impl(
             SelectItem::UnnamedExpr(expr) => rewrite_expr(expr),
             // TODO: support alias
             SelectItem::ExprWithAlias { .. } => {
-                return Err("alias is not supported".into());
+                return Err(Error::client_error("alias is not supported"));
             }
             SelectItem::QualifiedWildcard(_) | SelectItem::Wildcard => {
-                return Err("wildcard is not supported".into());
+                return Err(Error::client_error("wildcard is not supported"));
             }
         }
     }
@@ -141,7 +141,7 @@ fn parse_select(s: &str) -> Result<Query, Error> {
     if let Some(Statement::Query(query)) = statement {
         Ok(*query)
     } else {
-        Err("No query was provided".into())
+        Err(Error::client_error("No query was provided"))
     }
 }
 

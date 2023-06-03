@@ -303,6 +303,14 @@ fn parse_spotify_source(input: &str) -> Option<Spotify> {
     };
 }
 
+fn parse_setlist_source(input: &str) -> Option<String> {
+    let re = Regex::new(r"https://www.setlist.fm/setlist/.*-([[:alnum:]]*).html").unwrap();
+    return re
+        .captures_iter(input)
+        .next()
+        .map(|caps| caps[1].to_owned());
+}
+
 impl Home {
     async fn fetch_lists(favorite: bool) -> HomeMsg {
         let lists = fetch_lists(favorite).await.unwrap();
