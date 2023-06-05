@@ -4,7 +4,7 @@ use hyper::{Body, Client, Method, Request, Uri};
 use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use topbops::{List, ListMode, Source, SourceType, Spotify};
+use topbops::{Id, List, ListMode, Source, SourceType, Spotify};
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Playlists {
@@ -77,23 +77,27 @@ pub struct User {
     pub id: String,
 }
 
-pub async fn import(user_id: &UserId, id: &str) -> Result<(List, Vec<crate::Item>), Error> {
-    match id.split_once(':') {
-        Some(("playlist", id)) => import_playlist(user_id, id).await,
-        Some(("album", id)) => import_album(user_id, id).await,
+pub async fn import(
+    user_id: &UserId,
+    source: &str,
+    id: String,
+) -> Result<(List, Vec<crate::Item>), Error> {
+    match source {
+        "playlist" => import_playlist(user_id, id).await,
+        "album" => import_album(user_id, id).await,
         _ => todo!(),
     }
 }
 
 pub async fn get_playlist(
     user_id: &UserId,
-    playlist_id: &str,
+    playlist_id: Id,
 ) -> Result<(Source, Vec<crate::Item>), Error> {
     let token = get_token().await?;
 
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = format!("https://api.spotify.com/v1/playlists/{}", playlist_id)
+    let uri: Uri = format!("https://api.spotify.com/v1/playlists/{}", playlist_id.id)
         .parse()
         .unwrap();
     let resp = client
@@ -111,7 +115,7 @@ pub async fn get_playlist(
     let client = Client::builder().build::<_, hyper::Body>(https);
     let uri: Uri = format!(
         "https://api.spotify.com/v1/playlists/{}/tracks",
-        playlist_id
+        playlist_id.id
     )
     .parse()
     .unwrap();
@@ -151,7 +155,7 @@ pub async fn get_playlist(
     }
     Ok((
         Source {
-            source_type: SourceType::Spotify(Spotify::Playlist(playlist_id.to_owned())),
+            source_type: SourceType::Spotify(Spotify::Playlist(playlist_id.id.clone())),
             name: playlist.name,
         },
         items,
@@ -160,19 +164,23 @@ pub async fn get_playlist(
 
 pub async fn import_playlist(
     user_id: &UserId,
-    playlist_id: &str,
+    playlist_id: String,
 ) -> Result<(List, Vec<crate::Item>), Error> {
-    let (source, items) = get_playlist(user_id, playlist_id).await?;
+    let id = Id {
+        raw_id: format!(
+            "https://open.spotify.com/embed/playlist/{}?utm_source=generator",
+            playlist_id
+        ),
+        id: playlist_id,
+    };
+    let (source, items) = get_playlist(user_id, id.clone()).await?;
     let list = List {
-        id: playlist_id.to_owned(),
+        id: id.id,
         user_id: user_id.0.clone(),
         mode: ListMode::External,
         name: source.name.clone(),
         sources: vec![source],
-        iframe: Some(format!(
-            "https://open.spotify.com/embed/playlist/{}?utm_source=generator",
-            playlist_id
-        )),
+        iframe: Some(id.raw_id),
         items: crate::convert_items(&items),
         favorite: false,
         query: String::from("SELECT name, user_score FROM tracks"),
@@ -180,12 +188,12 @@ pub async fn import_playlist(
     Ok((list, items))
 }
 
-pub async fn get_album(user_id: &UserId, id: &str) -> Result<(Source, Vec<crate::Item>), Error> {
+pub async fn get_album(user_id: &UserId, id: Id) -> Result<(Source, Vec<crate::Item>), Error> {
     let token = get_token().await?;
 
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = format!("https://api.spotify.com/v1/albums/{}", id)
+    let uri: Uri = format!("https://api.spotify.com/v1/albums/{}", id.id)
         .parse()
         .unwrap();
     let resp = client
@@ -201,7 +209,7 @@ pub async fn get_album(user_id: &UserId, id: &str) -> Result<(Source, Vec<crate:
 
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = format!("https://api.spotify.com/v1/albums/{}/tracks", id)
+    let uri: Uri = format!("https://api.spotify.com/v1/albums/{}/tracks", id.id)
         .parse()
         .unwrap();
     let resp = client
@@ -241,25 +249,29 @@ pub async fn get_album(user_id: &UserId, id: &str) -> Result<(Source, Vec<crate:
     .await?;
     Ok((
         Source {
-            source_type: SourceType::Spotify(Spotify::Album(id.to_owned())),
+            source_type: SourceType::Spotify(Spotify::Album(id.id)),
             name: album.name,
         },
         items,
     ))
 }
 
-pub async fn import_album(user_id: &UserId, id: &str) -> Result<(List, Vec<crate::Item>), Error> {
-    let (source, items) = get_album(user_id, id).await?;
+pub async fn import_album(user_id: &UserId, id: String) -> Result<(List, Vec<crate::Item>), Error> {
+    let id = Id {
+        id: id.clone(),
+        raw_id: format!(
+            "https://open.spotify.com/embed/album/{}?utm_source=generator",
+            id
+        ),
+    };
+    let (source, items) = get_album(user_id, id.clone()).await?;
     let list = List {
-        id: id.to_owned(),
+        id: id.id,
         user_id: user_id.0.clone(),
         mode: ListMode::External,
         name: source.name.clone(),
         sources: vec![source],
-        iframe: Some(format!(
-            "https://open.spotify.com/embed/album/{}?utm_source=generator",
-            id
-        )),
+        iframe: Some(id.raw_id),
         items: crate::convert_items(&items),
         favorite: false,
         query: String::from("SELECT name, user_score FROM tracks"),

@@ -303,14 +303,25 @@ async fn update_list(
 ) -> Result<StatusCode, Response> {
     let user = require_user(auth)?;
     let user_id = UserId(user.user_id);
-    let current_list = get_list_doc(&state.client, &user_id, &id).await?;
+    let user_id = &user_id;
+    let client = &state.client;
+    let current_list = get_list_doc(client, user_id, &id).await?;
     if current_list.sources != list.sources {
         list.items.clear();
-        for source in &mut list.sources {
-            let (updated_source, items) = source::get_source_and_items(&user_id, source).await?;
-            list.items.extend(topbops_web::convert_items(&items));
-            create_items(&state.client, items, false).await?;
-            *source = updated_source;
+        let sources = list.sources;
+        list.sources = Vec::with_capacity(sources.len());
+        for (source, items) in futures::stream::iter(sources.into_iter().map(|source| async move {
+            let (updated_source, items) = source::get_source_and_items(user_id, source).await?;
+            let list_items = topbops_web::convert_items(&items);
+            create_items(client, items, false).await?;
+            Ok::<_, Error>((updated_source, list_items))
+        }))
+        .buffered(5)
+        .try_collect::<Vec<_>>()
+        .await?
+        {
+            list.sources.push(source);
+            list.items.extend(items);
         }
     }
     if let Ok((Some("spotify"), external_id)) = get_unique_source(&list) {
@@ -366,7 +377,7 @@ async fn find_items(
 
 async fn handle_action(
     State(state): State<Arc<AppState>>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(mut params): Query<HashMap<String, String>>,
     auth: AuthContext,
     body: Bytes,
 ) -> Result<StatusCode, Response> {
@@ -387,8 +398,8 @@ async fn handle_action(
             }
         }
         Some("import") => {
-            if let Some(id) = params.get("id") {
-                return Ok(import_list(state, user_id, id, false).await?);
+            if let (Some(source), Some(id)) = (params.remove("source"), params.remove("id")) {
+                return Ok(import_list(state, user_id, &source, id, false).await?);
             }
         }
         Some("updateItems") => {
@@ -525,11 +536,12 @@ fn get_source_id(source: &Source) -> Option<&str> {
 async fn import_list(
     state: Arc<AppState>,
     user_id: UserId,
-    id: &str,
+    source: &str,
+    id: String,
     favorite: bool,
 ) -> Result<StatusCode, Error> {
-    let (mut list, items) = match id.split_once(':') {
-        Some(("spotify", id)) => source::spotify::import(&user_id, id).await?,
+    let (mut list, items) = match source.split_once(':') {
+        Some(("spotify", source)) => source::spotify::import(&user_id, source, id).await?,
         _ => todo!(),
     };
     list.favorite = favorite;
@@ -687,7 +699,8 @@ async fn main() {
         import_list(
             Arc::clone(&shared_state),
             UserId(demo_user.clone()),
-            "spotify:playlist:5MztFbRbMpyxbVYuOSfQV9",
+            "spotify:playlist",
+            "5MztFbRbMpyxbVYuOSfQV9".to_owned(),
             true,
         )
         .await

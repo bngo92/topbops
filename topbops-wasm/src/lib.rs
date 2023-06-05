@@ -263,19 +263,15 @@ impl Component for Home {
             HomeMsg::Import => {
                 let input = self.import_ref.cast::<HtmlSelectElement>().unwrap().value();
                 // TODO: handle bad input
-                let id = match parse_spotify_source(&input) {
-                    Some(Spotify::Playlist(id)) => {
-                        format!("spotify:playlist:{}", id)
-                    }
-                    Some(Spotify::Album(id)) => {
-                        format!("spotify:album:{}", id)
-                    }
+                let (source, id) = match parse_spotify_source(&input) {
+                    Some(Spotify::Playlist(id)) => ("spotify:playlist", id),
+                    Some(Spotify::Album(id)) => ("spotify:album", id),
                     None => {
                         return false;
                     }
                 };
                 ctx.link().send_future(async move {
-                    import_list(&id).await.unwrap();
+                    import_list(&source, &id).await.unwrap();
                     Home::fetch_lists(false).await
                 });
                 false
@@ -546,9 +542,12 @@ async fn push_list(id: &str) -> Result<(), JsValue> {
     Ok(())
 }
 
-async fn import_list(id: &str) -> Result<(), JsValue> {
+async fn import_list(source: &str, id: &str) -> Result<(), JsValue> {
     let window = web_sys::window().expect("no global `window` exists");
-    let request = query(&format!("/api/?action=import&id={}", id), "POST")?;
+    let request = query(
+        &format!("/api/?action=import&source={source}&id={id}"),
+        "POST",
+    )?;
     JsFuture::from(window.fetch_with_request(&request)).await?;
     Ok(())
 }

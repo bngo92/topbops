@@ -81,6 +81,12 @@ pub enum Spotify {
     Album(String),
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct Id {
+    pub id: String,
+    pub raw_id: String,
+}
+
 #[cfg(feature = "azure")]
 impl CosmosEntity for List {
     type Entity = String;
