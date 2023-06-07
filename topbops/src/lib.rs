@@ -55,7 +55,7 @@ impl ItemMetadata {
 pub enum ListMode {
     /// User defined lists that can pull from multiple sources
     /// User lists can also be pushed to an external source
-    User(Option<String>),
+    User(Option<Id>),
     /// Lists that are pulled from an external source
     External,
     /// Read only lists
@@ -72,13 +72,13 @@ pub struct Source {
 pub enum SourceType {
     Custom(Value),
     Spotify(Spotify),
-    Setlist(String),
+    Setlist(Id),
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum Spotify {
-    Playlist(String),
-    Album(String),
+    Playlist(Id),
+    Album(Id),
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

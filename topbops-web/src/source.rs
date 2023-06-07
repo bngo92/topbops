@@ -1,6 +1,6 @@
 use crate::{Error, UserId};
 use serde_json::{Map, Value};
-use topbops::{Id, Source, SourceType, Spotify};
+use topbops::{Source, SourceType, Spotify};
 
 pub mod setlist;
 pub mod spotify;
@@ -14,27 +14,9 @@ pub async fn get_source_and_items(
             let items = get_custom_items(user_id, value)?;
             Ok((source, items))
         }
-        SourceType::Spotify(Spotify::Playlist(id)) => {
-            spotify::get_playlist(
-                user_id,
-                Id {
-                    id,
-                    raw_id: String::new(),
-                },
-            )
-            .await
-        }
-        SourceType::Spotify(Spotify::Album(id)) => {
-            spotify::get_album(
-                user_id,
-                Id {
-                    id,
-                    raw_id: String::new(),
-                },
-            )
-            .await
-        }
-        SourceType::Setlist(id) => setlist::get_setlist(user_id, &id).await,
+        SourceType::Spotify(Spotify::Playlist(id)) => spotify::get_playlist(user_id, id).await,
+        SourceType::Spotify(Spotify::Album(id)) => spotify::get_album(user_id, id).await,
+        SourceType::Setlist(id) => setlist::get_setlist(user_id, id).await,
     }
 }
 

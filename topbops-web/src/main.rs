@@ -522,7 +522,7 @@ fn get_unique_source(list: &List) -> Result<(Option<&str>, String), Error> {
             return Err(Error::client_error("List has multiple sources"));
         }
     }
-    Ok((source, external_id.clone()))
+    Ok((source, external_id.id.clone()))
 }
 
 fn get_source_id(source: &Source) -> Option<&str> {

@@ -9,7 +9,7 @@ use regex::Regex;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::rc::Rc;
-use topbops::{ItemQuery, List, ListMode, Lists, Spotify};
+use topbops::{Id, ItemQuery, List, ListMode, Lists, Spotify};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
@@ -263,7 +263,7 @@ impl Component for Home {
             HomeMsg::Import => {
                 let input = self.import_ref.cast::<HtmlSelectElement>().unwrap().value();
                 // TODO: handle bad input
-                let (source, id) = match parse_spotify_source(&input) {
+                let (source, id) = match parse_spotify_source(input) {
                     Some(Spotify::Playlist(id)) => ("spotify:playlist", id),
                     Some(Spotify::Album(id)) => ("spotify:album", id),
                     None => {
@@ -271,7 +271,7 @@ impl Component for Home {
                     }
                 };
                 ctx.link().send_future(async move {
-                    import_list(&source, &id).await.unwrap();
+                    import_list(source, &id.id).await.unwrap();
                     Home::fetch_lists(false).await
                 });
                 false
@@ -287,24 +287,34 @@ impl Component for Home {
     }
 }
 
-fn parse_spotify_source(input: &str) -> Option<Spotify> {
+fn parse_spotify_source(input: String) -> Option<Spotify> {
     let playlist_re = Regex::new(r"https://open.spotify.com/playlist/([[:alnum:]]*)").unwrap();
     let album_re = Regex::new(r"https://open.spotify.com/album/([[:alnum:]]*)").unwrap();
-    return if let Some(caps) = playlist_re.captures_iter(input).next() {
-        Some(Spotify::Playlist(caps[1].to_owned()))
-    } else if let Some(caps) = album_re.captures_iter(input).next() {
-        Some(Spotify::Album(caps[1].to_owned()))
+    return if let Some(caps) = playlist_re.captures_iter(&input).next() {
+        Some(Spotify::Playlist(Id {
+            id: caps[1].to_owned(),
+            raw_id: input,
+        }))
+    } else if let Some(caps) = album_re.captures_iter(&input).next() {
+        Some(Spotify::Album(Id {
+            id: caps[1].to_owned(),
+            raw_id: input,
+        }))
     } else {
         None
     };
 }
 
-fn parse_setlist_source(input: &str) -> Option<String> {
+fn parse_setlist_source(input: String) -> Option<Id> {
     let re = Regex::new(r"https://www.setlist.fm/setlist/.*-([[:alnum:]]*).html").unwrap();
-    return re
-        .captures_iter(input)
-        .next()
-        .map(|caps| caps[1].to_owned());
+    return if let Some(caps) = re.captures_iter(&input).next() {
+        Some(Id {
+            id: caps[1].to_owned(),
+            raw_id: input,
+        })
+    } else {
+        None
+    };
 }
 
 impl Home {

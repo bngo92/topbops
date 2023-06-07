@@ -4,7 +4,7 @@ use hyper::{Body, Client, Request, Uri};
 use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
 use time::Date;
-use topbops::{Source, SourceType};
+use topbops::{Id, Source, SourceType};
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,15 +57,15 @@ struct Song {
     pub cover: Option<Artist>,
 }
 
-pub async fn get_setlist(user_id: &UserId, id: &str) -> Result<(Source, Vec<crate::Item>), Error> {
+pub async fn get_setlist(user_id: &UserId, id: Id) -> Result<(Source, Vec<crate::Item>), Error> {
     let token = crate::source::spotify::get_token().await?;
     let token = &token;
 
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = format!("https://api.setlist.fm/rest/1.0/setlist/{}", id)
+    let uri: Uri = format!("https://api.setlist.fm/rest/1.0/setlist/{}", id.id)
         .parse()
-        .map_err(|_| Error::client_error(format!("Invalid id: {id}")))?;
+        .map_err(|_| Error::client_error(format!("Invalid id: {}", id.id)))?;
     let resp = client
         .request(
             Request::builder()
@@ -117,7 +117,7 @@ pub async fn get_setlist(user_id: &UserId, id: &str) -> Result<(Source, Vec<crat
     );
     Ok((
         Source {
-            source_type: SourceType::Setlist(String::from(id)),
+            source_type: SourceType::Setlist(id),
             name,
         },
         items,

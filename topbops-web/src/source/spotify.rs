@@ -155,7 +155,7 @@ pub async fn get_playlist(
     }
     Ok((
         Source {
-            source_type: SourceType::Spotify(Spotify::Playlist(playlist_id.id.clone())),
+            source_type: SourceType::Spotify(Spotify::Playlist(playlist_id)),
             name: playlist.name,
         },
         items,
@@ -249,7 +249,7 @@ pub async fn get_album(user_id: &UserId, id: Id) -> Result<(Source, Vec<crate::I
     .await?;
     Ok((
         Source {
-            source_type: SourceType::Spotify(Spotify::Album(id.id)),
+            source_type: SourceType::Spotify(Spotify::Album(id)),
             name: album.name,
         },
         items,

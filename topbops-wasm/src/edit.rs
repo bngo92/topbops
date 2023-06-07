@@ -85,7 +85,7 @@ impl Component for Edit {
                             </div>
                             if let ListMode::User(external_id) = &list.mode {
                                 <div class="form-floating mb-3 col-md-8">
-                                    <input class="form-control" id="externalId" value={external_id.clone()} ref={external_ref.clone()} placeholder="External ID"/>
+                                    <input class="form-control" id="externalId" value={external_id.as_ref().map(|id| id.raw_id.clone())} ref={external_ref.clone()} placeholder="External ID"/>
                                     <label for="externalId">{"External ID"}</label>
                                 </div>
                             }
@@ -148,7 +148,7 @@ impl Component for Edit {
                     let id = external_ref.cast::<HtmlInputElement>().unwrap().value();
                     if id.is_empty() {
                         *external_id = None;
-                    } else if let Some(Spotify::Playlist(id)) = crate::parse_spotify_source(&id) {
+                    } else if let Some(Spotify::Playlist(id)) = crate::parse_spotify_source(id) {
                         *external_id = Some(id);
                     }
                 }
@@ -158,7 +158,7 @@ impl Component for Edit {
                     let id = id.cast::<HtmlInputElement>().unwrap().value();
                     match &*source {
                         "Spotify" => {
-                            if let Some(source) = crate::parse_spotify_source(&id) {
+                            if let Some(source) = crate::parse_spotify_source(id) {
                                 list.sources.push(Source {
                                     source_type: SourceType::Spotify(source),
                                     name: String::new(),
@@ -178,7 +178,7 @@ impl Component for Edit {
                             }
                         }
                         "Setlist" => {
-                            if let Some(id) = crate::parse_setlist_source(&id) {
+                            if let Some(id) = crate::parse_setlist_source(id) {
                                 list.sources.push(Source {
                                     source_type: SourceType::Setlist(id),
                                     name: String::new(),
