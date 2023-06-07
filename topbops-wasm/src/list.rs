@@ -1,6 +1,7 @@
 use serde_json::Value;
 use std::collections::HashMap;
-use topbops::{ItemMetadata, ItemQuery, List, ListMode};
+use topbops::{Id, ItemMetadata, ItemQuery, List, ListMode, SourceType, Spotify};
+use url::Url;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlInputElement, HtmlSelectElement, Request, RequestInit, RequestMode};
@@ -48,10 +49,22 @@ impl Component for ListItems {
             ListState::Success(items) => {
                 let list = &ctx.props().list;
                 let source_html = list.sources.iter().map(|source| {
+                    let raw_id = match &source.source_type {
+                        SourceType::Spotify(Spotify::Playlist(Id { raw_id, .. }))
+                        | SourceType::Spotify(Spotify::Album(Id { raw_id, .. }))
+                        | SourceType::Setlist(Id { raw_id, .. })
+                            if raw_id.parse::<Url>().is_ok() =>
+                        {
+                            Some(raw_id.clone())
+                        }
+                        _ => None,
+                    };
                     html! {
-                        <div class="row mb-1">
-                            <label class="col-9 col-sm-10 col-form-label">{&source.name}</label>
-                        </div>
+                        if let Some(href) = raw_id {
+                            <div class="mb-2"><a {href}>{&source.name}</a></div>
+                        } else {
+                            <p class="mb-2">{&source.name}</p>
+                        }
                     }
                 });
                 let html = items.iter().map(|(item, rating, hidden, rating_ref, hidden_ref)| {
