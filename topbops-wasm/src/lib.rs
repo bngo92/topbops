@@ -1,7 +1,7 @@
 #![feature(iter_intersperse)]
 use crate::bootstrap::{Accordion, Collapse};
 use crate::edit::Edit;
-use crate::list::ListComponent;
+use crate::list::ListItems;
 use crate::random::Match;
 use crate::search::Search;
 use crate::tournament::Tournament;
@@ -49,8 +49,8 @@ fn switch(routes: Route) -> Html {
     match routes {
         Route::Home => html! { <Home show_all_lists=false/> },
         Route::Lists => html! { <Home show_all_lists=true/> },
-        Route::List { id } => html! { <ListComponent {id}/> },
-        Route::Edit { id } => html! { <Edit {id}/> },
+        Route::List { id } => html! { <ListComponent {id} view={ListView::Items}/> },
+        Route::Edit { id } => html! { <ListComponent {id} view={ListView::Edit}/> },
         Route::Match { id } => html! { <Match {id}/> },
         Route::Tournament { id } => html! {
             <Tournament {id}/>
@@ -467,6 +467,94 @@ impl Component for Row {
           </tr>
         }
     }
+}
+
+enum ListState {
+    Fetching,
+    Success(List),
+}
+
+pub enum Msg {
+    None,
+    Load(List),
+}
+
+#[derive(Eq, PartialEq, Properties)]
+pub struct ListProps {
+    pub view: ListView,
+    pub id: String,
+}
+
+pub struct ListComponent {
+    state: ListState,
+}
+
+impl Component for ListComponent {
+    type Message = Msg;
+    type Properties = ListProps;
+
+    fn create(ctx: &Context<Self>) -> Self {
+        let id = ctx.props().id.clone();
+        ctx.link()
+            .send_future(async move { Msg::Load(crate::fetch_list(&id).await.unwrap()) });
+        ListComponent {
+            state: ListState::Fetching,
+        }
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        match &self.state {
+            ListState::Fetching => html! {},
+            ListState::Success(list) => {
+                let mut tabs = ["nav-link"; 2];
+                let active = "nav-link active";
+                match ctx.props().view {
+                    ListView::Items => {
+                        tabs[0] = active;
+                    }
+                    ListView::Edit => {
+                        tabs[1] = active;
+                    }
+                }
+                let view = match ctx.props().view {
+                    ListView::Items => html! { <ListItems list={list.clone()}/> },
+                    ListView::Edit => html! { <Edit list={list.clone()}/> },
+                };
+                html! {
+                    <div class="row">
+                        <div class="col-lg-10 col-xl-8">
+                            <h2 class="col-11">{&list.name}</h2>
+                            <ul class="nav nav-tabs mb-3">
+                                <li class="nav-item">
+                                    <Link<Route> classes={tabs[0]} to={Route::List{id: list.id.clone()}}>{"Items"}</Link<Route>>
+                                </li>
+                                <li class="nav-item">
+                                    <Link<Route> classes={tabs[1]} to={Route::Edit{id: list.id.clone()}}>{"Settings"}</Link<Route>>
+                                </li>
+                            </ul>
+                            {view}
+                        </div>
+                    </div>
+                }
+            }
+        }
+    }
+
+    fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
+        match msg {
+            Msg::None => false,
+            Msg::Load(list) => {
+                self.state = ListState::Success(list);
+                true
+            }
+        }
+    }
+}
+
+#[derive(Eq, PartialEq)]
+pub enum ListView {
+    Items,
+    Edit,
 }
 
 // Called by our JS entry point to run the example

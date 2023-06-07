@@ -8,7 +8,7 @@ pub struct Lists {
     pub lists: Vec<List>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct List {
     pub id: String,
     pub user_id: String,
@@ -26,7 +26,7 @@ pub struct List {
     pub query: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ItemMetadata {
     pub id: String,
     pub name: String,
@@ -51,7 +51,7 @@ impl ItemMetadata {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ListMode {
     /// User defined lists that can pull from multiple sources
     /// User lists can also be pushed to an external source
@@ -62,26 +62,26 @@ pub enum ListMode {
     View,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Source {
     pub source_type: SourceType,
     pub name: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum SourceType {
     Custom(Value),
     Spotify(Spotify),
     Setlist(Id),
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum Spotify {
     Playlist(Id),
     Album(Id),
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Id {
     pub id: String,
     pub raw_id: String,
@@ -96,13 +96,13 @@ impl CosmosEntity for List {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ItemQuery {
     pub fields: Vec<String>,
     pub items: Vec<Item>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Item {
     pub values: Vec<String>,
     pub metadata: Option<ItemMetadata>,
