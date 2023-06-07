@@ -7,11 +7,12 @@ pub mod spotify;
 
 pub async fn get_source_and_items(
     user_id: &UserId,
-    source: Source,
+    mut source: Source,
 ) -> Result<(Source, Vec<super::Item>), Error> {
     match source.source_type {
         SourceType::Custom(ref value) => {
             let items = get_custom_items(user_id, value)?;
+            source.name = "Custom".to_owned();
             Ok((source, items))
         }
         SourceType::Spotify(Spotify::Playlist(id)) => spotify::get_playlist(user_id, id).await,
@@ -20,6 +21,7 @@ pub async fn get_source_and_items(
     }
 }
 
+// TODO: support arbitrary input
 fn get_custom_items(user_id: &UserId, value: &Value) -> Result<Vec<super::Item>, Error> {
     let Value::Array(a) = value else { return Err(Error::client_error("invalid custom type")); };
     a.iter()

@@ -10,6 +10,7 @@ pub enum Msg {
     Save,
 }
 
+// TODO: need to refresh list after edit
 #[derive(Eq, PartialEq, Properties)]
 pub struct EditProps {
     pub list: List,

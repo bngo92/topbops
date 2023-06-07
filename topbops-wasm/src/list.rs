@@ -1,10 +1,9 @@
 use serde_json::Value;
 use std::collections::HashMap;
 use topbops::{Id, ItemMetadata, ItemQuery, List, ListMode, SourceType, Spotify};
-use url::Url;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{HtmlInputElement, HtmlSelectElement, Request, RequestInit, RequestMode};
+use web_sys::{HtmlInputElement, HtmlSelectElement, Request, RequestInit, RequestMode, Url};
 use yew::{html, Component, Context, Html, NodeRef, Properties};
 
 enum ListState {
@@ -53,7 +52,7 @@ impl Component for ListItems {
                         SourceType::Spotify(Spotify::Playlist(Id { raw_id, .. }))
                         | SourceType::Spotify(Spotify::Album(Id { raw_id, .. }))
                         | SourceType::Setlist(Id { raw_id, .. })
-                            if raw_id.parse::<Url>().is_ok() =>
+                            if Url::new(raw_id).is_ok() =>
                         {
                             Some(raw_id.clone())
                         }
