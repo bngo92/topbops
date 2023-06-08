@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use azure_data_cosmos::{
     prelude::{
-        ConsistencyLevel, CreateDocumentBuilder, DatabaseClient, GetDocumentBuilder,
-        GetDocumentResponse, QueryDocumentsBuilder, ReplaceDocumentBuilder,
+        ConsistencyLevel, CreateDocumentBuilder, DatabaseClient, DeleteDocumentBuilder,
+        GetDocumentBuilder, GetDocumentResponse, QueryDocumentsBuilder, ReplaceDocumentBuilder,
     },
     CosmosEntity,
 };
@@ -76,11 +76,10 @@ impl SessionClient {
     }
 
     /// CosmosDB creates new session tokens after writes
-    pub async fn write_document<F, T1, T2>(&self, f: F) -> Result<(), azure_core::error::Error>
+    pub async fn write_document<F, T>(&self, f: F) -> Result<(), azure_core::error::Error>
     where
-        F: FnOnce(&DatabaseClient) -> Result<T1, azure_core::error::Error>,
-        T1: IntoSessionToken<T2>,
-        T2: Serialize + CosmosEntity + Send + 'static,
+        F: FnOnce(&DatabaseClient) -> Result<T, azure_core::error::Error>,
+        T: IntoSessionToken,
     {
         let builder = if let Some(session) = self.session.read().unwrap().clone() {
             println!("{:?}", session);
@@ -95,15 +94,13 @@ impl SessionClient {
 }
 
 #[async_trait]
-pub trait IntoSessionToken<T> {
+pub trait IntoSessionToken {
     fn consistency_level(self, consistency_level: ConsistencyLevel) -> Self;
     async fn into_session_token(self) -> Result<String, azure_core::error::Error>;
 }
 
 #[async_trait]
-impl<T: Serialize + CosmosEntity + Send + 'static> IntoSessionToken<T>
-    for CreateDocumentBuilder<T>
-{
+impl<T: Serialize + CosmosEntity + Send + 'static> IntoSessionToken for CreateDocumentBuilder<T> {
     fn consistency_level(self, consistency_level: ConsistencyLevel) -> Self {
         self.consistency_level(consistency_level)
     }
@@ -114,9 +111,18 @@ impl<T: Serialize + CosmosEntity + Send + 'static> IntoSessionToken<T>
 }
 
 #[async_trait]
-impl<T: Serialize + CosmosEntity + Send + 'static> IntoSessionToken<T>
-    for ReplaceDocumentBuilder<T>
-{
+impl<T: Serialize + CosmosEntity + Send + 'static> IntoSessionToken for ReplaceDocumentBuilder<T> {
+    fn consistency_level(self, consistency_level: ConsistencyLevel) -> Self {
+        self.consistency_level(consistency_level)
+    }
+
+    async fn into_session_token(self) -> Result<String, azure_core::error::Error> {
+        self.into_future().await.map(|r| r.session_token)
+    }
+}
+
+#[async_trait]
+impl IntoSessionToken for DeleteDocumentBuilder {
     fn consistency_level(self, consistency_level: ConsistencyLevel) -> Self {
         self.consistency_level(consistency_level)
     }

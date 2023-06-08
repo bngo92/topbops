@@ -343,6 +343,27 @@ async fn update_list(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Does not delete items
+async fn delete_list(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    auth: AuthContext,
+) -> Result<StatusCode, Response> {
+    let user = require_user(auth)?;
+    let user_id = UserId(user.user_id);
+    state
+        .client
+        .write_document(|db| {
+            Ok(db
+                .collection_client("lists")
+                .document_client(id, &user_id.0)?
+                .delete_document())
+        })
+        .await
+        .map_err(Error::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn find_items(
     State(state): State<Arc<AppState>>,
     Query(params): Query<HashMap<String, String>>,
@@ -754,7 +775,10 @@ async fn main() {
 
     let api_router = Router::new()
         .route("/lists", get(get_lists).post(create_list))
-        .route("/lists/:id", get(get_list).put(update_list))
+        .route(
+            "/lists/:id",
+            get(get_list).put(update_list).delete(delete_list),
+        )
         .route("/lists/:id/items", get(get_list_items))
         .route("/items", get(find_items))
         .route("/", post(handle_action))
