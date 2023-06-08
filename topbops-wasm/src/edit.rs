@@ -1,4 +1,4 @@
-use topbops::{List, ListMode, Source, SourceType, Spotify};
+use topbops::{Id, List, ListMode, Source, SourceType, Spotify};
 use web_sys::{HtmlInputElement, HtmlSelectElement};
 use yew::{html, Component, Context, Html, NodeRef, Properties};
 use yew_router::scope_ext::RouterScopeExt;
@@ -9,7 +9,6 @@ pub enum Msg {
     None,
     AddSource,
     DeleteSource(usize),
-    DeleteNewSource(usize),
     Save,
     Delete,
 }
@@ -21,7 +20,13 @@ pub struct EditProps {
 }
 
 pub struct Edit {
-    state: (List, Vec<(NodeRef, NodeRef)>, NodeRef, NodeRef, NodeRef),
+    state: (
+        List,
+        Vec<(NodeRef, NodeRef, Option<SourceType>)>,
+        NodeRef,
+        NodeRef,
+        NodeRef,
+    ),
 }
 
 impl Component for Edit {
@@ -29,10 +34,16 @@ impl Component for Edit {
     type Properties = EditProps;
 
     fn create(ctx: &Context<Self>) -> Self {
+        let mut list = ctx.props().list.clone();
+        let sources = list
+            .sources
+            .drain(..)
+            .map(|s| (NodeRef::default(), NodeRef::default(), Some(s.source_type)))
+            .collect();
         Edit {
             state: (
-                ctx.props().list.clone(),
-                Vec::new(),
+                list,
+                sources,
                 NodeRef::default(),
                 NodeRef::default(),
                 NodeRef::default(),
@@ -42,36 +53,50 @@ impl Component for Edit {
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         let disabled = crate::get_user().is_none();
-        let (list, new_sources, name_ref, external_ref, favorite_ref) = &self.state;
-        let source_html = list.sources.iter().enumerate().map(|(i, source)| {
-            let onclick = ctx.link().callback(move |_| Msg::DeleteSource(i));
-            html! {
-                <div class="row mb-1">
-                    <label class="col-9 col-sm-10 col-form-label">{&source.name}</label>
-                    <div class="col-2">
-                        <button type="button" class="btn btn-danger" {onclick}>{"Delete"}</button>
+        let (list, sources, name_ref, external_ref, favorite_ref) = &self.state;
+        let source_html = sources
+            .iter()
+            .enumerate()
+            .map(|(i, (source_ref, id, source))| {
+                let mut selected = [false; 3];
+                let value = match source {
+                    None => {
+                        selected[1] = true;
+                        String::new()
+                    }
+                    Some(SourceType::Custom(value)) => {
+                        selected[0] = true;
+                        value.to_string()
+                    }
+                    Some(
+                        SourceType::Spotify(Spotify::Playlist(Id { raw_id, .. }))
+                        | SourceType::Spotify(Spotify::Album(Id { raw_id, .. })),
+                    ) => {
+                        selected[1] = true;
+                        raw_id.clone()
+                    }
+                    Some(SourceType::Setlist(Id { raw_id, .. })) => {
+                        selected[2] = true;
+                        raw_id.clone()
+                    }
+                };
+                let onclick = ctx.link().callback(move |_| Msg::DeleteSource(i));
+                html! {
+                    <div class="row mb-1">
+                        <div class="col-4 col-sm-3 col-md-2">
+                            <select ref={source_ref} class="form-select">
+                                <option selected={selected[0]}>{"Custom"}</option>
+                                <option selected={selected[1]}>{"Spotify"}</option>
+                                <option selected={selected[2]}>{"Setlist"}</option>
+                            </select>
+                        </div>
+                        <input class="col-9 col-sm-7 col-md-8 col-form-label" value={value.clone()} ref={id}/>
+                        <div class="col-2">
+                            <button type="button" class="btn btn-danger" {onclick}>{"Delete"}</button>
+                        </div>
                     </div>
-                </div>
-            }
-        });
-        let new_source_html = new_sources.iter().enumerate().map(|(i, (source, id))| {
-            let onclick = ctx.link().callback(move |_| Msg::DeleteNewSource(i));
-            html! {
-                <div class="row mb-1">
-                    <div class="col-4 col-sm-3 col-md-2">
-                        <select ref={source} class="form-select">
-                            <option>{"Custom"}</option>
-                            <option>{"Spotify"}</option>
-                            <option>{"Setlist"}</option>
-                        </select>
-                    </div>
-                    <input class="col-9 col-sm-7 col-md-8 col-form-label" ref={id}/>
-                    <div class="col-2">
-                        <button type="button" class="btn btn-danger" {onclick}>{"Delete"}</button>
-                    </div>
-                </div>
-            }
-        });
+                }
+            });
         let checked = list.favorite;
         let add_source = ctx.link().callback(|_| Msg::AddSource);
         let save = ctx.link().callback(|_| Msg::Save);
@@ -98,7 +123,6 @@ impl Component for Edit {
                 <hr/>
                 <h4>{"Data Sources"}</h4>
                 {for source_html}
-                {for new_source_html}
                 <button type="button" class="btn btn-primary" onclick={add_source}>{"Add source"}</button>
                 <button type="button" class="btn btn-success" onclick={save} {disabled}>{"Save"}</button>
                 <div>
@@ -112,22 +136,17 @@ impl Component for Edit {
         match msg {
             Msg::None => false,
             Msg::AddSource => {
-                let (_, new_sources, _, _, _) = &mut self.state;
-                new_sources.push((NodeRef::default(), NodeRef::default()));
+                let (_, sources, _, _, _) = &mut self.state;
+                sources.push((NodeRef::default(), NodeRef::default(), None));
                 true
             }
             Msg::DeleteSource(i) => {
-                let (list, _, _, _, _) = &mut self.state;
-                list.sources.remove(i);
-                true
-            }
-            Msg::DeleteNewSource(i) => {
-                let (_, new_sources, _, _, _) = &mut self.state;
-                new_sources.remove(i);
+                let (_, sources, _, _, _) = &mut self.state;
+                sources.remove(i);
                 true
             }
             Msg::Save => {
-                let (list, new_refs, name_ref, external_ref, favorite_ref) = &mut self.state;
+                let (list, sources, name_ref, external_ref, favorite_ref) = &mut self.state;
                 if !matches!(list.mode, ListMode::External) {
                     list.name = name_ref.cast::<HtmlInputElement>().unwrap().value();
                 }
@@ -140,7 +159,8 @@ impl Component for Edit {
                     }
                 }
                 list.favorite = favorite_ref.cast::<HtmlInputElement>().unwrap().checked();
-                for (source, id) in new_refs {
+                list.sources.clear();
+                for (source, id, _) in sources {
                     let source = source.cast::<HtmlSelectElement>().unwrap().value();
                     let id = id.cast::<HtmlInputElement>().unwrap().value();
                     match &*source {
