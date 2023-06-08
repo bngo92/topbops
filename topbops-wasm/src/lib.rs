@@ -13,7 +13,9 @@ use topbops::{Id, ItemQuery, List, ListMode, Lists, Spotify};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{HtmlDocument, HtmlSelectElement, Request, RequestInit, RequestMode, Response};
+use web_sys::{
+    HtmlDocument, HtmlSelectElement, Request, RequestInit, RequestMode, Response, Window,
+};
 use yew::{html, Callback, Component, Context, Html, NodeRef, Properties};
 use yew_router::prelude::Link;
 use yew_router::scope_ext::RouterScopeExt;
@@ -611,6 +613,16 @@ async fn update_list(id: &str, list: List) -> Result<(), JsValue> {
     Ok(())
 }
 
+async fn delete_list(id: &str) -> Result<(), JsValue> {
+    let window = web_sys::window().expect("no global `window` exists");
+    let request = Request::new_with_str_and_init(
+        &format!("/api/lists/{}", id),
+        RequestInit::new().method("DELETE").mode(RequestMode::Cors),
+    )?;
+    JsFuture::from(window.fetch_with_request(&request)).await?;
+    Ok(())
+}
+
 async fn query_items(id: &str) -> Result<ItemQuery, JsValue> {
     let window = web_sys::window().expect("no global `window` exists");
     let request = query(&format!("/api/lists/{}/items", id), "GET").unwrap();
@@ -681,4 +693,8 @@ fn get_user() -> Option<String> {
         .filter_map(|c| c.trim().split_once('='))
         .collect();
     cookies.get("user").map(ToString::to_string)
+}
+
+fn window() -> Window {
+    web_sys::window().expect("no global `window` exists")
 }

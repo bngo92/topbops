@@ -1,6 +1,9 @@
 use topbops::{List, ListMode, Source, SourceType, Spotify};
 use web_sys::{HtmlInputElement, HtmlSelectElement};
 use yew::{html, Component, Context, Html, NodeRef, Properties};
+use yew_router::scope_ext::RouterScopeExt;
+
+use crate::Route;
 
 pub enum Msg {
     None,
@@ -8,6 +11,7 @@ pub enum Msg {
     DeleteSource(usize),
     DeleteNewSource(usize),
     Save,
+    Delete,
 }
 
 // TODO: need to refresh list after edit
@@ -71,6 +75,7 @@ impl Component for Edit {
         let checked = list.favorite;
         let add_source = ctx.link().callback(|_| Msg::AddSource);
         let save = ctx.link().callback(|_| Msg::Save);
+        let delete = ctx.link().callback(|_| Msg::Delete);
         html! {
             <div>
                 <h4>{"List Settings"}</h4>
@@ -96,6 +101,9 @@ impl Component for Edit {
                 {for new_source_html}
                 <button type="button" class="btn btn-primary" onclick={add_source}>{"Add source"}</button>
                 <button type="button" class="btn btn-success" onclick={save} {disabled}>{"Save"}</button>
+                <div>
+                    <button type="button" class="btn btn-danger" onclick={delete}>{"Delete list"}</button>
+                </div>
             </div>
         }
     }
@@ -176,6 +184,21 @@ impl Component for Edit {
                     crate::update_list(&list.id, list.clone()).await.unwrap();
                     Msg::None
                 });
+                false
+            }
+            Msg::Delete => {
+                let id = self.state.0.id.clone();
+                if crate::window()
+                    .confirm_with_message(&format!("Delete {id}?"))
+                    .unwrap()
+                {
+                    let navigator = ctx.link().navigator().unwrap();
+                    ctx.link().send_future(async move {
+                        crate::delete_list(&id).await.unwrap();
+                        navigator.push(&Route::Home);
+                        Msg::None
+                    });
+                }
                 false
             }
         }
