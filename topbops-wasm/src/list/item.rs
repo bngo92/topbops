@@ -109,7 +109,9 @@ impl Component for ListItems {
                             <p class="col-1"><strong>{"Hidden"}</strong></p>
                         </div>
                         <form>
-                            {for html}
+                            <div class="overflow-y-auto mb-3" style="max-height: 800px">
+                                {for html}
+                            </div>
                             <button type="button" class="btn btn-success" onclick={save} {disabled}>{"Save"}</button>
                         </form>
                         <hr/>
