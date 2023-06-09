@@ -1,7 +1,7 @@
 #![feature(iter_intersperse)]
 use crate::bootstrap::{Accordion, Collapse};
 use crate::edit::Edit;
-use crate::list::ListItems;
+use crate::list::item::ListItems;
 use crate::random::Match;
 use crate::search::Search;
 use crate::tournament::Tournament;
@@ -49,8 +49,8 @@ enum Route {
 
 fn switch(routes: Route) -> Html {
     match routes {
-        Route::Home => html! { <Home show_all_lists=false/> },
-        Route::Lists => html! { <Home show_all_lists=true/> },
+        Route::Home => html! { <Home/> },
+        Route::Lists => html! { <crate::list::Lists/> },
         Route::List { id } => html! { <ListComponent {id} view={ListView::Items}/> },
         Route::Edit { id } => html! { <ListComponent {id} view={ListView::Edit}/> },
         Route::Match { id } => html! { <Match {id}/> },
@@ -142,46 +142,31 @@ pub enum HomeMsg {
     ToggleHelp,
     Load(Vec<List>),
     Create,
-    Import,
-}
-
-#[derive(PartialEq, Properties)]
-pub struct HomeProps {
-    show_all_lists: bool,
 }
 
 pub struct Home {
     help_collapsed: bool,
     lists: Vec<List>,
     select_ref: NodeRef,
-    import_ref: NodeRef,
 }
 
 impl Component for Home {
     type Message = HomeMsg;
-    type Properties = HomeProps;
+    type Properties = ();
 
     fn create(ctx: &Context<Self>) -> Self {
         let select_ref = NodeRef::default();
-        ctx.link()
-            .send_future(Home::fetch_lists(!ctx.props().show_all_lists));
+        ctx.link().send_future(Home::fetch_lists());
         Home {
             help_collapsed: get_user().is_some(),
             lists: Vec::new(),
             select_ref,
-            import_ref: NodeRef::default(),
         }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         let disabled = get_user().is_none();
-        let default_import = if disabled {
-            "Not supported in demo"
-        } else {
-            "https://open.spotify.com/playlist/5MztFbRbMpyxbVYuOSfQV9?si=9db089ab25274efa"
-        };
         let create = ctx.link().callback(|_| HomeMsg::Create);
-        let import = ctx.link().callback(|_| HomeMsg::Import);
         html! {
           <div>
             <h1>{"Home"}</h1>
@@ -225,19 +210,6 @@ impl Component for Home {
             {for self.lists.iter().map(|l| html! {<Widget list={l.clone()} select_ref={self.select_ref.clone()}/>})}
             </div>
             <button type="button" class="btn btn-primary" onclick={create} {disabled}>{"Create List"}</button>
-            if ctx.props().show_all_lists {
-              <h1>{"My Spotify Playlists"}</h1>
-              <form>
-                <div class="row">
-                  <div class="col-12 col-md-8 col-lg-9 pt-1">
-                    <input ref={self.import_ref.clone()} type="text" class="col-12" value={default_import} {disabled}/>
-                  </div>
-                  <div class="col-2 col-lg-1 pe-2">
-                    <button type="button" class="col-12 btn btn-success" onclick={import} {disabled}>{"Save"}</button>
-                  </div>
-                </div>
-              </form>
-            }
           </div>
         }
     }
@@ -262,30 +234,7 @@ impl Component for Home {
                 });
                 false
             }
-            HomeMsg::Import => {
-                let input = self.import_ref.cast::<HtmlSelectElement>().unwrap().value();
-                // TODO: handle bad input
-                let (source, id) = match parse_spotify_source(input) {
-                    Some(Spotify::Playlist(id)) => ("spotify:playlist", id),
-                    Some(Spotify::Album(id)) => ("spotify:album", id),
-                    None => {
-                        return false;
-                    }
-                };
-                ctx.link().send_future(async move {
-                    import_list(source, &id.id).await.unwrap();
-                    Home::fetch_lists(false).await
-                });
-                false
-            }
         }
-    }
-
-    // Changing the favorite prop using BrowserRouter doesn't re-render so manually do it
-    fn changed(&mut self, ctx: &Context<Self>, _: &Self::Properties) -> bool {
-        ctx.link()
-            .send_future(Home::fetch_lists(!ctx.props().show_all_lists));
-        true
     }
 }
 
@@ -320,8 +269,8 @@ fn parse_setlist_source(input: String) -> Option<Id> {
 }
 
 impl Home {
-    async fn fetch_lists(favorite: bool) -> HomeMsg {
-        let lists = fetch_lists(favorite).await.unwrap();
+    async fn fetch_lists() -> HomeMsg {
+        let lists = fetch_lists(true).await.unwrap();
         HomeMsg::Load(lists)
     }
 }
