@@ -13,9 +13,12 @@ use futures::{StreamExt, TryStreamExt};
 use hyper::{Body, Client, Method, Request, StatusCode, Uri};
 use hyper_tls::HttpsConnector;
 use serde_json::{Map, Value};
-use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 use topbops::{ItemQuery, List, ListMode, Lists, Source, SourceType};
 use topbops_web::{
     cosmos::SessionClient,
@@ -769,7 +772,9 @@ async fn main() {
         .expect("SECRET_KEY is not base64");
 
     let session_store = CosmosStore { db };
-    let session_layer = SessionLayer::new(session_store.clone(), &secret).with_secure(false);
+    let session_layer = SessionLayer::new(session_store.clone(), &secret)
+        .with_secure(false)
+        .with_session_ttl(Some(Duration::from_secs(31536000)));
 
     let auth_layer = AuthLayer::new(session_store, &secret);
 
