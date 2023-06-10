@@ -626,9 +626,18 @@ async fn delete_list(id: &str) -> Result<(), JsValue> {
     Ok(())
 }
 
-async fn query_items(id: &str) -> Result<ItemQuery, JsValue> {
+async fn get_items(id: &str) -> Result<ItemQuery, JsValue> {
     let window = web_sys::window().expect("no global `window` exists");
     let request = query(&format!("/api/lists/{}/items", id), "GET").unwrap();
+    let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
+    let resp: Response = resp_value.dyn_into()?;
+    let json = JsFuture::from(resp.json()?).await?;
+    Ok(serde_wasm_bindgen::from_value(json).unwrap())
+}
+
+async fn query_items(id: &str) -> Result<ItemQuery, JsValue> {
+    let window = web_sys::window().expect("no global `window` exists");
+    let request = query(&format!("/api/lists/{}/query", id), "GET").unwrap();
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
     let json = JsFuture::from(resp.json()?).await?;

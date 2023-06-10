@@ -38,9 +38,6 @@ pub fn rewrite_list_query<'a>(
     } else {
         let i = query.find("FROM").unwrap();
         query.insert_str(i - 1, ", id ");
-        // TODO: need a first class way to get rating
-        query.insert_str(i - 1, ", rating ");
-        query.insert_str(i - 1, ", hidden ");
         for i in &list.items {
             map.insert(i.id.clone(), i);
         }

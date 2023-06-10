@@ -205,7 +205,7 @@ async fn get_list(
     Ok(Json(list))
 }
 
-async fn get_list_items(
+async fn get_list_query(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     auth: AuthContext,
@@ -244,6 +244,58 @@ async fn get_list_items(
                     topbops::Item {
                         values: iter.map(format_value).collect(),
                         metadata,
+                    }
+                })
+                .collect(),
+        }))
+    }
+}
+
+async fn get_list_items(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    auth: AuthContext,
+) -> Result<Json<ItemQuery>, Response> {
+    let user_id = get_user_or_demo_user(auth);
+    let list = get_list_doc(&state.client, &user_id, &id).await?;
+    if list.items.is_empty() {
+        Ok(Json(ItemQuery {
+            fields: Vec::new(),
+            items: Vec::new(),
+        }))
+    } else {
+        let query = String::from("SELECT c.id, c.name, c.hidden, c.rating FROM c WHERE c.user_id = @user_id AND ARRAY_CONTAINS(@ids, c.id)");
+        let items = state
+            .client
+            .query_documents(|db| {
+                db.collection_client("items")
+                    .query_documents(CosmosQuery::with_params(
+                        query,
+                        [
+                            Param::new(String::from("@user_id"), user_id.0.clone()),
+                            Param::new(
+                                String::from("@ids"),
+                                list.items.iter().cloned().map(|i| i.id).collect::<Vec<_>>(),
+                            ),
+                        ],
+                    ))
+            })
+            .await
+            .map_err(Error::from)?;
+        let map: HashMap<_, _> = items
+            .into_iter()
+            .map(|r: Map<String, Value>| (r["id"].as_str().expect("string id").to_owned(), r))
+            .collect();
+        Ok(Json(ItemQuery {
+            fields: Vec::new(),
+            items: list
+                .items
+                .into_iter()
+                .map(|i| {
+                    let iter = map[&i.id].values();
+                    topbops::Item {
+                        values: iter.map(format_value).collect(),
+                        metadata: Some(i),
                     }
                 })
                 .collect(),
@@ -785,6 +837,7 @@ async fn main() {
             get(get_list).put(update_list).delete(delete_list),
         )
         .route("/lists/:id/items", get(get_list_items))
+        .route("/lists/:id/query", get(get_list_query))
         .route("/items", get(find_items))
         .route("/", post(handle_action))
         .route("/login", get(login_handler))

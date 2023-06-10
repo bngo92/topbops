@@ -35,7 +35,7 @@ impl Component for ListItems {
     fn create(ctx: &Context<Self>) -> Self {
         let id = ctx.props().list.id.clone();
         ctx.link()
-            .send_future(async move { Msg::Load(crate::query_items(&id).await.unwrap()) });
+            .send_future(async move { Msg::Load(crate::get_items(&id).await.unwrap()) });
         ListItems {
             state: ListState::Fetching,
         }
