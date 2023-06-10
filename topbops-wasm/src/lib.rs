@@ -363,7 +363,7 @@ impl Component for Widget {
                         <button type="button" class="btn btn-success" onclick={go} {disabled}>{"View"}</button>
                     </div>
                     <div class="col-auto">
-                        <button type="button" class="btn btn-warning" onclick={compare} {disabled}>{"Compare"}</button>
+                        <button type="button" class="btn btn-success" onclick={compare} {disabled}>{"Compare"}</button>
                     </div>
                 </div>
             </div>

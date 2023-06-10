@@ -64,11 +64,11 @@ impl Component for Lists {
             <h1>{"My Spotify Playlists"}</h1>
             <form>
               <div class="row">
-                <div class="col-12 col-md-8 col-lg-9 pt-1">
-                  <input ref={self.import_ref.clone()} type="text" class="col-12" value={default_import} {disabled}/>
+                <div class="col-12 col-md-8 col-lg-9">
+                  <input ref={self.import_ref.clone()} type="text" class="w-100 h-100" value={default_import} {disabled}/>
                 </div>
                 <div class="col-2 col-lg-1 pe-2">
-                  <button type="button" class="col-12 btn btn-success" onclick={import} {disabled}>{"Save"}</button>
+                  <button type="button" class="btn btn-success" onclick={import} {disabled}>{"Save"}</button>
                 </div>
               </div>
             </form>

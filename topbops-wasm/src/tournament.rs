@@ -538,7 +538,7 @@ impl Tournament {
             <div>
                 {select}
                 <div class="row mt-4">
-                    <div class="col-6">
+                    <div class="col-auto">
                         <select ref={self.select_ref.clone()} class="form-select" onchange={ctx.link().callback(|_| Msg::SelectView)}>
                             <option selected={matches!(fields.view_state, ViewState::Tournament)}>{"Tournament View"}</option>
                             <option selected={matches!(fields.view_state, ViewState::List)}>{"List View"}</option>
@@ -586,7 +586,7 @@ fn tournament_bracket_view(
                     <div class="row" style={row_width.clone()}>
                     {for offsets[item.depth].clone()}
                         <div style={col_width.clone()}>
-                            <button type="button" class="btn btn-warning text-truncate w-100" style="height: 38px" {disabled} {onclick}>{title}</button>
+                            <button type="button" class="btn btn-success text-truncate w-100" style="height: 38px" {disabled} {onclick}>{title}</button>
                         </div>
                     </div>
                 }

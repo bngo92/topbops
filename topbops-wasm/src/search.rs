@@ -51,11 +51,11 @@ impl Component for Search {
         let search = ctx.link().callback(|_| Msg::Fetching);
         let (class, error) = if let Some(error) = &self.error {
             (
-                "col-12 is-invalid",
+                "w-100 h-100 is-invalid",
                 Some(html! {<div class="invalid-feedback">{error}</div>}),
             )
         } else {
-            ("col-12", None)
+            ("w-100 h-100", None)
         };
         let onkeydown = ctx.link().callback(|event: KeyboardEvent| {
             if event.key_code() == 13 {
@@ -69,12 +69,12 @@ impl Component for Search {
             <div>
                 <form {onkeydown}>
                     <div class="row">
-                        <div class="col-12 col-md-10 col-xl-11 pt-1">
+                        <div class="col-12 col-md-10 col-xl-11">
                             <input ref={self.search_ref.clone()} type="text" {class} placeholder={default_search}/>
                             {for error}
                         </div>
                         <div class="col-3 col-sm-2 col-md-2 col-xl-1 pe-2">
-                            <button type="button" class="col-12 btn btn-success" onclick={search}>{"Search"}</button>
+                            <button type="button" class="btn btn-success" onclick={search}>{"Search"}</button>
                         </div>
                     </div>
                 </form>

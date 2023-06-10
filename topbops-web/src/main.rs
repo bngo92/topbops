@@ -806,6 +806,10 @@ async fn main() {
             "/topbops_wasm_bg.wasm",
             ServeFile::new("../topbops-wasm/pkg/topbops_wasm_bg.wasm"),
         )
+        .route_service(
+            "/bootstrap.min.css",
+            ServeFile::new("../topbops-wasm/www/bootstrap.min.css"),
+        )
         .fallback_service(ServeFile::new("../topbops-wasm/www/index.html"))
     };
 

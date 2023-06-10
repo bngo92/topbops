@@ -90,8 +90,8 @@ impl Component for Edit {
                                 <option selected={selected[2]}>{"Setlist"}</option>
                             </select>
                         </div>
-                        <input class="col-9 col-sm-7 col-md-8 col-form-label" value={value.clone()} ref={id}/>
-                        <div class="col-2">
+                        <input class="col-9 col-sm-7 col-md-8" value={value.clone()} ref={id}/>
+                        <div class="col-auto">
                             <button type="button" class="btn btn-danger" {onclick}>{"Delete"}</button>
                         </div>
                     </div>
@@ -122,11 +122,21 @@ impl Component for Edit {
                 </form>
                 <hr/>
                 <h4>{"Data Sources"}</h4>
-                {for source_html}
-                <button type="button" class="btn btn-primary" onclick={add_source}>{"Add source"}</button>
-                <button type="button" class="btn btn-success" onclick={save} {disabled}>{"Save"}</button>
+                <div class="mb-3">
+                    {for source_html}
+                </div>
+                <div class="row mb-3">
+                    <div class="col-auto">
+                        <button type="button" class="btn btn-primary" onclick={add_source}>{"Add source"}</button>
+                    </div>
+                    <div class="col-auto">
+                        <button type="button" class="btn btn-success" onclick={save} {disabled}>{"Save all settings"}</button>
+                    </div>
+                </div>
+                <hr/>
+                <h4>{"Delete List"}</h4>
                 <div>
-                    <button type="button" class="btn btn-danger" onclick={delete}>{"Delete list"}</button>
+                    <button type="button" class="btn btn-danger" onclick={delete}>{"Delete"}</button>
                 </div>
             </div>
         }
