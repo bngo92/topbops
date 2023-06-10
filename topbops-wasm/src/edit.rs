@@ -24,6 +24,7 @@ pub struct Edit {
     sources: Vec<(NodeRef, NodeRef, Option<SourceType>)>,
     name_ref: NodeRef,
     external_ref: NodeRef,
+    query_ref: NodeRef,
     favorite_ref: NodeRef,
 }
 
@@ -43,6 +44,7 @@ impl Component for Edit {
             sources,
             name_ref: NodeRef::default(),
             external_ref: NodeRef::default(),
+            query_ref: NodeRef::default(),
             favorite_ref: NodeRef::default(),
         }
     }
@@ -92,6 +94,11 @@ impl Component for Edit {
                     </div>
                 }
             });
+        let mode = match self.list.mode {
+            ListMode::User(_) => "User",
+            ListMode::External => "External",
+            ListMode::View => "View",
+        };
         let checked = self.list.favorite;
         let add_source = ctx.link().callback(|_| Msg::AddSource);
         let save = ctx.link().callback(|_| Msg::Save);
@@ -100,9 +107,13 @@ impl Component for Edit {
             <div>
                 <h4>{"List Settings"}</h4>
                 <form>
-                    <div class="form-floating mb-3 col-md-8">
-                        <input class="form-control" id="name" value={Some(self.list.name.clone())} ref={&self.name_ref} placeholder="Name"/>
+                    <div class="form-floating mb-2 col-md-8">
+                        <input type="text" readonly={matches!(self.list.mode, ListMode::External)} class="form-control-plaintext" id="name" value={self.list.name.clone()} ref={&self.name_ref} placeholder=""/>
                         <label for="name">{"List name"}</label>
+                    </div>
+                    <div class="form-floating mb-2 col-md-8">
+                        <input type="text" readonly=true class="form-control-plaintext" id="mode" value={mode} placeholder=""/>
+                        <label for="mode">{"List mode"}</label>
                     </div>
                     if let ListMode::User(external_id) = &self.list.mode {
                         <div class="form-floating mb-3 col-md-8">
@@ -110,6 +121,10 @@ impl Component for Edit {
                             <label for="externalId">{"External ID"}</label>
                         </div>
                     }
+                    <div class="form-floating mb-3 col-md-8">
+                        <input class="form-control" id="query" value={self.list.query.clone()} ref={&self.query_ref} placeholder="External ID"/>
+                        <label for="query">{"Query"}</label>
+                    </div>
                     <div class="form-check">
                         <label class="form-check-label" for="favorite">{"Favorite"}</label>
                         <input ref={&self.favorite_ref} class="form-check-input" type="checkbox" id="favorite" {checked}/>
@@ -165,6 +180,7 @@ impl Component for Edit {
                         *external_id = Some(id);
                     }
                 }
+                self.list.query = self.query_ref.cast::<HtmlInputElement>().unwrap().value();
                 self.list.favorite = self
                     .favorite_ref
                     .cast::<HtmlInputElement>()
