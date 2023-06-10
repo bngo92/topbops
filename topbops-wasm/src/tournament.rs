@@ -413,7 +413,7 @@ impl Component for Tournament {
                                 for (item, rank) in &mut list.items.iter_mut().zip(updated_ranks) {
                                     item.rank = rank;
                                 }
-                                crate::update_list(&id, list).await.unwrap();
+                                crate::update_list(&list).await.unwrap();
                             }
                             Vec::new()
                         });

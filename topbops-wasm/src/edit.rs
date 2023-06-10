@@ -20,13 +20,11 @@ pub struct EditProps {
 }
 
 pub struct Edit {
-    state: (
-        List,
-        Vec<(NodeRef, NodeRef, Option<SourceType>)>,
-        NodeRef,
-        NodeRef,
-        NodeRef,
-    ),
+    list: List,
+    sources: Vec<(NodeRef, NodeRef, Option<SourceType>)>,
+    name_ref: NodeRef,
+    external_ref: NodeRef,
+    favorite_ref: NodeRef,
 }
 
 impl Component for Edit {
@@ -41,20 +39,17 @@ impl Component for Edit {
             .map(|s| (NodeRef::default(), NodeRef::default(), Some(s.source_type)))
             .collect();
         Edit {
-            state: (
-                list,
-                sources,
-                NodeRef::default(),
-                NodeRef::default(),
-                NodeRef::default(),
-            ),
+            list,
+            sources,
+            name_ref: NodeRef::default(),
+            external_ref: NodeRef::default(),
+            favorite_ref: NodeRef::default(),
         }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         let disabled = crate::get_user().is_none();
-        let (list, sources, name_ref, external_ref, favorite_ref) = &self.state;
-        let source_html = sources
+        let source_html = self.sources
             .iter()
             .enumerate()
             .map(|(i, (source_ref, id, source))| {
@@ -90,14 +85,14 @@ impl Component for Edit {
                                 <option selected={selected[2]}>{"Setlist"}</option>
                             </select>
                         </div>
-                        <input class="col-9 col-sm-7 col-md-8" value={value.clone()} ref={id}/>
+                        <input class="col-9 col-sm-7 col-md-8" {value} ref={id}/>
                         <div class="col-auto">
                             <button type="button" class="btn btn-danger" {onclick}>{"Delete"}</button>
                         </div>
                     </div>
                 }
             });
-        let checked = list.favorite;
+        let checked = self.list.favorite;
         let add_source = ctx.link().callback(|_| Msg::AddSource);
         let save = ctx.link().callback(|_| Msg::Save);
         let delete = ctx.link().callback(|_| Msg::Delete);
@@ -106,18 +101,18 @@ impl Component for Edit {
                 <h4>{"List Settings"}</h4>
                 <form>
                     <div class="form-floating mb-3 col-md-8">
-                        <input class="form-control" id="name" value={Some(list.name.clone())} ref={name_ref.clone()} placeholder="Name"/>
+                        <input class="form-control" id="name" value={Some(self.list.name.clone())} ref={&self.name_ref} placeholder="Name"/>
                         <label for="name">{"List name"}</label>
                     </div>
-                    if let ListMode::User(external_id) = &list.mode {
+                    if let ListMode::User(external_id) = &self.list.mode {
                         <div class="form-floating mb-3 col-md-8">
-                            <input class="form-control" id="externalId" value={external_id.as_ref().map(|id| id.raw_id.clone())} ref={external_ref.clone()} placeholder="External ID"/>
+                            <input class="form-control" id="externalId" value={external_id.as_ref().map(|id| id.raw_id.clone())} ref={&self.external_ref} placeholder="External ID"/>
                             <label for="externalId">{"External ID"}</label>
                         </div>
                     }
                     <div class="form-check">
                         <label class="form-check-label" for="favorite">{"Favorite"}</label>
-                        <input ref={favorite_ref} class="form-check-input" type="checkbox" id="favorite" {checked}/>
+                        <input ref={&self.favorite_ref} class="form-check-input" type="checkbox" id="favorite" {checked}/>
                     </div>
                 </form>
                 <hr/>
@@ -146,37 +141,43 @@ impl Component for Edit {
         match msg {
             Msg::None => false,
             Msg::AddSource => {
-                let (_, sources, _, _, _) = &mut self.state;
-                sources.push((NodeRef::default(), NodeRef::default(), None));
+                self.sources
+                    .push((NodeRef::default(), NodeRef::default(), None));
                 true
             }
             Msg::DeleteSource(i) => {
-                let (_, sources, _, _, _) = &mut self.state;
-                sources.remove(i);
+                self.sources.remove(i);
                 true
             }
             Msg::Save => {
-                let (list, sources, name_ref, external_ref, favorite_ref) = &mut self.state;
-                if !matches!(list.mode, ListMode::External) {
-                    list.name = name_ref.cast::<HtmlInputElement>().unwrap().value();
+                if !matches!(self.list.mode, ListMode::External) {
+                    self.list.name = self.name_ref.cast::<HtmlInputElement>().unwrap().value();
                 }
-                if let ListMode::User(external_id) = &mut list.mode {
-                    let id = external_ref.cast::<HtmlInputElement>().unwrap().value();
+                if let ListMode::User(external_id) = &mut self.list.mode {
+                    let id = self
+                        .external_ref
+                        .cast::<HtmlInputElement>()
+                        .unwrap()
+                        .value();
                     if id.is_empty() {
                         *external_id = None;
                     } else if let Some(Spotify::Playlist(id)) = crate::parse_spotify_source(id) {
                         *external_id = Some(id);
                     }
                 }
-                list.favorite = favorite_ref.cast::<HtmlInputElement>().unwrap().checked();
-                list.sources.clear();
-                for (source, id, _) in sources {
+                self.list.favorite = self
+                    .favorite_ref
+                    .cast::<HtmlInputElement>()
+                    .unwrap()
+                    .checked();
+                self.list.sources.clear();
+                for (source, id, _) in &self.sources {
                     let source = source.cast::<HtmlSelectElement>().unwrap().value();
                     let id = id.cast::<HtmlInputElement>().unwrap().value();
                     match &*source {
                         "Spotify" => {
                             if let Some(source) = crate::parse_spotify_source(id) {
-                                list.sources.push(Source {
+                                self.list.sources.push(Source {
                                     source_type: SourceType::Spotify(source),
                                     name: String::new(),
                                 });
@@ -186,7 +187,7 @@ impl Component for Edit {
                         }
                         "Custom" => {
                             if let Ok(json) = serde_json::from_str(&id) {
-                                list.sources.push(Source {
+                                self.list.sources.push(Source {
                                     source_type: SourceType::Custom(json),
                                     name: String::new(),
                                 });
@@ -196,7 +197,7 @@ impl Component for Edit {
                         }
                         "Setlist" => {
                             if let Some(id) = crate::parse_setlist_source(id) {
-                                list.sources.push(Source {
+                                self.list.sources.push(Source {
                                     source_type: SourceType::Setlist(id),
                                     name: String::new(),
                                 });
@@ -209,15 +210,15 @@ impl Component for Edit {
                         }
                     };
                 }
-                let list = list.clone();
+                let list = self.list.clone();
                 ctx.link().send_future(async move {
-                    crate::update_list(&list.id, list.clone()).await.unwrap();
+                    crate::update_list(&list).await.unwrap();
                     Msg::None
                 });
                 false
             }
             Msg::Delete => {
-                let id = self.state.0.id.clone();
+                let id = self.list.id.clone();
                 if crate::window()
                     .confirm_with_message(&format!("Delete {id}?"))
                     .unwrap()

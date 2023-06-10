@@ -600,10 +600,10 @@ async fn create_list() -> Result<List, JsValue> {
     Ok(serde_wasm_bindgen::from_value(json).unwrap())
 }
 
-async fn update_list(id: &str, list: List) -> Result<(), JsValue> {
+async fn update_list(list: &List) -> Result<(), JsValue> {
     let window = web_sys::window().expect("no global `window` exists");
     let request = Request::new_with_str_and_init(
-        &format!("/api/lists/{}", id),
+        &format!("/api/lists/{}", list.id),
         RequestInit::new()
             .method("PUT")
             .mode(RequestMode::Cors)
