@@ -40,7 +40,7 @@ impl Component for Lists {
                 <div class="col-12 col-md-6 mb-4">
                     <div class="card">
                         <div class="card-body">
-                            <Link<Route> to={Route::List{id: l.id.clone()}}>{&l.name}</Link<Route>>
+                            <Link<Route> to={Route::View{id: l.id.clone()}}>{&l.name}</Link<Route>>
                         </div>
                     </div>
                 </div>

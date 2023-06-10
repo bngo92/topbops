@@ -36,6 +36,8 @@ enum Route {
     #[at("/lists")]
     Lists,
     #[at("/lists/:id")]
+    View { id: String },
+    #[at("/lists/:id/items")]
     List { id: String },
     #[at("/lists/:id/edit")]
     Edit { id: String },
@@ -51,8 +53,9 @@ fn switch(routes: Route) -> Html {
     match routes {
         Route::Home => html! { <Home/> },
         Route::Lists => html! { <crate::list::Lists/> },
-        Route::List { id } => html! { <ListComponent {id} view={ListView::Items}/> },
-        Route::Edit { id } => html! { <ListComponent {id} view={ListView::Edit}/> },
+        Route::List { id } => html! { <ListComponent {id} view={ListTab::Items}/> },
+        Route::View { id } => html! { <ListComponent {id} view={ListTab::View}/> },
+        Route::Edit { id } => html! { <ListComponent {id} view={ListTab::Edit}/> },
         Route::Match { id } => html! { <Match {id}/> },
         Route::Tournament { id } => html! {
             <Tournament {id}/>
@@ -360,7 +363,7 @@ impl Component for Widget {
                 </Accordion>
                 <div class="row mb-3">
                     <div class="col-auto">
-                        <button type="button" class="btn btn-success" onclick={go} {disabled}>{"View"}</button>
+                        <button type="button" class="btn btn-success" onclick={go} {disabled}>{"Items"}</button>
                     </div>
                     <div class="col-auto">
                         <button type="button" class="btn btn-success" onclick={compare} {disabled}>{"Compare"}</button>
@@ -390,6 +393,49 @@ impl Component for Widget {
                 true
             }
         }
+    }
+}
+
+enum ListViewMsg {
+    Success(ItemQuery),
+}
+
+#[derive(PartialEq, Properties)]
+pub struct ListViewProps {
+    id: String,
+}
+
+struct ListView {
+    query: Option<ItemQuery>,
+}
+
+impl Component for ListView {
+    type Message = ListViewMsg;
+    type Properties = ListViewProps;
+
+    fn create(ctx: &Context<Self>) -> Self {
+        let id = ctx.props().id.clone();
+        ctx.link()
+            .send_future(async move { ListViewMsg::Success(query_items(&id).await.unwrap()) });
+        Self { query: None }
+    }
+
+    fn view(&self, _: &Context<Self>) -> Html {
+        let Some(query) = &self.query else { return html! {}; };
+        crate::base::table_view(
+            &query.fields.iter().map(String::as_str).collect::<Vec<_>>(),
+            query
+                .items
+                .iter()
+                .zip(1..)
+                .map(|(item, i)| Some((i, Cow::from(&item.values)))),
+        )
+    }
+
+    fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
+        let ListViewMsg::Success(query) = msg;
+        self.query = Some(query);
+        true
     }
 }
 
@@ -432,7 +478,7 @@ pub enum Msg {
 
 #[derive(Eq, PartialEq, Properties)]
 pub struct ListProps {
-    pub view: ListView,
+    pub view: ListTab,
     pub id: String,
 }
 
@@ -457,19 +503,23 @@ impl Component for ListComponent {
         match &self.state {
             ListState::Fetching => html! {},
             ListState::Success(list) => {
-                let mut tabs = ["nav-link"; 2];
+                let mut tabs = ["nav-link"; 3];
                 let active = "nav-link active";
                 match ctx.props().view {
-                    ListView::Items => {
+                    ListTab::View => {
                         tabs[0] = active;
                     }
-                    ListView::Edit => {
+                    ListTab::Items => {
                         tabs[1] = active;
+                    }
+                    ListTab::Edit => {
+                        tabs[2] = active;
                     }
                 }
                 let view = match ctx.props().view {
-                    ListView::Items => html! { <ListItems list={list.clone()}/> },
-                    ListView::Edit => html! { <Edit list={list.clone()}/> },
+                    ListTab::View => html! { <ListView id={list.id.clone()}/> },
+                    ListTab::Items => html! { <ListItems list={list.clone()}/> },
+                    ListTab::Edit => html! { <Edit list={list.clone()}/> },
                 };
                 html! {
                     <div class="row">
@@ -477,10 +527,13 @@ impl Component for ListComponent {
                             <h2 class="col-11">{&list.name}</h2>
                             <ul class="nav nav-tabs mb-3">
                                 <li class="nav-item">
-                                    <Link<Route> classes={tabs[0]} to={Route::List{id: list.id.clone()}}>{"Items"}</Link<Route>>
+                                    <Link<Route> classes={tabs[0]} to={Route::View{id: list.id.clone()}}>{"View"}</Link<Route>>
                                 </li>
                                 <li class="nav-item">
-                                    <Link<Route> classes={tabs[1]} to={Route::Edit{id: list.id.clone()}}>{"Settings"}</Link<Route>>
+                                    <Link<Route> classes={tabs[1]} to={Route::List{id: list.id.clone()}}>{"Items"}</Link<Route>>
+                                </li>
+                                <li class="nav-item">
+                                    <Link<Route> classes={tabs[2]} to={Route::Edit{id: list.id.clone()}}>{"Settings"}</Link<Route>>
                                 </li>
                             </ul>
                             {view}
@@ -503,7 +556,8 @@ impl Component for ListComponent {
 }
 
 #[derive(Eq, PartialEq)]
-pub enum ListView {
+pub enum ListTab {
+    View,
     Items,
     Edit,
 }
