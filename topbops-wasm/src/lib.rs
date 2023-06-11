@@ -94,7 +94,7 @@ impl Component for App {
                 <BrowserRouter>
                     <nav class="navbar navbar-expand navbar-dark bg-dark">
                         <div class="container-lg">
-                            <Link<Route> classes="navbar-brand" to={Route::Home}>{"Bops to the Top"}</Link<Route>>
+                            <Link<Route> classes="navbar-brand" to={Route::Home}>{"ZeroFlops"}</Link<Route>>
                             <ul class="navbar-nav me-auto">
                                 <li class="nav-item">
                                     <Link<Route> classes={search} to={Route::Lists}>{"Lists"}</Link<Route>>
