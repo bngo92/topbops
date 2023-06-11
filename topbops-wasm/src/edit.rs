@@ -108,7 +108,11 @@ impl Component for Edit {
                 <h4>{"List Settings"}</h4>
                 <form>
                     <div class="form-floating mb-2 col-md-8">
-                        <input type="text" readonly={matches!(self.list.mode, ListMode::External)} class="form-control-plaintext" id="name" value={self.list.name.clone()} ref={&self.name_ref} placeholder=""/>
+                        if let ListMode::External = &self.list.mode {
+                            <input type="text" readonly=true class="form-control-plaintext" id="name" value={self.list.name.clone()} placeholder=""/>
+                        } else {
+                            <input type="text" class="form-control" id="name" value={self.list.name.clone()} ref={&self.name_ref} placeholder=""/>
+                        }
                         <label for="name">{"List name"}</label>
                     </div>
                     <div class="form-floating mb-2 col-md-8">
