@@ -15,10 +15,7 @@ use hyper_tls::HttpsConnector;
 use serde_json::{Map, Value};
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
-use std::{
-    collections::{HashMap, HashSet},
-    time::Duration,
-};
+use std::{collections::HashMap, time::Duration};
 use topbops::{ItemQuery, List, ListMode, Lists, Source, SourceType};
 use topbops_web::{
     cosmos::SessionClient,
@@ -212,30 +209,47 @@ async fn get_list_query(
 ) -> Result<Json<ItemQuery>, Response> {
     let user_id = get_user_or_demo_user(auth);
     let list = get_list_doc(&state.client, &user_id, &id).await?;
+    Ok(Json(
+        get_list_query_impl(&state.client, &user_id, list).await?,
+    ))
+}
+
+async fn get_list_query_impl(
+    client: &SessionClient,
+    user_id: &UserId,
+    list: List,
+) -> Result<ItemQuery, Error> {
     if list.items.is_empty() {
-        Ok(Json(ItemQuery {
+        Ok(ItemQuery {
             fields: Vec::new(),
             items: Vec::new(),
-        }))
+        })
     } else {
-        let (query, fields, map, ids) = query::rewrite_list_query(&list, &user_id)?;
-        let items: HashMap<_, _> = state
-            .client
+        let (query, fields, map, ids) = query::rewrite_list_query(&list, user_id)?;
+        let mut items: Vec<_> = client
             .query_documents(|db| {
                 db.collection_client("items")
                     .query_documents(CosmosQuery::new(query.to_string()))
             })
             .await
-            .map_err(Error::from)?
-            .into_iter()
-            .map(|r: Map<String, Value>| (r["id"].to_string(), r))
-            .collect();
-        Ok(Json(ItemQuery {
-            fields,
-            items: ids
+            .map_err(Error::from)?;
+        // Use list item order if an ordering wasn't provided
+        if query.order_by.is_empty() {
+            let mut item_metadata: HashMap<_, _> = items
                 .into_iter()
-                .map(|id| {
-                    let mut iter = items[&id].values();
+                .map(|r: Map<String, Value>| (r["id"].to_string(), r))
+                .collect();
+            items = ids
+                .into_iter()
+                .filter_map(|id| item_metadata.remove(&id))
+                .collect();
+        };
+        Ok(ItemQuery {
+            fields,
+            items: items
+                .into_iter()
+                .map(|r| {
+                    let mut iter = r.values();
                     let metadata = if map.is_empty() {
                         None
                     } else {
@@ -247,7 +261,7 @@ async fn get_list_query(
                     }
                 })
                 .collect(),
-        }))
+        })
     }
 }
 
@@ -554,27 +568,16 @@ async fn handle_stats_update(
 }
 
 async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<StatusCode, Error> {
-    let list = get_list_doc(&state.client, &UserId(user.user_id.clone()), id).await?;
+    let user_id = UserId(user.user_id.clone());
+    let list = get_list_doc(&state.client, &user_id, id).await?;
     // TODO: create new playlist if one doesn't exist
     let (_, external_id) = get_unique_source(&list)?;
-    let ids: Vec<_> = list.items.into_iter().map(|i| i.id).collect();
-    let query = String::from("SELECT VALUE c.id FROM c WHERE c.user_id = @user_id AND ARRAY_CONTAINS(@ids, c.id) AND c.hidden = true");
-    let hidden: HashSet<_> = state
-        .client
-        .query_documents::<_, String>(|db| {
-            db.collection_client("items")
-                .query_documents(CosmosQuery::with_params(
-                    query,
-                    [
-                        Param::new(String::from("@user_id"), user.user_id.clone()),
-                        Param::new(String::from("@ids"), ids.clone()),
-                    ],
-                ))
-        })
+    let ids: Vec<_> = get_list_query_impl(&state.client, &user_id, list)
         .await?
+        .items
         .into_iter()
+        .map(|i| i.metadata.unwrap().id)
         .collect();
-    let ids: Vec<_> = ids.into_iter().filter(|id| !hidden.contains(id)).collect();
     let access_token = source::spotify::get_access_token(&state.client, user).await?;
     source::spotify::update_list(access_token, &external_id, &ids.join(",")).await?;
     Ok(StatusCode::OK)

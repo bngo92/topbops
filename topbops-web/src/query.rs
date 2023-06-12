@@ -32,26 +32,43 @@ pub fn rewrite_list_query<'a>(
         .iter()
         .map(|i| format!("\"{}\"", i.id))
         .collect::<Vec<_>>();
-    let mut query = format!("{} WHERE c.id IN ({})", list.query, ids.join(","));
-    let query = if let ListMode::View = list.mode {
-        &list.query
+    let (query, _) = if let ListMode::View = list.mode {
+        rewrite_query(&list.query, user_id)?
     } else {
+        let mut query = list.query.clone();
         let i = query.find("FROM").unwrap();
         query.insert_str(i - 1, ", id ");
         for i in &list.items {
             map.insert(i.id.clone(), i);
         }
-        &query
+        rewrite_query_impl(&query, user_id, Some(id_filter(&ids)))?
     };
-    let (query, _) = rewrite_query_impl(query, user_id)?;
     Ok((query, fields, map, ids))
 }
 
-pub fn rewrite_query(s: &str, user_id: &UserId) -> Result<(Query, Vec<String>), Error> {
-    rewrite_query_impl(s, user_id)
+fn id_filter(ids: &[String]) -> Expr {
+    Expr::InList {
+        expr: Box::new(Expr::CompoundIdentifier(vec![
+            Ident::new("c"),
+            Ident::new("id"),
+        ])),
+        list: ids
+            .iter()
+            .map(|id| Expr::Identifier(Ident::new(id)))
+            .collect(),
+        negated: false,
+    }
 }
 
-fn rewrite_query_impl(s: &str, user_id: &UserId) -> Result<(Query, Vec<String>), Error> {
+pub fn rewrite_query(s: &str, user_id: &UserId) -> Result<(Query, Vec<String>), Error> {
+    rewrite_query_impl(s, user_id, None)
+}
+
+fn rewrite_query_impl(
+    s: &str,
+    user_id: &UserId,
+    filter: Option<Expr>,
+) -> Result<(Query, Vec<String>), Error> {
     let mut query = parse_select(s)?;
     let SetExpr::Select(select) = &mut query.body else { return Err(Error::client_error("Only SELECT queries are supported")) };
 
@@ -88,8 +105,21 @@ fn rewrite_query_impl(s: &str, user_id: &UserId) -> Result<(Query, Vec<String>),
         op: BinaryOperator::Eq,
         right: Box::new(Expr::Identifier(Ident::new(format!("\"{}\"", user_id.0)))),
     };
-    select.selection = if let Some(mut selection) = select.selection.take() {
-        rewrite_expr(&mut selection);
+    let mut sanitized_select = select.selection.take();
+    if let Some(selection) = &mut sanitized_select {
+        rewrite_expr(selection);
+    }
+    let selection = match (filter, sanitized_select) {
+        (None, None) => None,
+        (None, Some(sanitized_select)) => Some(sanitized_select),
+        (Some(filter), None) => Some(filter),
+        (Some(filter), Some(sanitized_select)) => Some(Expr::BinaryOp {
+            left: Box::new(filter),
+            op: BinaryOperator::And,
+            right: Box::new(sanitized_select),
+        }),
+    };
+    select.selection = if let Some(selection) = selection {
         Some(Expr::BinaryOp {
             left: Box::new(required_user_id),
             op: BinaryOperator::And,
@@ -168,6 +198,17 @@ mod test {
         super::rewrite_query(query, &UserId(String::from("demo")))
     }
 
+    fn rewrite_query_with_id_filter(
+        query: &str,
+        ids: &[String],
+    ) -> Result<(Query, Vec<String>), Error> {
+        super::rewrite_query_impl(
+            query,
+            &UserId(String::from("demo")),
+            Some(super::id_filter(ids)),
+        )
+    }
+
     #[test]
     fn test_select() {
         let (query, column_names) = rewrite_query("SELECT name, user_score FROM tracks").unwrap();
@@ -187,6 +228,20 @@ mod test {
              "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.user_score IN (1500)"),
         ] {
             let (query, column_names) = rewrite_query(input).unwrap();
+            assert_eq!(query.to_string(), expected);
+            assert_eq!(column_names, vec!["name", "user_score"]);
+        }
+    }
+
+    #[test]
+    fn test_id_filter() {
+        for (input, expected) in [
+            ("SELECT name, user_score FROM tracks WHERE user_score >= 1500",
+             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.id IN (\"1\", \"2\", \"3\") AND c.user_score >= 1500"),
+            ("SELECT name, user_score FROM tracks WHERE user_score IN (1500)",
+             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.id IN (\"1\", \"2\", \"3\") AND c.user_score IN (1500)"),
+        ] {
+            let (query, column_names) = rewrite_query_with_id_filter(input, &["\"1\"".into(), "\"2\"".into(), "\"3\"".into()]).unwrap();
             assert_eq!(query.to_string(), expected);
             assert_eq!(column_names, vec!["name", "user_score"]);
         }
