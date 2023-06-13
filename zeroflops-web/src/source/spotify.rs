@@ -97,9 +97,12 @@ pub async fn get_playlist(
 
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = format!("https://api.spotify.com/v1/playlists/{}", playlist_id.id)
-        .parse()
-        .unwrap();
+    let uri: Uri = format!(
+        "https://api.spotify.com/v1/playlists/{}?limit=50",
+        playlist_id.id
+    )
+    .parse()
+    .unwrap();
     let resp = client
         .request(
             Request::builder()
@@ -209,9 +212,12 @@ pub async fn get_album(user_id: &UserId, id: Id) -> Result<(Source, Vec<crate::I
 
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = format!("https://api.spotify.com/v1/albums/{}/tracks", id.id)
-        .parse()
-        .unwrap();
+    let uri: Uri = format!(
+        "https://api.spotify.com/v1/albums/{}/tracks?limit=50",
+        id.id
+    )
+    .parse()
+    .unwrap();
     let resp = client
         .request(
             Request::builder()
