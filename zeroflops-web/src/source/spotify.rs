@@ -250,7 +250,7 @@ pub async fn get_album(user_id: &UserId, id: Id) -> Result<(Source, Vec<crate::I
                 Ok::<_, Error>(new_spotify_item(track, user_id))
             }),
     )
-    .buffered(5)
+    .buffered(1)
     .try_collect()
     .await?;
     Ok((
@@ -285,12 +285,19 @@ pub async fn import_album(user_id: &UserId, id: String) -> Result<(List, Vec<cra
     Ok((list, items))
 }
 
-pub async fn update_list(access_token: &str, playlist_id: &str, ids: &str) -> Result<(), Error> {
+pub async fn update_list(
+    access_token: &str,
+    playlist_id: &str,
+    ids: &[String],
+) -> Result<(), Error> {
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
+    let mut chunks = ids.chunks(100);
     let uri: Uri = format!(
         "https://api.spotify.com/v1/playlists/{}/tracks?uris={}",
-        playlist_id, ids
+        playlist_id,
+        // Clear playlist if empty
+        chunks.next().unwrap_or(&[]).join(",")
     )
     .parse()
     .unwrap();
@@ -312,10 +319,37 @@ pub async fn update_list(access_token: &str, playlist_id: &str, ids: &str) -> Re
             String::from_utf8(got.to_vec())
                 .unwrap_or_else(|_| "Spotify response should be ASCII".to_owned())
         );
-        Err(Error::internal_error(error))
-    } else {
-        Ok(())
+        return Err(Error::internal_error(error));
     }
+    for ids in chunks {
+        let uri: Uri = format!(
+            "https://api.spotify.com/v1/playlists/{}/tracks?uris={}",
+            playlist_id,
+            ids.join(",")
+        )
+        .parse()
+        .unwrap();
+        let resp = client
+            .request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(uri)
+                    .header("Authorization", format!("Bearer {}", access_token))
+                    .header("Content-Length", "0")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        if resp.status().is_client_error() || resp.status().is_server_error() {
+            let got = hyper::body::to_bytes(resp.into_body()).await?;
+            let error = format!(
+                "Spotify update playlist items error: {}",
+                String::from_utf8(got.to_vec())
+                    .unwrap_or_else(|_| "Spotify response should be ASCII".to_owned())
+            );
+            return Err(Error::internal_error(error));
+        }
+    }
+    Ok(())
 }
 
 pub async fn get_token() -> Result<crate::Token, Error> {

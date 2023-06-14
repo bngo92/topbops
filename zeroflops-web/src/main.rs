@@ -586,7 +586,7 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
         .map(|i| i.metadata.unwrap().id)
         .collect();
     let access_token = source::spotify::get_access_token(&state.client, user).await?;
-    source::spotify::update_list(access_token, &external_id, &ids.join(",")).await?;
+    source::spotify::update_list(access_token, &external_id, &ids).await?;
     Ok(StatusCode::OK)
 }
 
