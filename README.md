@@ -1,9 +1,9 @@
-# topbops
-## topbops-web
+# zeroflops
+## zeroflops-web
 ```
 COSMOS_MASTER_KEY= COSMOS_ACCOUNT= SPOTIFY_TOKEN= cargo +nightly run --features dev
 ```
-## topbops-wasm
+## zeroflops-wasm
 ```
 rustup run nightly wasm-pack build --target web
 ```
@@ -12,9 +12,9 @@ rustup run nightly wasm-pack build --target web
 - [x] Move tournament component to use grids
 - [x] Fix tournament list view
 - [x] Add search page
-- [ ] Support custom queries for lists
+- [x] Support custom queries for lists
 - [x] Support hiding items
-- [ ] Support deleting lists
+- [x] Support deleting lists
 ### P1
 - [x] Support user lists
 - [ ] Add dedicated import page
