@@ -375,7 +375,14 @@ async fn update_list(
     let user_id = &user_id;
     let client = &state.client;
     let current_list = get_list_doc(client, user_id, &id).await?;
-    if current_list.sources != list.sources {
+    // Avoid updating sources if they haven't changed
+    // TODO: we should also check the snapshot ID
+    if current_list
+        .sources
+        .iter()
+        .map(|s| &s.source_type)
+        .ne(list.sources.iter().map(|s| &s.source_type))
+    {
         list.items.clear();
         let sources = list.sources;
         list.sources = Vec::with_capacity(sources.len());
