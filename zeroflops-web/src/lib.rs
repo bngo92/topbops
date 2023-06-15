@@ -129,6 +129,9 @@ impl From<sqlparser::parser::ParserError> for Error {
         Error::ClientError(match e {
             sqlparser::parser::ParserError::TokenizerError(e) => e,
             sqlparser::parser::ParserError::ParserError(e) => e,
+            sqlparser::parser::ParserError::RecursionLimitExceeded => {
+                "Query is too long".to_owned()
+            }
         })
     }
 }
