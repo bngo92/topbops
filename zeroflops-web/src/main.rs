@@ -75,8 +75,25 @@ async fn login_handler(
 }
 
 // TODO: fix rerender on logout
-async fn logout_handler(mut auth: AuthContext) -> impl IntoResponse {
-    auth.logout().await;
+async fn logout_handler(
+    State(state): State<Arc<AppState>>,
+    mut auth: AuthContext,
+) -> impl IntoResponse {
+    if let Some(user) = &mut auth.current_user {
+        // Log out of all sessions with axum-login by changing the user secret
+        user.secret = zeroflops_web::user::generate_secret();
+        state
+            .client
+            .write_document(|db| {
+                Ok(db
+                    .collection_client("users")
+                    .create_document(user.clone())
+                    .is_upsert(true))
+            })
+            .await
+            .expect("Couldn't reset password");
+        auth.logout().await;
+    }
     (
         // TODO: also clear cookie if there was an invalid session
         [(header::SET_COOKIE, "user=; Max-Age=0; Path=/")],
@@ -125,7 +142,7 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, 
     let spotify_user: source::spotify::User = serde_json::from_slice(&got)?;
 
     let query = CosmosQuery::with_params(
-        String::from("SELECT c.id FROM c WHERE c.user_id = @user_id"),
+        String::from("SELECT c.id, c.secret FROM c WHERE c.user_id = @user_id"),
         [Param::new(
             String::from("@user_id"),
             spotify_user.id.clone(),
@@ -140,15 +157,23 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, 
                 .parallelize_cross_partition_query(true)
         })
         .await?;
-    let id = if let Some(mut map) = results.pop() {
-        map.remove("id").expect("id should be returned by DB")
+    let (id, secret) = if let Some(mut map) = results.pop() {
+        (
+            map.remove("id").expect("id should be returned by DB"),
+            map.remove("secret")
+                .expect("secret should be returned by DB"),
+        )
     } else {
-        Uuid::new_v4().to_hyphenated().to_string()
+        (
+            Uuid::new_v4().to_hyphenated().to_string(),
+            zeroflops_web::user::generate_secret(),
+        )
     };
 
     let user = User {
         id,
         user_id: spotify_user.id,
+        secret,
         access_token: token.access_token.clone(),
         refresh_token: token
             .refresh_token

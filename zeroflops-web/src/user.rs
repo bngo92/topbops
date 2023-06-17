@@ -8,6 +8,8 @@ use azure_data_cosmos::{
     prelude::{DatabaseClient, GetDocumentResponse},
     CosmosEntity,
 };
+use base64::prelude::{Engine, BASE64_STANDARD};
+use rand::Rng;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +17,7 @@ use serde::{Deserialize, Serialize};
 pub struct User {
     pub id: String,
     pub user_id: String,
+    pub secret: String,
     pub access_token: String,
     pub refresh_token: String,
 }
@@ -33,7 +36,7 @@ impl AuthUser<String> for User {
     }
 
     fn get_password_hash(&self) -> SecretVec<u8> {
-        SecretVec::new(self.refresh_token.clone().into())
+        SecretVec::new(self.secret.clone().into())
     }
 }
 
@@ -114,4 +117,8 @@ where
             Ok(None)
         }
     }
+}
+
+pub fn generate_secret() -> String {
+    BASE64_STANDARD.encode(rand::thread_rng().gen::<[u8; 64]>())
 }
