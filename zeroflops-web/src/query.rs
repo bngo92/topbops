@@ -165,14 +165,15 @@ fn rewrite_expr(expr: &mut Expr) {
                 queue.push_back(right);
             }
             Expr::Function(f) => {
-                if let Some(last) = f.args.pop() {
-                    if let FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(id))) = last
-                    {
-                        f.args.push(FunctionArg::Unnamed(FunctionArgExpr::Expr(
-                            rewrite_identifier(id),
-                        )));
-                    } else {
-                        f.args.push(last);
+                for arg in &mut f.args {
+                    if let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = arg {
+                        if let Expr::Identifier(id) = expr.clone() {
+                            // Function arg strings are being parsed into identifiers instead of
+                            // values so skip rewriting
+                            if id.quote_style.is_none() {
+                                *expr = rewrite_identifier(id);
+                            }
+                        }
                     }
                 }
             }
@@ -226,6 +227,8 @@ mod test {
              "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.user_score >= 1500"),
             ("SELECT name, user_score FROM tracks WHERE user_score IN (1500)",
              "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.user_score IN (1500)"),
+            ("SELECT name, user_score FROM tracks WHERE ARRAY_CONTAINS(artists, \"foo\")",
+             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND ARRAY_CONTAINS(c.metadata.artists, \"foo\")"),
         ] {
             let (query, column_names) = rewrite_query(input).unwrap();
             assert_eq!(query.to_string(), expected);
