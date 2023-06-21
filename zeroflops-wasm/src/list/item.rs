@@ -1,8 +1,12 @@
+use crate::bootstrap::Alert;
+use js_sys::Error;
 use serde_json::Value;
 use std::collections::HashMap;
-use wasm_bindgen::JsValue;
+use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{HtmlInputElement, HtmlSelectElement, Request, RequestInit, RequestMode, Url};
+use web_sys::{
+    HtmlInputElement, HtmlSelectElement, Request, RequestInit, RequestMode, Response, Url,
+};
 use yew::{html, Component, Context, Html, NodeRef, Properties};
 use zeroflops::{Id, ItemMetadata, ItemQuery, List, ListMode, SourceType, Spotify};
 
@@ -15,17 +19,20 @@ pub enum Msg {
     None,
     Load(ItemQuery),
     Save,
+    SaveError(String),
+    HideAlert,
     SaveSuccess(Vec<(usize, HashMap<String, Value>)>),
     Push,
 }
 
-#[derive(Eq, PartialEq, Properties)]
+#[derive(PartialEq, Properties)]
 pub struct ListProps {
     pub list: List,
 }
 
 pub struct ListItems {
     state: ListState,
+    alert: Option<Result<String, String>>,
 }
 
 impl Component for ListItems {
@@ -38,6 +45,7 @@ impl Component for ListItems {
             .send_future(async move { Msg::Load(crate::get_items(&id).await.unwrap()) });
         ListItems {
             state: ListState::Fetching,
+            alert: None,
         }
     }
 
@@ -95,6 +103,7 @@ impl Component for ListItems {
                 });
                 let save = ctx.link().callback(|_| Msg::Save);
                 let push = ctx.link().callback(|_| Msg::Push);
+                let hide = ctx.link().callback(|_| Msg::HideAlert);
                 html! {
                     <div>
                         if let Some(src) = list.iframe.clone() {
@@ -112,7 +121,12 @@ impl Component for ListItems {
                             <div class="overflow-y-auto mb-3" style="max-height: 800px">
                                 {for html}
                             </div>
-                            <button type="button" class="btn btn-success" onclick={save} {disabled}>{"Save"}</button>
+                            if let Some(result) = self.alert.clone() {
+                                <button type="button" class="btn btn-success mb-3" onclick={save} {disabled}>{"Save"}</button>
+                                <Alert {result} {hide}/>
+                            } else {
+                                <button type="button" class="btn btn-success" onclick={save} {disabled}>{"Save"}</button>
+                            }
                         </form>
                         <hr/>
                         <h4>{"Data Sources"}</h4>
@@ -188,13 +202,36 @@ impl Component for ListItems {
                         .set("Content-Type", "application/json")
                         .unwrap();
                     ctx.link().send_future(async move {
-                        JsFuture::from(window.fetch_with_request(&request))
-                            .await
-                            .unwrap();
-                        Msg::SaveSuccess(update_indexes)
+                        match JsFuture::from(window.fetch_with_request(&request)).await {
+                            Ok(resp) => {
+                                let resp_value: Response = resp.dyn_into().unwrap();
+                                if resp_value.status() >= 400 {
+                                    Msg::SaveError(
+                                        JsFuture::from(resp_value.text().unwrap())
+                                            .await
+                                            .unwrap()
+                                            .as_string()
+                                            .unwrap(),
+                                    )
+                                } else {
+                                    Msg::SaveSuccess(update_indexes)
+                                }
+                            }
+                            Err(e) => {
+                                Msg::SaveError(e.dyn_into::<Error>().unwrap().to_string().into())
+                            }
+                        }
                     });
                 }
                 false
+            }
+            Msg::SaveError(e) => {
+                self.alert = Some(Err(e));
+                true
+            }
+            Msg::HideAlert => {
+                self.alert = None;
+                true
             }
             // Update the rating and hidden state values if the save request is successful.
             // We check if the values are the same to avoid no-op requests.
@@ -215,7 +252,8 @@ impl Component for ListItems {
                         }
                     }
                 }
-                false
+                self.alert = Some(Ok("Save successful".to_owned()));
+                true
             }
             Msg::Push => {
                 let id = ctx.props().list.id.clone();

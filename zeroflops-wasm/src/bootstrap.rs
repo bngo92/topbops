@@ -86,3 +86,34 @@ impl Component for Collapse {
         }
     }
 }
+
+#[derive(Clone, PartialEq, Properties)]
+pub struct AlertProps {
+    pub result: Result<String, String>,
+    pub hide: Callback<MouseEvent>,
+}
+
+pub struct Alert;
+
+impl Component for Alert {
+    type Message = ();
+    type Properties = AlertProps;
+
+    fn create(_: &Context<Self>) -> Self {
+        Alert
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let (alert_class, body) = match ctx.props().result.clone() {
+            Ok(msg) => ("alert alert-success alert-dismissible", msg),
+            Err(msg) => ("alert alert-danger alert-dismissible", msg),
+        };
+        let onclick = ctx.props().hide.clone();
+        html! {
+            <div class={alert_class}>
+                {body}
+                <button type="button" class="btn-close" {onclick}></button>
+            </div>
+        }
+    }
+}

@@ -529,7 +529,7 @@ async fn handle_action(
         }
         _ => {}
     }
-    Err(StatusCode::BAD_REQUEST.into_response())
+    Err((StatusCode::BAD_REQUEST, "action does not exist").into_response())
 }
 
 // TODO: handle spaces in IDs
