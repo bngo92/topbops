@@ -3,7 +3,7 @@ use sqlparser::ast::{
     BinaryOperator, Expr, FunctionArg, FunctionArgExpr, Ident, Query, SelectItem, SetExpr,
     Statement, TableFactor,
 };
-use sqlparser::dialect::GenericDialect;
+use sqlparser::dialect::MySqlDialect;
 use sqlparser::parser::Parser;
 use std::collections::{HashMap, VecDeque};
 use zeroflops::{ItemMetadata, List, ListMode};
@@ -138,7 +138,8 @@ fn rewrite_query_impl(
 }
 
 fn parse_select(s: &str) -> Result<Query, Error> {
-    let dialect = GenericDialect {};
+    // The MySQL dialect seems to be the closest to Cosmos DB in regards to string value handling
+    let dialect = MySqlDialect {};
     let statement = Parser::parse_sql(&dialect, s)?.pop();
     if let Some(Statement::Query(query)) = statement {
         Ok(*query)
@@ -168,11 +169,7 @@ fn rewrite_expr(expr: &mut Expr) {
                 for arg in &mut f.args {
                     if let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = arg {
                         if let Expr::Identifier(id) = expr.clone() {
-                            // Function arg strings are being parsed into identifiers instead of
-                            // values so skip rewriting
-                            if id.quote_style.is_none() {
-                                *expr = rewrite_identifier(id);
-                            }
+                            *expr = rewrite_identifier(id);
                         }
                     }
                 }
@@ -227,6 +224,10 @@ mod test {
              "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.user_score >= 1500"),
             ("SELECT name, user_score FROM tracks WHERE user_score IN (1500)",
              "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.user_score IN (1500)"),
+            ("SELECT name, user_score FROM tracks WHERE album = 'foo'",
+             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.metadata.album = 'foo'"),
+            ("SELECT name, user_score FROM tracks WHERE album = \"foo\"",
+             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.metadata.album = \"foo\""),
             ("SELECT name, user_score FROM tracks WHERE ARRAY_CONTAINS(artists, \"foo\")",
              "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND ARRAY_CONTAINS(c.metadata.artists, \"foo\")"),
         ] {
