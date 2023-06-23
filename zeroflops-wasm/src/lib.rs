@@ -50,7 +50,7 @@ enum Route {
 }
 
 fn switch(routes: Route) -> Html {
-    match routes {
+    let content = match routes {
         Route::Home => html! { <Home/> },
         Route::Lists => html! { <crate::list::Lists/> },
         Route::List { id } => html! { <ListComponent {id} view={ListTab::Items}/> },
@@ -60,7 +60,12 @@ fn switch(routes: Route) -> Html {
         Route::Tournament { id } => html! {
             <Tournament {id}/>
         },
-        Route::Search => html! { <Search/> },
+        Route::Search => return html! { <Search/> },
+    };
+    html! {
+        <div class="container-lg my-md-4">
+            { content }
+        </div>
     }
 }
 
@@ -114,9 +119,7 @@ impl Component for App {
                             </ul>
                         </div>
                     </nav>
-                    <div class="container-lg my-md-4">
-                        <Switch<Route> render={switch} />
-                    </div>
+                    <Switch<Route> render={switch} />
                 </BrowserRouter>
             </div>
         }

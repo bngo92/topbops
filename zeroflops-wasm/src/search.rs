@@ -4,6 +4,65 @@ use yew::{html, Component, Context, Html, NodeRef, Properties};
 use yew_router::scope_ext::RouterScopeExt;
 use zeroflops::ItemQuery;
 
+pub enum SearchMsg {
+    Toggle,
+}
+
+pub struct Search {
+    split_view: bool,
+}
+
+impl Component for Search {
+    type Message = SearchMsg;
+    type Properties = ();
+
+    fn create(_: &Context<Self>) -> Self {
+        Search { split_view: false }
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let onclick = ctx.link().callback(|_| SearchMsg::Toggle);
+        let button_text = if self.split_view {
+            "Single View"
+        } else {
+            "Split View"
+        };
+        html! {
+            <div>
+                <div class="container-lg">
+                    <div class="row align-items-end mb-3">
+                        <h1 class="col-10 m-0">{"Search"}</h1>
+                        <div class="col-2">
+                            <button type="button" class="btn btn-info w-100" {onclick}>{button_text}</button>
+                        </div>
+                    </div>
+                </div>
+                if self.split_view {
+                    <div class="container-fluid">
+                        <div class="row">
+                            <div class="col-6">
+                                <SearchPane/>
+                            </div>
+                            <div class="col-6">
+                                <SearchPane/>
+                            </div>
+                        </div>
+                    </div>
+                } else {
+                    <div class="container-lg">
+                        <SearchPane/>
+                    </div>
+                }
+            </div>
+        }
+    }
+
+    fn update(&mut self, _: &Context<Self>, _: Self::Message) -> bool {
+        self.split_view = !self.split_view;
+        true
+    }
+}
+
 pub enum Msg {
     None,
     Fetching,
@@ -11,7 +70,7 @@ pub enum Msg {
     Failed(String),
 }
 
-pub struct Search {
+pub struct SearchPane {
     search_ref: NodeRef,
     query: Option<ItemQuery>,
     error: Option<String>,
@@ -23,7 +82,7 @@ enum Format {
     Csv,
 }
 
-impl Component for Search {
+impl Component for SearchPane {
     type Message = Msg;
     type Properties = ();
 
@@ -38,7 +97,7 @@ impl Component for Search {
             Some("csv") => Format::Csv,
             _ => Format::Table,
         };
-        Search {
+        SearchPane {
             search_ref: NodeRef::default(),
             query: None,
             error: None,
@@ -69,12 +128,12 @@ impl Component for Search {
             <div>
                 <form {onkeydown}>
                     <div class="row">
-                        <div class="col-12 col-md-10 col-xl-11">
+                        <div class="col-12 col-md">
                             // Copy only the styles from .form-control that are needed for sizing
                             <input ref={self.search_ref.clone()} type="text" {class} style="padding: .5rem 1rem; font-size: .875rem; border-width: 1px" placeholder={default_search}/>
                             {for error}
                         </div>
-                        <div class="col-3 col-sm-2 col-md-2 col-xl-1 pe-2">
+                        <div class="col-auto">
                             <button type="button" class="btn btn-success" onclick={search}>{"Search"}</button>
                         </div>
                     </div>
