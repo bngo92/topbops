@@ -16,15 +16,29 @@ rustup run nightly wasm-pack build --target web
 - [x] Support hiding items
 - [x] Support deleting lists
 ### P1
+- [ ] Add sort/rank page to lists
+- [ ] Add Google auth
+- [ ] Add IMDb data source
 - [x] Support user lists
 - [ ] Add dedicated import page
 - [ ] Add documentation
-- [ ] Support resetting items
+- [ ] Support resetting/deleting items
+- [ ] Add Spotify search support
+- [ ] Add chart visualization
+- [ ] Add custom tournaments
+- [ ] Add item notes
+- [ ] Add description
+- [ ] Add lists as a data source
+- [ ] Add time weighted averages
+- [ ] Support data source refresh
 ### P2
-- [ ] Add sort mode
+- [ ] Add list sort mode (via rank or rating)
 - [ ] Revisit data model
 - [x] Fix sort mode responsiveness
 - [ ] Add spinners
-- [ ] Add Google auth
 - [ ] Improve error handling
 - [ ] Add sharing
+- [ ] Add multiplayer
+- [ ] Add Spotify snapshot caching 
+- [ ] Add public home page
+- [ ] Add CFB support 
