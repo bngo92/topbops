@@ -376,22 +376,23 @@ pub async fn get_token() -> Result<crate::Token, Error> {
     serde_json::from_slice(&got).map_err(Error::from)
 }
 
-// TODO: reuse existing access token if it hasn't expired
 pub async fn get_access_token<'a>(
-    client: &'_ SessionClient,
+    _client: &'_ SessionClient,
     user: &'a mut crate::user::User,
 ) -> Result<&'a str, Error> {
-    let token = get_user_token(&user.refresh_token).await?;
-    user.access_token = token.access_token;
-    client
-        .write_document(|db| {
-            Ok(db
-                .collection_client("users")
-                .document_client(&user.id, &user.id)?
-                .replace_document(user.clone()))
-        })
-        .await?;
-    Ok(&user.access_token)
+    let Some(refresh_token) = &user.refresh_token else { return Err(Error::client_error("User hasn't set up Spotify auth")) };
+    let token = get_user_token(&refresh_token).await?;
+    user.access_token = Some(token.access_token);
+    // TODO: reuse existing access token if it hasn't expired
+    /*client
+    .write_document(|db| {
+        Ok(db
+            .collection_client("users")
+            .document_client(&user.id, &user.id)?
+            .replace_document(user.clone()))
+    })
+    .await?;*/
+    Ok(user.access_token.as_deref().unwrap())
 }
 
 async fn get_user_token(refresh_token: &str) -> Result<crate::Token, Error> {

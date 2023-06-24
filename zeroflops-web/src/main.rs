@@ -23,7 +23,7 @@ use uuid::Uuid;
 use zeroflops::{ItemQuery, List, ListMode, Lists, Source, SourceType};
 use zeroflops_web::{
     cosmos::SessionClient,
-    user::{CosmosStore, User},
+    user::{CosmosStore, GoogleCredentials, GoogleUser, User},
 };
 use zeroflops_web::{query, source, Error, Item, Token, UserId};
 
@@ -174,10 +174,10 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, 
         id,
         user_id: spotify_user.id,
         secret,
-        access_token: token.access_token.clone(),
-        refresh_token: token
-            .refresh_token
-            .expect("Spotify should return refresh token"),
+        google_email: None,
+        access_token: Some(token.access_token.clone()),
+        refresh_token: token.refresh_token.clone(),
+        spotify_credentials: Some(token),
     };
     state
         .client
@@ -189,6 +189,153 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, 
         })
         .await?;
     Ok(user)
+}
+
+async fn google_login_handler(
+    OriginalUri(original_uri): OriginalUri,
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<HashMap<String, String>>,
+    mut auth: AuthContext,
+    Host(host): Host,
+) -> Result<Response, Response> {
+    let origin;
+    #[cfg(feature = "dev")]
+    {
+        origin = format!("http://{}{}", host, original_uri.path());
+    }
+    #[cfg(not(feature = "dev"))]
+    {
+        origin = format!("https://{}{}", host, original_uri.path());
+    }
+    Ok(google_login(&state, &mut auth, &params["code"], &origin).await?)
+}
+
+async fn google_login(
+    state: &Arc<AppState>,
+    auth: &mut AuthContext,
+    code: &str,
+    origin: &str,
+) -> Result<Response, Error> {
+    let https = HttpsConnector::new();
+    let client = Client::builder().build::<_, hyper::Body>(https);
+    let uri: Uri = "https://oauth2.googleapis.com/token".parse().unwrap();
+    let resp = client
+        .request(
+            Request::builder()
+                .method(Method::POST)
+                .uri(uri)
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .body(Body::from(format!(
+                    "code={}&client_id=1038220726403-n55jha2cvprd8kdb4akdfvo0uiok4p5u.apps.googleusercontent.com&client_secret={}&redirect_uri={}&grant_type=authorization_code",
+                    code,
+                    std::env::var("GOOGLE_SECRET").expect("GOOGLE_SECRET is missing"),
+                    origin
+                )))?,
+        )
+        .await?;
+    let got = hyper::body::to_bytes(resp.into_body()).await?;
+    let token: GoogleCredentials = serde_json::from_slice(&got)?;
+
+    let https = HttpsConnector::new();
+    let client = Client::builder().build::<_, hyper::Body>(https);
+    let uri: Uri = "https://openidconnect.googleapis.com/v1/userinfo"
+        .parse()
+        .unwrap();
+    let resp = client
+        .request(
+            Request::builder()
+                .uri(uri)
+                .header("Authorization", format!("Bearer {}", token.access_token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    let got = hyper::body::to_bytes(resp.into_body()).await?;
+    let google_user: GoogleUser = serde_json::from_slice(&got)?;
+
+    // Add Google identity to user if a session already exists
+    if let Some(user) = &auth.current_user {
+        let mut user = user.clone();
+        user.google_email = Some(google_user.email);
+        state
+            .client
+            .write_document(|db| {
+                Ok(db
+                    .collection_client("users")
+                    .document_client(user.id.clone(), &user.id)?
+                    .replace_document(user.clone()))
+            })
+            .await?;
+        auth.login(&user).await.unwrap();
+        return Ok(Redirect::to("/").into_response());
+    }
+
+    let query = CosmosQuery::with_params(
+        String::from("SELECT c.id FROM c WHERE c.google_email = @google_email"),
+        [Param::new(
+            String::from("@google_email"),
+            google_user.email.clone(),
+        )],
+    );
+    let mut results: Vec<HashMap<String, String>> = state
+        .client
+        .query_documents(move |db| {
+            db.collection_client("users")
+                .query_documents(query)
+                .query_cross_partition(true)
+                .parallelize_cross_partition_query(true)
+        })
+        .await?;
+    let user = if let Some(map) = results.pop() {
+        let id = &map["id"];
+        state
+            .client
+            .get_document(|db| {
+                Ok(db
+                    .collection_client("users")
+                    .document_client(id.clone(), &id)?
+                    .get_document())
+            })
+            .await?
+            .ok_or(Error::internal_error(format!(
+                "User doesn't exist for {id}"
+            )))?
+    } else {
+        User {
+            id: Uuid::new_v4().to_hyphenated().to_string(),
+            user_id: google_user
+                .email
+                .split_once('@')
+                .ok_or(Error::internal_error(format!(
+                    "Received invalid email: {}",
+                    google_user.email
+                )))?
+                .0
+                .to_owned(),
+            secret: zeroflops_web::user::generate_secret(),
+            google_email: Some(google_user.email),
+            access_token: None,
+            refresh_token: None,
+            spotify_credentials: None,
+        }
+    };
+    state
+        .client
+        .write_document(|db| {
+            Ok(db
+                .collection_client("users")
+                .create_document(user.clone())
+                .is_upsert(true))
+        })
+        .await?;
+    auth.login(&user).await.unwrap();
+    Ok((
+        [(
+            header::SET_COOKIE,
+            format!("user={}; Max-Age=31536000; Path=/", user.user_id),
+        )],
+        Redirect::to("/"),
+    )
+        .into_response())
 }
 
 async fn get_lists(
@@ -876,6 +1023,7 @@ async fn main() {
         .route("/items", get(find_items))
         .route("/", post(handle_action))
         .route("/login", get(login_handler))
+        .route("/login/google", get(google_login_handler))
         .route("/logout", get(logout_handler))
         .with_state(shared_state);
 

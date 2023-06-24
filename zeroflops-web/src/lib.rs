@@ -24,7 +24,7 @@ pub const ITEM_FIELDS: [&str; 7] = [
     "hidden",
 ];
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Token {
     pub access_token: String,
     pub refresh_token: Option<String>,

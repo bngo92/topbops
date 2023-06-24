@@ -18,8 +18,20 @@ pub struct User {
     pub id: String,
     pub user_id: String,
     pub secret: String,
+    pub google_email: Option<String>,
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
+    pub spotify_credentials: Option<crate::Token>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct GoogleCredentials {
     pub access_token: String,
-    pub refresh_token: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct GoogleUser {
+    pub email: String,
 }
 
 impl CosmosEntity for User {
