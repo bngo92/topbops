@@ -1,5 +1,5 @@
 #![feature(iter_intersperse)]
-use crate::bootstrap::{Accordion, Collapse};
+use crate::bootstrap::{Accordion, Collapse, Modal};
 use crate::edit::Edit;
 use crate::list::item::ListItems;
 use crate::random::Match;
@@ -69,22 +69,26 @@ fn switch(routes: Route) -> Html {
     }
 }
 
-/*enum Msg {
-    Logout,
-    Reload,
-}*/
+enum Msg {
+    Login,
+    HideLogin,
+    //Logout,
+    //Reload,
+}
 
-struct App;
+struct App {
+    login: bool,
+}
 
 impl Component for App {
-    type Message = ();
+    type Message = Msg;
     type Properties = ();
 
     fn create(_: &Context<Self>) -> Self {
-        App
+        App { login: false }
     }
 
-    fn view(&self, _: &Context<Self>) -> Html {
+    fn view(&self, ctx: &Context<Self>) -> Html {
         let window = web_sys::window().expect("no global `window` exists");
         let location = window.location();
         //let onclick = ctx.link().callback(|_| Msg::Logout);
@@ -94,6 +98,8 @@ impl Component for App {
         } else */{
             "nav-link"
         };
+        let login = ctx.link().callback(|_| Msg::Login);
+        let hide = ctx.link().callback(|_| Msg::HideLogin);
         html! {
             <div>
                 <BrowserRouter>
@@ -113,21 +119,31 @@ impl Component for App {
                                     if let Some(user) = get_user() {
                                         <a class="nav-link" href="/api/logout">{format!("{} Logout", user)}</a>
                                     } else {
-                                        <a class="nav-link" href={format!("https://accounts.spotify.com/authorize?client_id=ee3d1b4f8d80477ea48743a511ef3018&redirect_uri={}/api/login&response_type=code&scope=playlist-modify-public playlist-modify-private", location.origin().unwrap().as_str())}>{"Login"}</a>
+                                        <a class="nav-link" href="#" onclick={login}>{"Log in"}</a>
                                     }
                                 </li>
                             </ul>
                         </div>
                     </nav>
+                    if self.login {
+                        <Modal header={"Log in"} {hide}>
+                            <div class="modal-body">
+                                <a class="btn btn-success" href={format!("https://accounts.spotify.com/authorize?client_id=ee3d1b4f8d80477ea48743a511ef3018&redirect_uri={}/api/login&response_type=code&scope=playlist-modify-public playlist-modify-private", location.origin().unwrap().as_str())}>{"Log in with Spotify"}</a>
+                            </div>
+                        </Modal>
+                        <div class="modal-backdrop show"></div>
+                    }
                     <Switch<Route> render={switch} />
                 </BrowserRouter>
             </div>
         }
     }
 
-    /*fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
+    fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
-            Msg::Logout => {
+            Msg::Login => self.login = true,
+            Msg::HideLogin => self.login = false,
+            /*Msg::Logout => {
                 ctx.link().clone().send_future(async move {
                     let window = web_sys::window().expect("no global `window` exists");
                     let request = query("/api/logout", "POST").unwrap();
@@ -138,9 +154,10 @@ impl Component for App {
                 });
                 false
             }
-            Msg::Reload => true,
+            Msg::Reload => true,*/
         }
-    }*/
+        true
+    }
 }
 
 pub enum HomeMsg {
@@ -479,7 +496,7 @@ enum ListState {
     Success(List),
 }
 
-pub enum Msg {
+pub enum ListMsg {
     None,
     Load(List),
 }
@@ -495,13 +512,13 @@ pub struct ListComponent {
 }
 
 impl Component for ListComponent {
-    type Message = Msg;
+    type Message = ListMsg;
     type Properties = ListProps;
 
     fn create(ctx: &Context<Self>) -> Self {
         let id = ctx.props().id.clone();
         ctx.link()
-            .send_future(async move { Msg::Load(crate::fetch_list(&id).await.unwrap()) });
+            .send_future(async move { ListMsg::Load(crate::fetch_list(&id).await.unwrap()) });
         ListComponent {
             state: ListState::Fetching,
         }
@@ -554,8 +571,8 @@ impl Component for ListComponent {
 
     fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
-            Msg::None => false,
-            Msg::Load(list) => {
+            ListMsg::None => false,
+            ListMsg::Load(list) => {
                 self.state = ListState::Success(list);
                 true
             }

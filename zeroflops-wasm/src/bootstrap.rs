@@ -56,6 +56,37 @@ impl Component for Accordion {
 }
 
 #[derive(Clone, PartialEq, Properties)]
+pub struct AlertProps {
+    pub result: Result<String, String>,
+    pub hide: Callback<MouseEvent>,
+}
+
+pub struct Alert;
+
+impl Component for Alert {
+    type Message = ();
+    type Properties = AlertProps;
+
+    fn create(_: &Context<Self>) -> Self {
+        Alert
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let (alert_class, body) = match &ctx.props().result {
+            Ok(msg) => ("alert alert-success alert-dismissible", msg),
+            Err(msg) => ("alert alert-danger alert-dismissible", msg),
+        };
+        let onclick = &ctx.props().hide;
+        html! {
+            <div class={alert_class}>
+                {body}
+                <button type="button" class="btn-close" {onclick}></button>
+            </div>
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Properties)]
 pub struct CollapseProps {
     pub children: Children,
     pub collapsed: bool,
@@ -88,31 +119,35 @@ impl Component for Collapse {
 }
 
 #[derive(Clone, PartialEq, Properties)]
-pub struct AlertProps {
-    pub result: Result<String, String>,
+pub struct ModalProps {
+    pub header: String,
+    pub children: Children,
     pub hide: Callback<MouseEvent>,
 }
 
-pub struct Alert;
+pub struct Modal;
 
-impl Component for Alert {
+impl Component for Modal {
     type Message = ();
-    type Properties = AlertProps;
+    type Properties = ModalProps;
 
     fn create(_: &Context<Self>) -> Self {
-        Alert
+        Modal
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let (alert_class, body) = match ctx.props().result.clone() {
-            Ok(msg) => ("alert alert-success alert-dismissible", msg),
-            Err(msg) => ("alert alert-danger alert-dismissible", msg),
-        };
         let onclick = ctx.props().hide.clone();
         html! {
-            <div class={alert_class}>
-                {body}
-                <button type="button" class="btn-close" {onclick}></button>
+            <div class="modal d-block">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h1 class="modal-title">{&ctx.props().header}</h1>
+                            <button type="button" class="btn-close" {onclick}></button>
+                        </div>
+                        {for ctx.props().children.iter()}
+                    </div>
+                </div>
             </div>
         }
     }
