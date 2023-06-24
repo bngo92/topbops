@@ -380,9 +380,9 @@ pub async fn get_access_token<'a>(
     _client: &'_ SessionClient,
     user: &'a mut crate::user::User,
 ) -> Result<&'a str, Error> {
-    let Some(refresh_token) = &user.refresh_token else { return Err(Error::client_error("User hasn't set up Spotify auth")) };
-    let token = get_user_token(&refresh_token).await?;
-    user.access_token = Some(token.access_token);
+    let Some(credentials) = &mut user.spotify_credentials else { return Err(Error::client_error("User hasn't set up Spotify auth")) };
+    let token = get_user_token(&credentials.refresh_token).await?;
+    credentials.access_token = token.access_token;
     // TODO: reuse existing access token if it hasn't expired
     /*client
     .write_document(|db| {
@@ -392,7 +392,7 @@ pub async fn get_access_token<'a>(
             .replace_document(user.clone()))
     })
     .await?;*/
-    Ok(user.access_token.as_deref().unwrap())
+    Ok(&credentials.access_token)
 }
 
 async fn get_user_token(refresh_token: &str) -> Result<crate::Token, Error> {

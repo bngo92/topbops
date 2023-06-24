@@ -18,10 +18,15 @@ pub struct User {
     pub id: String,
     pub user_id: String,
     pub secret: String,
+    pub spotify_credentials: Option<SpotifyCredentials>,
     pub google_email: Option<String>,
-    pub access_token: Option<String>,
-    pub refresh_token: Option<String>,
-    pub spotify_credentials: Option<crate::Token>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SpotifyCredentials {
+    pub user_id: String,
+    pub access_token: String,
+    pub refresh_token: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

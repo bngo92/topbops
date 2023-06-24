@@ -23,7 +23,7 @@ use uuid::Uuid;
 use zeroflops::{ItemQuery, List, ListMode, Lists, Source, SourceType};
 use zeroflops_web::{
     cosmos::SessionClient,
-    user::{CosmosStore, GoogleCredentials, GoogleUser, User},
+    user::{CosmosStore, GoogleCredentials, GoogleUser, SpotifyCredentials, User},
 };
 use zeroflops_web::{query, source, Error, Item, Token, UserId};
 
@@ -172,12 +172,16 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, 
 
     let user = User {
         id,
-        user_id: spotify_user.id,
+        user_id: spotify_user.id.clone(),
         secret,
         google_email: None,
-        access_token: Some(token.access_token.clone()),
-        refresh_token: token.refresh_token.clone(),
-        spotify_credentials: Some(token),
+        spotify_credentials: Some(SpotifyCredentials {
+            user_id: spotify_user.id,
+            access_token: token.access_token,
+            refresh_token: token.refresh_token.ok_or(Error::internal_error(
+                "Spotify did not return refresh_token",
+            ))?,
+        }),
     };
     state
         .client
@@ -313,8 +317,6 @@ async fn google_login(
                 .to_owned(),
             secret: zeroflops_web::user::generate_secret(),
             google_email: Some(google_user.email),
-            access_token: None,
-            refresh_token: None,
             spotify_credentials: None,
         }
     };
