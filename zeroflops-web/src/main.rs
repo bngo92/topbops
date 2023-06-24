@@ -53,7 +53,7 @@ async fn login_handler(
     Query(params): Query<HashMap<String, String>>,
     mut auth: AuthContext,
     Host(host): Host,
-) -> Result<impl IntoResponse, Response> {
+) -> Result<Response, Response> {
     let origin;
     #[cfg(feature = "dev")]
     {
@@ -63,15 +63,7 @@ async fn login_handler(
     {
         origin = format!("https://{}{}", host, original_uri.path());
     }
-    let user = login(&state, &params["code"], &origin).await?;
-    auth.login(&user).await.unwrap();
-    Ok((
-        [(
-            header::SET_COOKIE,
-            format!("user={}; Max-Age=31536000; Path=/", user.user_id),
-        )],
-        Redirect::to("/"),
-    ))
+    Ok(login(&state, &mut auth, &params["code"], &origin).await?)
 }
 
 // TODO: fix rerender on logout
@@ -101,7 +93,12 @@ async fn logout_handler(
     )
 }
 
-async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, Error> {
+async fn login(
+    state: &Arc<AppState>,
+    auth: &mut AuthContext,
+    code: &str,
+    origin: &str,
+) -> Result<Response, Error> {
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
     let uri: Uri = "https://accounts.spotify.com/api/token".parse().unwrap();
@@ -120,7 +117,7 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, 
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .body(Body::from(format!(
                     "grant_type=authorization_code&code={}&redirect_uri={}",
-                    auth, origin
+                    code, origin
                 )))?,
         )
         .await?;
@@ -140,9 +137,33 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, 
         .await?;
     let got = hyper::body::to_bytes(resp.into_body()).await?;
     let spotify_user: source::spotify::User = serde_json::from_slice(&got)?;
+    let spotify_credentials = Some(SpotifyCredentials {
+        user_id: spotify_user.id.clone(),
+        access_token: token.access_token,
+        refresh_token: token.refresh_token.ok_or(Error::internal_error(
+            "Spotify did not return refresh_token",
+        ))?,
+    });
+
+    // Add Spotify identity to user if a session already exists
+    if let Some(user) = &auth.current_user {
+        let mut user = user.clone();
+        user.spotify_credentials = spotify_credentials;
+        state
+            .client
+            .write_document(|db| {
+                Ok(db
+                    .collection_client("users")
+                    .document_client(user.id.clone(), &user.id)?
+                    .replace_document(user.clone()))
+            })
+            .await?;
+        auth.login(&user).await.unwrap();
+        return Ok(Redirect::to("/").into_response());
+    }
 
     let query = CosmosQuery::with_params(
-        String::from("SELECT c.id, c.secret FROM c WHERE c.user_id = @user_id"),
+        String::from("SELECT c.id, c.secret FROM c WHERE c.spotify_credentials.user_id = @user_id"),
         [Param::new(
             String::from("@user_id"),
             spotify_user.id.clone(),
@@ -157,31 +178,28 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, 
                 .parallelize_cross_partition_query(true)
         })
         .await?;
-    let (id, secret) = if let Some(mut map) = results.pop() {
-        (
-            map.remove("id").expect("id should be returned by DB"),
-            map.remove("secret")
-                .expect("secret should be returned by DB"),
-        )
+    let user = if let Some(map) = results.pop() {
+        let id = &map["id"];
+        state
+            .client
+            .get_document(|db| {
+                Ok(db
+                    .collection_client("users")
+                    .document_client(id.clone(), &id)?
+                    .get_document())
+            })
+            .await?
+            .ok_or(Error::internal_error(format!(
+                "User doesn't exist for {id}"
+            )))?
     } else {
-        (
-            Uuid::new_v4().to_hyphenated().to_string(),
-            zeroflops_web::user::generate_secret(),
-        )
-    };
-
-    let user = User {
-        id,
-        user_id: spotify_user.id.clone(),
-        secret,
-        google_email: None,
-        spotify_credentials: Some(SpotifyCredentials {
+        User {
+            id: Uuid::new_v4().to_hyphenated().to_string(),
             user_id: spotify_user.id,
-            access_token: token.access_token,
-            refresh_token: token.refresh_token.ok_or(Error::internal_error(
-                "Spotify did not return refresh_token",
-            ))?,
-        }),
+            secret: zeroflops_web::user::generate_secret(),
+            google_email: None,
+            spotify_credentials,
+        }
     };
     state
         .client
@@ -192,7 +210,15 @@ async fn login(state: &Arc<AppState>, auth: &str, origin: &str) -> Result<User, 
                 .is_upsert(true))
         })
         .await?;
-    Ok(user)
+    auth.login(&user).await.unwrap();
+    Ok((
+        [(
+            header::SET_COOKIE,
+            format!("user={}; Max-Age=31536000; Path=/", user.user_id),
+        )],
+        Redirect::to("/"),
+    )
+        .into_response())
 }
 
 async fn google_login_handler(
