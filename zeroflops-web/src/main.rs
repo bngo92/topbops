@@ -1,7 +1,6 @@
 use axum::{
     body::Bytes,
     extract::{Host, OriginalUri, Path, Query, State},
-    http::header,
     response::{IntoResponse, Json, Redirect, Response},
     routing::{get, post},
     Router,
@@ -53,7 +52,7 @@ async fn login_handler(
     Query(params): Query<HashMap<String, String>>,
     mut auth: AuthContext,
     Host(host): Host,
-) -> Result<Response, Response> {
+) -> Result<impl IntoResponse, Response> {
     let origin;
     #[cfg(feature = "dev")]
     {
@@ -63,7 +62,9 @@ async fn login_handler(
     {
         origin = format!("https://{}{}", host, original_uri.path());
     }
-    Ok(login(&state, &mut auth, &params["code"], &origin).await?)
+    let user = login(&state, &auth, &params["code"], &origin).await?;
+    auth.login(&user).await.unwrap();
+    Ok(Redirect::to("/"))
 }
 
 // TODO: fix rerender on logout
@@ -86,19 +87,15 @@ async fn logout_handler(
             .expect("Couldn't reset password");
         auth.logout().await;
     }
-    (
-        // TODO: also clear cookie if there was an invalid session
-        [(header::SET_COOKIE, "user=; Max-Age=0; Path=/")],
-        Redirect::to("/"),
-    )
+    Redirect::to("/")
 }
 
 async fn login(
     state: &Arc<AppState>,
-    auth: &mut AuthContext,
+    auth: &AuthContext,
     code: &str,
     origin: &str,
-) -> Result<Response, Error> {
+) -> Result<User, Error> {
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
     let uri: Uri = "https://accounts.spotify.com/api/token".parse().unwrap();
@@ -159,8 +156,7 @@ async fn login(
                     .replace_document(user.clone()))
             })
             .await?;
-        auth.login(&user).await.unwrap();
-        return Ok(Redirect::to("/").into_response());
+        return Ok(user);
     }
 
     let query = CosmosQuery::with_params(
@@ -211,15 +207,7 @@ async fn login(
                 .is_upsert(true))
         })
         .await?;
-    auth.login(&user).await.unwrap();
-    Ok((
-        [(
-            header::SET_COOKIE,
-            format!("user={}; Max-Age=31536000; Path=/", user.user_id),
-        )],
-        Redirect::to("/"),
-    )
-        .into_response())
+    Ok(user)
 }
 
 async fn google_login_handler(
@@ -228,7 +216,7 @@ async fn google_login_handler(
     Query(params): Query<HashMap<String, String>>,
     mut auth: AuthContext,
     Host(host): Host,
-) -> Result<Response, Response> {
+) -> Result<impl IntoResponse, Response> {
     let origin;
     #[cfg(feature = "dev")]
     {
@@ -238,15 +226,17 @@ async fn google_login_handler(
     {
         origin = format!("https://{}{}", host, original_uri.path());
     }
-    Ok(google_login(&state, &mut auth, &params["code"], &origin).await?)
+    let user = google_login(&state, &auth, &params["code"], &origin).await?;
+    auth.login(&user).await.unwrap();
+    Ok(Redirect::to("/"))
 }
 
 async fn google_login(
     state: &Arc<AppState>,
-    auth: &mut AuthContext,
+    auth: &AuthContext,
     code: &str,
     origin: &str,
-) -> Result<Response, Error> {
+) -> Result<User, Error> {
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
     let uri: Uri = "https://oauth2.googleapis.com/token".parse().unwrap();
@@ -296,8 +286,7 @@ async fn google_login(
                     .replace_document(user.clone()))
             })
             .await?;
-        auth.login(&user).await.unwrap();
-        return Ok(Redirect::to("/").into_response());
+        return Ok(user);
     }
 
     let query = CosmosQuery::with_params(
@@ -356,15 +345,7 @@ async fn google_login(
                 .is_upsert(true))
         })
         .await?;
-    auth.login(&user).await.unwrap();
-    Ok((
-        [(
-            header::SET_COOKIE,
-            format!("user={}; Max-Age=31536000; Path=/", user.user_id),
-        )],
-        Redirect::to("/"),
-    )
-        .into_response())
+    Ok(user)
 }
 
 async fn get_lists(
