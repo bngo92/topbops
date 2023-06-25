@@ -1,11 +1,11 @@
-use crate::{cosmos::SessionClient, Error, UserId};
+use crate::{cosmos::SessionClient, UserId};
 use futures::{StreamExt, TryStreamExt};
 use hyper::{Body, Client, Method, Request, Uri};
 use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
-use zeroflops::{Id, List, ListMode, Source, SourceType, Spotify};
+use zeroflops::{Error, Id, List, ListMode, Source, SourceType, Spotify};
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Playlists {

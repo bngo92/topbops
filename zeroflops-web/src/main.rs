@@ -19,12 +19,12 @@ use std::{collections::HashMap, time::Duration};
 use tower_http::services::ServeFile;
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
-use zeroflops::{ItemQuery, List, ListMode, Lists, Source, SourceType};
+use zeroflops::{Error, ItemQuery, List, ListMode, Lists};
 use zeroflops_web::{
     cosmos::SessionClient,
     user::{CosmosStore, GoogleCredentials, GoogleUser, SpotifyCredentials, User},
 };
-use zeroflops_web::{query, source, Error, Item, Token, UserId};
+use zeroflops_web::{query, source, Item, Token, UserId};
 
 type AuthContext = axum_login::extractors::AuthContext<String, User, CosmosStore>;
 
@@ -582,7 +582,7 @@ async fn update_list(
             list.items.extend(items);
         }
     }
-    if let Ok((Some("spotify"), external_id)) = get_unique_source(&list) {
+    if let Ok((Some("spotify"), external_id)) = list.get_unique_source() {
         list.iframe = Some(format!(
             "https://open.spotify.com/embed/playlist/{}?utm_source=generator",
             external_id
@@ -760,7 +760,7 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
     let user_id = UserId(user.user_id.clone());
     let list = get_list_doc(&state.client, &user_id, id).await?;
     // TODO: create new playlist if one doesn't exist
-    let (_, external_id) = get_unique_source(&list)?;
+    let (_, external_id) = list.get_unique_source()?;
     let ids: Vec<_> = get_list_query_impl(&state.client, &user_id, list)
         .await?
         .items
@@ -770,35 +770,6 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
     let access_token = source::spotify::get_access_token(&state.client, user).await?;
     source::spotify::update_list(access_token, &external_id, &ids).await?;
     Ok(StatusCode::OK)
-}
-
-fn get_unique_source(list: &List) -> Result<(Option<&str>, String), Error> {
-    let ListMode::User(Some(external_id)) = &list.mode else {
-        return Err(Error::client_error("Push is not supported for this list type"));
-    };
-    let mut iter = list.sources.iter().map(get_source_id);
-    let source = if let Some(source) = iter.next() {
-        if source.is_none() {
-            return Err(Error::client_error("Push is not supported for the source"));
-        }
-        source
-    } else {
-        return Err(Error::client_error("List has no sources"));
-    };
-    for s in iter {
-        if s != source {
-            return Err(Error::client_error("List has multiple sources"));
-        }
-    }
-    Ok((source, external_id.id.clone()))
-}
-
-fn get_source_id(source: &Source) -> Option<&str> {
-    match source.source_type {
-        SourceType::Spotify(_) => Some("spotify"),
-        SourceType::Setlist(_) => Some("spotify"),
-        _ => None,
-    }
 }
 
 async fn import_list(

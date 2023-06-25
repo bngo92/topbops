@@ -1,4 +1,4 @@
-use crate::{Error, UserId, ITEM_FIELDS};
+use crate::{UserId, ITEM_FIELDS};
 use sqlparser::ast::{
     BinaryOperator, Expr, FunctionArg, FunctionArgExpr, Ident, Query, SelectItem, SetExpr,
     Statement, TableFactor,
@@ -6,7 +6,7 @@ use sqlparser::ast::{
 use sqlparser::dialect::MySqlDialect;
 use sqlparser::parser::Parser;
 use std::collections::{HashMap, VecDeque};
-use zeroflops::{ItemMetadata, List, ListMode};
+use zeroflops::{Error, ItemMetadata, List, ListMode};
 
 pub fn rewrite_list_query<'a>(
     list: &'a List,

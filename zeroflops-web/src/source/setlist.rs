@@ -1,10 +1,10 @@
-use crate::{Error, UserId};
+use crate::UserId;
 use futures::{StreamExt, TryStreamExt};
 use hyper::{Body, Client, Request, Uri};
 use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
 use time::Date;
-use zeroflops::{Id, Source, SourceType};
+use zeroflops::{Error, Id, Source, SourceType};
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

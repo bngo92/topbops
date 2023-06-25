@@ -49,21 +49,21 @@ enum Route {
     Settings,
 }
 
-fn switch(routes: Route, user: Option<User>) -> Html {
+fn switch(routes: Route, user: Rc<Option<User>>) -> Html {
     let logged_in = user.is_some();
     let content = match routes {
         Route::Home => html! { <Home {logged_in}/> },
         Route::Lists => html! { <crate::list::Lists {logged_in}/> },
-        Route::List { id } => html! { <ListComponent {logged_in} {id} view={ListTab::Items}/> },
-        Route::View { id } => html! { <ListComponent {logged_in} {id} view={ListTab::View}/> },
-        Route::Edit { id } => html! { <ListComponent {logged_in} {id} view={ListTab::Edit}/> },
+        Route::List { id } => html! { <ListComponent {user} {id} view={ListTab::Items}/> },
+        Route::View { id } => html! { <ListComponent {user} {id} view={ListTab::View}/> },
+        Route::Edit { id } => html! { <ListComponent {user} {id} view={ListTab::Edit}/> },
         Route::Match { id } => html! { <Match {id}/> },
         Route::Tournament { id } => html! {
             <Tournament {id}/>
         },
         Route::Search => return html! { <Search/> },
         Route::Settings => html! {
-            if let Some(user) = user {
+            if let Some(user) = (*user).clone() {
                 <Settings {user}/>
             } else {
                 <Redirect<Route> to={Route::Home}/>
@@ -89,7 +89,7 @@ enum Msg {
 
 struct App {
     user_loaded: bool,
-    user: Option<User>,
+    user: Rc<Option<User>>,
     login: bool,
     dropdown: bool,
 }
@@ -107,7 +107,7 @@ impl Component for App {
         });
         App {
             user_loaded: false,
-            user: None,
+            user: Rc::new(None),
             login: false,
             dropdown: false,
         }
@@ -147,7 +147,7 @@ impl Component for App {
                             </ul>
                             if self.user_loaded {
                                 <ul class="navbar-nav">
-                                    if let Some(user) = &self.user {
+                                    if let Some(user) = &*self.user {
                                         <li class="nav-item dropdown">
                                             <a class={toggle_class} href="#" onclick={dropdown}>{&user.user_id}</a>
                                             <ul class={menu_class}>
@@ -174,7 +174,7 @@ impl Component for App {
                         <div class="modal-backdrop show"></div>
                     }
                     if self.user_loaded {
-                        <Switch<Route> render={let user = self.user.clone(); move |routes| switch(routes, user.clone())} />
+                        <Switch<Route> render={let user = Rc::clone(&self.user); move |routes| switch(routes, user.clone())} />
                     }
                 </BrowserRouter>
             </div>
@@ -186,7 +186,7 @@ impl Component for App {
             Msg::Demo => self.user_loaded = true,
             Msg::Success(user) => {
                 self.user_loaded = true;
-                self.user = Some(user)
+                self.user = Rc::new(Some(user))
             }
             Msg::Login => self.login = true,
             Msg::HideLogin => self.login = false,
@@ -557,7 +557,7 @@ pub enum ListMsg {
 #[derive(Eq, PartialEq, Properties)]
 pub struct ListProps {
     pub view: ListTab,
-    pub logged_in: bool,
+    pub user: Rc<Option<User>>,
     pub id: String,
 }
 
@@ -595,12 +595,13 @@ impl Component for ListComponent {
                         tabs[2] = active;
                     }
                 }
-                let logged_in = ctx.props().logged_in;
                 let view = match ctx.props().view {
                     ListTab::View => html! { <ListView id={list.id.clone()}/> },
-                    ListTab::Items => html! { <ListItems {logged_in} list={list.clone()}/> },
+                    ListTab::Items => {
+                        html! { <ListItems user={Rc::clone(&ctx.props().user)} list={list.clone()}/> }
+                    }
                     ListTab::Edit => {
-                        html! { <Edit {logged_in} list={list.clone()}/> }
+                        html! { <Edit logged_in={ctx.props().user.is_some()} list={list.clone()}/> }
                     }
                 };
                 html! {

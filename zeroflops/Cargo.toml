@@ -6,9 +6,13 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+axum = { version = "0.6.18", optional = true }
+azure_core = "0.4.0"
 azure_data_cosmos = { version = "0.5.0", optional = true }
+hyper = { version = "0.14", features = ["full"], optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sqlparser = { version = "0", features = ["serde"] }
 
 [features]
-azure = ["azure_data_cosmos"]
+hyper = ["dep:axum", "dep:azure_data_cosmos", "dep:hyper"]

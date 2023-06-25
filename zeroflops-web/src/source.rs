@@ -1,6 +1,6 @@
-use crate::{Error, UserId};
+use crate::UserId;
 use serde_json::{Map, Value};
-use zeroflops::{Source, SourceType, Spotify};
+use zeroflops::{Error, Source, SourceType, Spotify};
 
 pub mod setlist;
 pub mod spotify;

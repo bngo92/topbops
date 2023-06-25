@@ -23,7 +23,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 sqlparser = { version = "0", features = ["serde"] }
 time = { version = "0.3.21", features = ["formatting"] }
-zeroflops = { path = "../zeroflops/", features = ["azure"] }
+zeroflops = { path = "../zeroflops/", features = ["hyper"] }
 tower-http = { version = "0.4.0", features = ["fs", "trace"] }
 tracing-subscriber = "0.3.17"
 uuid = { version = "0.8", features = ["v4"] }

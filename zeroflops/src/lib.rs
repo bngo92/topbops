@@ -1,4 +1,9 @@
-#[cfg(feature = "azure")]
+#[cfg(feature = "hyper")]
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
+#[cfg(feature = "hyper")]
 use azure_data_cosmos::prelude::CosmosEntity;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -75,6 +80,37 @@ pub enum SourceType {
     Setlist(Id),
 }
 
+impl List {
+    pub fn get_unique_source(&self) -> Result<(Option<&str>, String), Error> {
+        let ListMode::User(Some(external_id)) = &self.mode else {
+        return Err(Error::client_error("Push is not supported for this list type"));
+    };
+        let mut iter = self.sources.iter().map(get_source_id);
+        let source = if let Some(source) = iter.next() {
+            if source.is_none() {
+                return Err(Error::client_error("Push is not supported for the source"));
+            }
+            source
+        } else {
+            return Err(Error::client_error("List has no sources"));
+        };
+        for s in iter {
+            if s != source {
+                return Err(Error::client_error("List has multiple sources"));
+            }
+        }
+        Ok((source, external_id.id.clone()))
+    }
+}
+
+fn get_source_id(source: &Source) -> Option<&str> {
+    match source.source_type {
+        SourceType::Spotify(_) => Some("spotify"),
+        SourceType::Setlist(_) => Some("spotify"),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum Spotify {
     Playlist(Id),
@@ -87,7 +123,7 @@ pub struct Id {
     pub raw_id: String,
 }
 
-#[cfg(feature = "azure")]
+#[cfg(feature = "hyper")]
 impl CosmosEntity for List {
     type Entity = String;
 
@@ -114,4 +150,97 @@ pub struct User {
     pub spotify_user: Option<String>,
     pub spotify_url: Option<String>,
     pub google_email: Option<String>,
+}
+
+#[derive(Debug)]
+pub enum Error {
+    ClientError(String),
+    InternalError(InternalError),
+}
+
+impl Error {
+    pub fn client_error(e: impl Into<String>) -> Self {
+        Self::ClientError(e.into())
+    }
+
+    pub fn internal_error(e: impl Into<String>) -> Self {
+        Self::InternalError(InternalError::Error(e.into()))
+    }
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for Error {}
+
+#[derive(Debug)]
+pub enum InternalError {
+    #[cfg(feature = "hyper")]
+    HyperError(hyper::Error),
+    #[cfg(feature = "hyper")]
+    RequestError(hyper::http::Error),
+    JSONError(serde_json::Error),
+    CosmosError(azure_core::error::Error),
+    IOError(std::io::Error),
+    Error(String),
+}
+
+#[cfg(feature = "hyper")]
+impl From<hyper::Error> for Error {
+    fn from(e: hyper::Error) -> Error {
+        Error::InternalError(InternalError::HyperError(e))
+    }
+}
+
+#[cfg(feature = "hyper")]
+impl From<hyper::http::Error> for Error {
+    fn from(e: hyper::http::Error) -> Error {
+        Error::InternalError(InternalError::RequestError(e))
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(e: serde_json::Error) -> Error {
+        Error::InternalError(InternalError::JSONError(e))
+    }
+}
+
+impl From<azure_core::error::Error> for Error {
+    fn from(e: azure_core::error::Error) -> Error {
+        Error::InternalError(InternalError::CosmosError(e))
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Error {
+        Error::InternalError(InternalError::IOError(e))
+    }
+}
+
+impl From<sqlparser::parser::ParserError> for Error {
+    fn from(e: sqlparser::parser::ParserError) -> Error {
+        Error::ClientError(match e {
+            sqlparser::parser::ParserError::TokenizerError(e) => e,
+            sqlparser::parser::ParserError::ParserError(e) => e,
+            sqlparser::parser::ParserError::RecursionLimitExceeded => {
+                "Query is too long".to_owned()
+            }
+        })
+    }
+}
+
+#[cfg(feature = "hyper")]
+impl From<Error> for Response {
+    fn from(e: Error) -> Response {
+        match e {
+            Error::ClientError(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+            Error::InternalError(e) => {
+                eprintln!("server error: {:?}", e);
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            }
+        }
+    }
 }

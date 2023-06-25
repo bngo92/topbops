@@ -2,13 +2,14 @@ use crate::bootstrap::Alert;
 use js_sys::Error;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::rc::Rc;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{
     HtmlInputElement, HtmlSelectElement, Request, RequestInit, RequestMode, Response, Url,
 };
 use yew::{html, Component, Context, Html, NodeRef, Properties};
-use zeroflops::{Id, ItemMetadata, ItemQuery, List, ListMode, SourceType, Spotify};
+use zeroflops::{Id, ItemMetadata, ItemQuery, List, ListMode, SourceType, Spotify, User};
 
 enum ListState {
     Fetching,
@@ -27,7 +28,7 @@ pub enum Msg {
 
 #[derive(PartialEq, Properties)]
 pub struct ListProps {
-    pub logged_in: bool,
+    pub user: Rc<Option<User>>,
     pub list: List,
 }
 
@@ -51,7 +52,7 @@ impl Component for ListItems {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let disabled = !ctx.props().logged_in;
+        let disabled = ctx.props().user.is_none();
         match &self.state {
             ListState::Fetching => html! {},
             ListState::Success(items) => {
@@ -104,6 +105,15 @@ impl Component for ListItems {
                 });
                 let save = ctx.link().callback(|_| Msg::Save);
                 let push = ctx.link().callback(|_| Msg::Push);
+                let push_available = if let Some(user) = &*ctx.props().user {
+                    if let Ok((Some(source), _)) = list.get_unique_source() {
+                        source == "spotify" && user.spotify_user.is_some()
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
                 let hide = ctx.link().callback(|_| Msg::HideAlert);
                 html! {
                     <div>
@@ -133,7 +143,7 @@ impl Component for ListItems {
                         <h4>{"Data Sources"}</h4>
                         {for source_html}
                         if !matches!(list.mode, ListMode::External) {
-                            <button type="button" class="btn btn-primary" onclick={push} {disabled}>{"Push"}</button>
+                            <button type="button" class="btn btn-success" onclick={push} disabled={!push_available}>{"Push"}</button>
                         }
                     </div>
                 }

@@ -2332,9 +2332,13 @@ dependencies = [
 name = "zeroflops"
 version = "0.1.0"
 dependencies = [
+ "axum",
+ "azure_core",
  "azure_data_cosmos",
+ "hyper",
  "serde",
  "serde_json",
+ "sqlparser",
 ]
 
 [[package]]
