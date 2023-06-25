@@ -107,3 +107,10 @@ pub struct Item {
     pub values: Vec<String>,
     pub metadata: Option<ItemMetadata>,
 }
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct User {
+    pub user_id: String,
+    pub spotify_url: Option<String>,
+    pub google_email: Option<String>,
+}

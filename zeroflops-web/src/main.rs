@@ -139,6 +139,7 @@ async fn login(
     let spotify_user: source::spotify::User = serde_json::from_slice(&got)?;
     let spotify_credentials = Some(SpotifyCredentials {
         user_id: spotify_user.id.clone(),
+        url: spotify_user.external_urls["spotify"].clone(),
         access_token: token.access_token,
         refresh_token: token.refresh_token.ok_or(Error::internal_error(
             "Spotify did not return refresh_token",
@@ -956,6 +957,15 @@ async fn update_items(
     Ok(StatusCode::NO_CONTENT)
 }
 
+async fn user_handler(auth: AuthContext) -> Result<Json<zeroflops::User>, Response> {
+    let user = require_user(auth)?;
+    Ok(Json(zeroflops::User {
+        user_id: user.user_id,
+        spotify_url: user.spotify_credentials.map(|c| c.url),
+        google_email: user.google_email,
+    }))
+}
+
 struct AppState {
     client: SessionClient,
 }
@@ -1053,6 +1063,7 @@ async fn main() {
         .route("/login", get(login_handler))
         .route("/login/google", get(google_login_handler))
         .route("/logout", get(logout_handler))
+        .route("/user", get(user_handler))
         .with_state(shared_state);
 
     let app = Router::new()

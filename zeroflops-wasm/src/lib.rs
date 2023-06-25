@@ -12,14 +12,12 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{
-    HtmlDocument, HtmlSelectElement, Request, RequestInit, RequestMode, Response, Window,
-};
+use web_sys::{HtmlSelectElement, Request, RequestInit, RequestMode, Response, Window};
 use yew::{html, Callback, Component, Context, Html, NodeRef, Properties};
 use yew_router::prelude::Link;
 use yew_router::scope_ext::RouterScopeExt;
 use yew_router::{BrowserRouter, Routable, Switch};
-use zeroflops::{Id, ItemQuery, List, ListMode, Lists, Spotify};
+use zeroflops::{Id, ItemQuery, List, ListMode, Lists, Spotify, User};
 
 mod base;
 mod bootstrap;
@@ -49,13 +47,13 @@ enum Route {
     Search,
 }
 
-fn switch(routes: Route) -> Html {
+fn switch(routes: Route, logged_in: bool) -> Html {
     let content = match routes {
-        Route::Home => html! { <Home/> },
-        Route::Lists => html! { <crate::list::Lists/> },
-        Route::List { id } => html! { <ListComponent {id} view={ListTab::Items}/> },
-        Route::View { id } => html! { <ListComponent {id} view={ListTab::View}/> },
-        Route::Edit { id } => html! { <ListComponent {id} view={ListTab::Edit}/> },
+        Route::Home => html! { <Home {logged_in}/> },
+        Route::Lists => html! { <crate::list::Lists {logged_in}/> },
+        Route::List { id } => html! { <ListComponent {logged_in} {id} view={ListTab::Items}/> },
+        Route::View { id } => html! { <ListComponent {logged_in} {id} view={ListTab::View}/> },
+        Route::Edit { id } => html! { <ListComponent {logged_in} {id} view={ListTab::Edit}/> },
         Route::Match { id } => html! { <Match {id}/> },
         Route::Tournament { id } => html! {
             <Tournament {id}/>
@@ -70,6 +68,8 @@ fn switch(routes: Route) -> Html {
 }
 
 enum Msg {
+    Demo,
+    Success(User),
     Login,
     HideLogin,
     //Logout,
@@ -77,6 +77,8 @@ enum Msg {
 }
 
 struct App {
+    user_loaded: bool,
+    user: Option<User>,
     login: bool,
 }
 
@@ -84,8 +86,18 @@ impl Component for App {
     type Message = Msg;
     type Properties = ();
 
-    fn create(_: &Context<Self>) -> Self {
-        App { login: false }
+    fn create(ctx: &Context<Self>) -> Self {
+        ctx.link().send_future(async move {
+            match get_user().await {
+                Ok(user) => Msg::Success(user),
+                Err(_) => Msg::Demo,
+            }
+        });
+        App {
+            user_loaded: false,
+            user: None,
+            login: false,
+        }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
@@ -114,27 +126,31 @@ impl Component for App {
                                     <Link<Route> classes={search} to={Route::Search}>{"Search"}</Link<Route>>
                                 </li>
                             </ul>
-                            <ul class="navbar-nav">
-                                <li class="nav-item">
-                                    if let Some(user) = get_user() {
-                                        <a class="nav-link" href="/api/logout">{format!("{} Logout", user)}</a>
-                                    } else {
-                                        <a class="nav-link" href="#" onclick={login}>{"Log in"}</a>
-                                    }
-                                </li>
-                            </ul>
+                            if self.user_loaded {
+                                <ul class="navbar-nav">
+                                    <li class="nav-item">
+                                        if let Some(user) = &self.user {
+                                            <a class="nav-link" href="/api/logout">{format!("{} Logout", user.user_id)}</a>
+                                        } else {
+                                            <a class="nav-link" href="#" onclick={login}>{"Log in"}</a>
+                                        }
+                                    </li>
+                                </ul>
+                            }
                         </div>
                     </nav>
                     if self.login {
                         <Modal header={"Log in"} {hide}>
-                            <div class="modal-body">
+                            <div class="modal-body d-grid gap-2">
                                 <a class="btn btn-success" href={format!("https://accounts.spotify.com/authorize?client_id=ee3d1b4f8d80477ea48743a511ef3018&redirect_uri={}/api/login&response_type=code&scope=playlist-modify-public playlist-modify-private", location.origin().unwrap().as_str())}>{"Log in with Spotify"}</a>
                                 <a class="btn btn-success" href={format!("https://accounts.google.com/o/oauth2/v2/auth?client_id=1038220726403-n55jha2cvprd8kdb4akdfvo0uiok4p5u.apps.googleusercontent.com&redirect_uri={}/api/login/google&response_type=code&scope=email", location.origin().unwrap().as_str())}>{"Log in with Google"}</a>
                             </div>
                         </Modal>
                         <div class="modal-backdrop show"></div>
                     }
-                    <Switch<Route> render={switch} />
+                    if self.user_loaded {
+                        <Switch<Route> render={let logged_in = self.user.is_some(); move |routes| switch(routes, logged_in)} />
+                    }
                 </BrowserRouter>
             </div>
         }
@@ -142,6 +158,13 @@ impl Component for App {
 
     fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
+            Msg::Demo => {
+                self.user_loaded = true;
+            }
+            Msg::Success(user) => {
+                self.user_loaded = true;
+                self.user = Some(user)
+            }
             Msg::Login => self.login = true,
             Msg::HideLogin => self.login = false,
             /*Msg::Logout => {
@@ -168,6 +191,11 @@ pub enum HomeMsg {
     Create,
 }
 
+#[derive(Eq, PartialEq, Properties)]
+pub struct UserProps {
+    logged_in: bool,
+}
+
 pub struct Home {
     help_collapsed: bool,
     lists: Vec<List>,
@@ -176,20 +204,20 @@ pub struct Home {
 
 impl Component for Home {
     type Message = HomeMsg;
-    type Properties = ();
+    type Properties = UserProps;
 
     fn create(ctx: &Context<Self>) -> Self {
         let select_ref = NodeRef::default();
         ctx.link().send_future(Home::fetch_lists());
         Home {
-            help_collapsed: get_user().is_some(),
+            help_collapsed: ctx.props().logged_in,
             lists: Vec::new(),
             select_ref,
         }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let disabled = get_user().is_none();
+        let disabled = !ctx.props().logged_in;
         let create = ctx.link().callback(|_| HomeMsg::Create);
         html! {
           <div>
@@ -505,6 +533,7 @@ pub enum ListMsg {
 #[derive(Eq, PartialEq, Properties)]
 pub struct ListProps {
     pub view: ListTab,
+    pub logged_in: bool,
     pub id: String,
 }
 
@@ -542,10 +571,13 @@ impl Component for ListComponent {
                         tabs[2] = active;
                     }
                 }
+                let logged_in = ctx.props().logged_in;
                 let view = match ctx.props().view {
                     ListTab::View => html! { <ListView id={list.id.clone()}/> },
-                    ListTab::Items => html! { <ListItems list={list.clone()}/> },
-                    ListTab::Edit => html! { <Edit list={list.clone()}/> },
+                    ListTab::Items => html! { <ListItems {logged_in} list={list.clone()}/> },
+                    ListTab::Edit => {
+                        html! { <Edit {logged_in} list={list.clone()}/> }
+                    }
                 };
                 html! {
                     <div class="row">
@@ -719,18 +751,13 @@ fn query(url: &str, method: &str) -> Result<Request, JsValue> {
     Request::new_with_str_and_init(url, &opts)
 }
 
-fn get_user() -> Option<String> {
+async fn get_user() -> Result<User, JsValue> {
     let window = web_sys::window().expect("no global `window` exists");
-    let document = window.document().expect("should have a document on window");
-    let html_document = document.dyn_into::<HtmlDocument>().unwrap();
-    let cookie = html_document.cookie();
-    let cookies: HashMap<_, _> = cookie
-        .as_ref()
-        .unwrap()
-        .split(';')
-        .filter_map(|c| c.trim().split_once('='))
-        .collect();
-    cookies.get("user").map(ToString::to_string)
+    let request = query("/api/user", "GET")?;
+    let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
+    let resp: Response = resp_value.dyn_into()?;
+    let json = JsFuture::from(resp.json()?).await?;
+    Ok(serde_wasm_bindgen::from_value(json).unwrap())
 }
 
 fn window() -> Window {

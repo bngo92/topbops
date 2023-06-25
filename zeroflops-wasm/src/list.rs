@@ -1,4 +1,4 @@
-use crate::Route;
+use crate::{Route, UserProps};
 use web_sys::HtmlSelectElement;
 use yew::{html, Component, Context, Html, NodeRef};
 use yew_router::prelude::Link;
@@ -21,7 +21,7 @@ pub struct Lists {
 
 impl Component for Lists {
     type Message = ListsMsg;
-    type Properties = ();
+    type Properties = UserProps;
 
     fn create(ctx: &Context<Self>) -> Self {
         ctx.link().send_future(async move {
@@ -46,7 +46,7 @@ impl Component for Lists {
                 </div>
             }
         });
-        let disabled = crate::get_user().is_none();
+        let disabled = !ctx.props().logged_in;
         let default_import = if disabled {
             "Not supported in demo"
         } else {

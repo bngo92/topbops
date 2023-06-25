@@ -25,6 +25,7 @@ pub struct User {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SpotifyCredentials {
     pub user_id: String,
+    pub url: String,
     pub access_token: String,
     pub refresh_token: String,
 }

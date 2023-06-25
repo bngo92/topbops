@@ -16,6 +16,7 @@ pub enum Msg {
 // TODO: need to refresh list after edit
 #[derive(Eq, PartialEq, Properties)]
 pub struct EditProps {
+    pub logged_in: bool,
     pub list: List,
 }
 
@@ -50,7 +51,7 @@ impl Component for Edit {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let disabled = crate::get_user().is_none();
+        let disabled = !ctx.props().logged_in;
         let source_html = self.sources
             .iter()
             .enumerate()

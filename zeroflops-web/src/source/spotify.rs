@@ -4,6 +4,7 @@ use hyper::{Body, Client, Method, Request, Uri};
 use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::collections::HashMap;
 use zeroflops::{Id, List, ListMode, Source, SourceType, Spotify};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -75,6 +76,7 @@ struct SearchTracks {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct User {
     pub id: String,
+    pub external_urls: HashMap<String, String>,
 }
 
 pub async fn import(

@@ -27,6 +27,7 @@ pub enum Msg {
 
 #[derive(PartialEq, Properties)]
 pub struct ListProps {
+    pub logged_in: bool,
     pub list: List,
 }
 
@@ -50,7 +51,7 @@ impl Component for ListItems {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let disabled = crate::get_user().is_none();
+        let disabled = !ctx.props().logged_in;
         match &self.state {
             ListState::Fetching => html! {},
             ListState::Success(items) => {
