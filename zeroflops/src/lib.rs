@@ -111,6 +111,7 @@ pub struct Item {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct User {
     pub user_id: String,
+    pub spotify_user: Option<String>,
     pub spotify_url: Option<String>,
     pub google_email: Option<String>,
 }

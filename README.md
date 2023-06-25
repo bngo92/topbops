@@ -18,7 +18,7 @@ rustup run nightly wasm-pack build --target web
 - [ ] Debug session issues
 ### P1
 - [ ] Add sort/rank page to lists
-- [ ] Add Google auth
+- [x] Add Google auth
 - [ ] Add IMDb data source
 - [x] Support user lists
 - [ ] Add dedicated import page

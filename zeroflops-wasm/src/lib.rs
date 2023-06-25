@@ -14,7 +14,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlSelectElement, Request, RequestInit, RequestMode, Response, Window};
 use yew::{html, Callback, Component, Context, Html, NodeRef, Properties};
-use yew_router::prelude::Link;
+use yew_router::prelude::{Link, Redirect};
 use yew_router::scope_ext::RouterScopeExt;
 use yew_router::{BrowserRouter, Routable, Switch};
 use zeroflops::{Id, ItemQuery, List, ListMode, Lists, Spotify, User};
@@ -45,9 +45,12 @@ enum Route {
     Tournament { id: String },
     #[at("/search")]
     Search,
+    #[at("/settings")]
+    Settings,
 }
 
-fn switch(routes: Route, logged_in: bool) -> Html {
+fn switch(routes: Route, user: Option<User>) -> Html {
+    let logged_in = user.is_some();
     let content = match routes {
         Route::Home => html! { <Home {logged_in}/> },
         Route::Lists => html! { <crate::list::Lists {logged_in}/> },
@@ -59,6 +62,13 @@ fn switch(routes: Route, logged_in: bool) -> Html {
             <Tournament {id}/>
         },
         Route::Search => return html! { <Search/> },
+        Route::Settings => html! {
+            if let Some(user) = user {
+                <Settings {user}/>
+            } else {
+                <Redirect<Route> to={Route::Home}/>
+            }
+        },
     };
     html! {
         <div class="container-lg my-md-4">
@@ -72,6 +82,7 @@ enum Msg {
     Success(User),
     Login,
     HideLogin,
+    Dropdown,
     //Logout,
     //Reload,
 }
@@ -80,6 +91,7 @@ struct App {
     user_loaded: bool,
     user: Option<User>,
     login: bool,
+    dropdown: bool,
 }
 
 impl Component for App {
@@ -97,6 +109,7 @@ impl Component for App {
             user_loaded: false,
             user: None,
             login: false,
+            dropdown: false,
         }
     }
 
@@ -110,6 +123,12 @@ impl Component for App {
         } else */{
             "nav-link"
         };
+        let (toggle_class, menu_class) = if self.dropdown {
+            ("nav-link dropdown-toggle show", "dropdown-menu show")
+        } else {
+            ("nav-link dropdown-toggle", "dropdown-menu")
+        };
+        let dropdown = ctx.link().callback(|_| Msg::Dropdown);
         let login = ctx.link().callback(|_| Msg::Login);
         let hide = ctx.link().callback(|_| Msg::HideLogin);
         html! {
@@ -128,13 +147,19 @@ impl Component for App {
                             </ul>
                             if self.user_loaded {
                                 <ul class="navbar-nav">
-                                    <li class="nav-item">
-                                        if let Some(user) = &self.user {
-                                            <a class="nav-link" href="/api/logout">{format!("{} Logout", user.user_id)}</a>
-                                        } else {
+                                    if let Some(user) = &self.user {
+                                        <li class="nav-item dropdown">
+                                            <a class={toggle_class} href="#" onclick={dropdown}>{&user.user_id}</a>
+                                            <ul class={menu_class}>
+                                                <li><Link<Route> classes="dropdown-item" to={Route::Settings}>{"Settings"}</Link<Route>></li>
+                                                <li><a class="dropdown-item" href="/api/logout">{"Log out"}</a></li>
+                                            </ul>
+                                        </li>
+                                    } else {
+                                        <li class="nav-item">
                                             <a class="nav-link" href="#" onclick={login}>{"Log in"}</a>
-                                        }
-                                    </li>
+                                        </li>
+                                    }
                                 </ul>
                             }
                         </div>
@@ -149,7 +174,7 @@ impl Component for App {
                         <div class="modal-backdrop show"></div>
                     }
                     if self.user_loaded {
-                        <Switch<Route> render={let logged_in = self.user.is_some(); move |routes| switch(routes, logged_in)} />
+                        <Switch<Route> render={let user = self.user.clone(); move |routes| switch(routes, user.clone())} />
                     }
                 </BrowserRouter>
             </div>
@@ -158,15 +183,14 @@ impl Component for App {
 
     fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
-            Msg::Demo => {
-                self.user_loaded = true;
-            }
+            Msg::Demo => self.user_loaded = true,
             Msg::Success(user) => {
                 self.user_loaded = true;
                 self.user = Some(user)
             }
             Msg::Login => self.login = true,
             Msg::HideLogin => self.login = false,
+            Msg::Dropdown => self.dropdown = !self.dropdown,
             /*Msg::Logout => {
                 ctx.link().clone().send_future(async move {
                     let window = web_sys::window().expect("no global `window` exists");
@@ -618,6 +642,46 @@ pub enum ListTab {
     View,
     Items,
     Edit,
+}
+
+#[derive(Eq, PartialEq, Properties)]
+pub struct SettingsProps {
+    user: User,
+}
+
+struct Settings;
+
+impl Component for Settings {
+    type Message = ();
+    type Properties = SettingsProps;
+
+    fn create(_: &Context<Self>) -> Self {
+        Settings
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let window = web_sys::window().expect("no global `window` exists");
+        let location = window.location();
+        // TODO: let you remove integrations
+        // Should we link to Google profile?
+        html! {
+            <div>
+                <h1>{"Integrations"}</h1>
+                <h2>{"Spotify"}</h2>
+                if let (Some(url), Some(user)) = (&ctx.props().user.spotify_url, &ctx.props().user.spotify_user) {
+                    <a href={url.clone()}>{&user}</a>
+                } else {
+                    <a class="btn btn-success" href={format!("https://accounts.spotify.com/authorize?client_id=ee3d1b4f8d80477ea48743a511ef3018&redirect_uri={}/api/login&response_type=code&scope=playlist-modify-public playlist-modify-private", location.origin().unwrap().as_str())}>{"Log in with Spotify"}</a>
+                }
+                <h2>{"Google"}</h2>
+                if let Some(google_email) = &ctx.props().user.google_email {
+                    <p>{google_email}</p>
+                } else {
+                    <a class="btn btn-success" href={format!("https://accounts.google.com/o/oauth2/v2/auth?client_id=1038220726403-n55jha2cvprd8kdb4akdfvo0uiok4p5u.apps.googleusercontent.com&redirect_uri={}/api/login/google&response_type=code&scope=email", location.origin().unwrap().as_str())}>{"Log in with Google"}</a>
+                }
+            </div>
+        }
+    }
 }
 
 // Called by our JS entry point to run the example

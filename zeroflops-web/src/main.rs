@@ -942,6 +942,7 @@ async fn user_handler(auth: AuthContext) -> Result<Json<zeroflops::User>, Respon
     let user = require_user(auth)?;
     Ok(Json(zeroflops::User {
         user_id: user.user_id,
+        spotify_user: user.spotify_credentials.as_ref().map(|c| c.user_id.clone()),
         spotify_url: user.spotify_credentials.map(|c| c.url),
         google_email: user.google_email,
     }))
