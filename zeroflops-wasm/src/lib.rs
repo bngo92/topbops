@@ -12,7 +12,7 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{HtmlSelectElement, Request, RequestInit, RequestMode, Response, Window};
+use web_sys::{HtmlSelectElement, MouseEvent, Request, RequestInit, RequestMode, Response, Window};
 use yew::{html, Callback, Component, Context, Html, NodeRef, Properties};
 use yew_router::prelude::{Link, Redirect};
 use yew_router::scope_ext::RouterScopeExt;
@@ -83,6 +83,7 @@ enum Msg {
     Login,
     HideLogin,
     Dropdown,
+    ResetDropdown,
     //Logout,
     //Reload,
 }
@@ -114,7 +115,7 @@ impl Component for App {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let window = web_sys::window().expect("no global `window` exists");
+        let window = window();
         let location = window.location();
         //let onclick = ctx.link().callback(|_| Msg::Logout);
         // TODO: make anchors active if active
@@ -128,11 +129,16 @@ impl Component for App {
         } else {
             ("nav-link dropdown-toggle", "dropdown-menu")
         };
-        let dropdown = ctx.link().callback(|_| Msg::Dropdown);
+        let dropdown = ctx.link().callback(|e: MouseEvent| {
+            // Prevent reset_dropdown from triggering
+            e.stop_propagation();
+            Msg::Dropdown
+        });
         let login = ctx.link().callback(|_| Msg::Login);
         let hide = ctx.link().callback(|_| Msg::HideLogin);
+        let reset_dropdown = ctx.link().callback(|_| Msg::ResetDropdown);
         html! {
-            <div>
+            <div class="vh-100" onclick={reset_dropdown}>
                 <BrowserRouter>
                     <nav class="navbar navbar-expand navbar-dark bg-dark">
                         <div class="container-lg">
@@ -191,6 +197,7 @@ impl Component for App {
             Msg::Login => self.login = true,
             Msg::HideLogin => self.login = false,
             Msg::Dropdown => self.dropdown = !self.dropdown,
+            Msg::ResetDropdown => self.dropdown = false,
             /*Msg::Logout => {
                 ctx.link().clone().send_future(async move {
                     let window = web_sys::window().expect("no global `window` exists");
@@ -661,7 +668,7 @@ impl Component for Settings {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let window = web_sys::window().expect("no global `window` exists");
+        let window = window();
         let location = window.location();
         // TODO: let you remove integrations
         // Should we link to Google profile?
@@ -693,7 +700,7 @@ pub async fn run() -> Result<(), JsValue> {
 }
 
 async fn fetch_lists(favorite: bool) -> Result<Vec<List>, JsValue> {
-    let window = web_sys::window().expect("no global `window` exists");
+    let window = window();
     let request = query(&format!("/api/lists?favorite={}", favorite), "GET")?;
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
@@ -703,7 +710,7 @@ async fn fetch_lists(favorite: bool) -> Result<Vec<List>, JsValue> {
 }
 
 async fn fetch_list(id: &str) -> Result<List, JsValue> {
-    let window = web_sys::window().expect("no global `window` exists");
+    let window = window();
     let request = query(&format!("/api/lists/{}", id), "GET")?;
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
@@ -712,7 +719,7 @@ async fn fetch_list(id: &str) -> Result<List, JsValue> {
 }
 
 async fn create_list() -> Result<List, JsValue> {
-    let window = web_sys::window().expect("no global `window` exists");
+    let window = window();
     let request = Request::new_with_str_and_init(
         "/api/lists",
         RequestInit::new().method("POST").mode(RequestMode::Cors),
@@ -724,7 +731,7 @@ async fn create_list() -> Result<List, JsValue> {
 }
 
 async fn update_list(list: &List) -> Result<(), JsValue> {
-    let window = web_sys::window().expect("no global `window` exists");
+    let window = window();
     let request = Request::new_with_str_and_init(
         &format!("/api/lists/{}", list.id),
         RequestInit::new()
@@ -740,7 +747,7 @@ async fn update_list(list: &List) -> Result<(), JsValue> {
 }
 
 async fn delete_list(id: &str) -> Result<(), JsValue> {
-    let window = web_sys::window().expect("no global `window` exists");
+    let window = window();
     let request = Request::new_with_str_and_init(
         &format!("/api/lists/{}", id),
         RequestInit::new().method("DELETE").mode(RequestMode::Cors),
@@ -750,7 +757,7 @@ async fn delete_list(id: &str) -> Result<(), JsValue> {
 }
 
 async fn get_items(id: &str) -> Result<ItemQuery, JsValue> {
-    let window = web_sys::window().expect("no global `window` exists");
+    let window = window();
     let request = query(&format!("/api/lists/{}/items", id), "GET").unwrap();
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
@@ -759,7 +766,7 @@ async fn get_items(id: &str) -> Result<ItemQuery, JsValue> {
 }
 
 async fn query_items(id: &str) -> Result<ItemQuery, JsValue> {
-    let window = web_sys::window().expect("no global `window` exists");
+    let window = window();
     let request = query(&format!("/api/lists/{}/query", id), "GET").unwrap();
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
@@ -768,7 +775,7 @@ async fn query_items(id: &str) -> Result<ItemQuery, JsValue> {
 }
 
 async fn update_stats(list: &str, win: &str, lose: &str) -> Result<(), JsValue> {
-    let window = web_sys::window().expect("no global `window` exists");
+    let window = window();
     let request = query(
         &format!(
             "/api/?action=update&list={}&win={}&lose={}",
@@ -781,14 +788,14 @@ async fn update_stats(list: &str, win: &str, lose: &str) -> Result<(), JsValue> 
 }
 
 async fn push_list(id: &str) -> Result<(), JsValue> {
-    let window = web_sys::window().expect("no global `window` exists");
+    let window = window();
     let request = query(&format!("/api/?action=push&list={}", id), "POST")?;
     JsFuture::from(window.fetch_with_request(&request)).await?;
     Ok(())
 }
 
 async fn import_list(source: &str, id: &str) -> Result<(), JsValue> {
-    let window = web_sys::window().expect("no global `window` exists");
+    let window = window();
     let request = query(
         &format!("/api/?action=import&source={source}&id={id}"),
         "POST",
@@ -798,7 +805,7 @@ async fn import_list(source: &str, id: &str) -> Result<(), JsValue> {
 }
 
 async fn find_items(search: &str) -> Result<ItemQuery, JsValue> {
-    let window = web_sys::window().expect("no global `window` exists");
+    let window = window();
     let request = query(&format!("/api/items?q=search&query={}", search), "GET")?;
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
@@ -817,7 +824,7 @@ fn query(url: &str, method: &str) -> Result<Request, JsValue> {
 }
 
 async fn get_user() -> Result<User, JsValue> {
-    let window = web_sys::window().expect("no global `window` exists");
+    let window = window();
     let request = query("/api/user", "GET")?;
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
