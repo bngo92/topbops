@@ -189,8 +189,9 @@ fn rewrite_identifier(id: Ident) -> Expr {
 
 #[cfg(test)]
 mod test {
-    use crate::{Error, UserId};
+    use crate::UserId;
     use sqlparser::ast::Query;
+    use zeroflops::Error;
 
     fn rewrite_query(query: &str) -> Result<(Query, Vec<String>), Error> {
         super::rewrite_query(query, &UserId(String::from("demo")))
