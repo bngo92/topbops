@@ -216,7 +216,6 @@ impl Component for App {
 }
 
 pub enum HomeMsg {
-    None,
     ToggleHelp,
     Load(Vec<List>),
     Create,
@@ -304,7 +303,6 @@ impl Component for Home {
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
-            HomeMsg::None => false,
             HomeMsg::ToggleHelp => {
                 self.help_collapsed = !self.help_collapsed;
                 true
@@ -315,10 +313,10 @@ impl Component for Home {
             }
             HomeMsg::Create => {
                 let navigator = ctx.link().navigator().unwrap();
-                ctx.link().send_future(async move {
+                ctx.link().send_future_batch(async move {
                     let list = create_list().await.unwrap();
                     navigator.push(&Route::Edit { id: list.id });
-                    HomeMsg::None
+                    None
                 });
                 false
             }
@@ -557,7 +555,6 @@ enum ListState {
 }
 
 pub enum ListMsg {
-    None,
     Load(List),
 }
 
@@ -636,7 +633,6 @@ impl Component for ListComponent {
 
     fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
-            ListMsg::None => false,
             ListMsg::Load(list) => {
                 self.state = ListState::Success(list);
                 true

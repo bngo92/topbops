@@ -8,7 +8,6 @@ use zeroflops::{List, Spotify};
 pub mod item;
 
 pub enum ListsMsg {
-    None,
     Load(Vec<List>),
     Create,
     Import,
@@ -78,17 +77,16 @@ impl Component for Lists {
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
-            ListsMsg::None => false,
             ListsMsg::Load(lists) => {
                 self.lists = lists;
                 true
             }
             ListsMsg::Create => {
                 let navigator = ctx.link().navigator().unwrap();
-                ctx.link().send_future(async move {
+                ctx.link().send_future_batch(async move {
                     let list = crate::create_list().await.unwrap();
                     navigator.push(&Route::Edit { id: list.id });
-                    ListsMsg::None
+                    None
                 });
                 false
             }

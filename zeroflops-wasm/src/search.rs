@@ -64,7 +64,6 @@ impl Component for Search {
 }
 
 pub enum Msg {
-    None,
     Fetching,
     Success(ItemQuery),
     Failed(String),
@@ -116,12 +115,12 @@ impl Component for SearchPane {
         } else {
             ("w-100", None)
         };
-        let onkeydown = ctx.link().callback(|event: KeyboardEvent| {
+        let onkeydown = ctx.link().batch_callback(|event: KeyboardEvent| {
             if event.key_code() == 13 {
                 event.prevent_default();
-                Msg::Fetching
+                Some(Msg::Fetching)
             } else {
-                Msg::None
+                None
             }
         });
         html! {
@@ -156,7 +155,6 @@ impl Component for SearchPane {
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
-            Msg::None => false,
             Msg::Fetching => {
                 let input = self.search_ref.cast::<HtmlSelectElement>().unwrap().value();
                 ctx.link().send_future(async move {

@@ -245,10 +245,10 @@ impl Component for Edit {
                     .unwrap()
                 {
                     let navigator = ctx.link().navigator().unwrap();
-                    ctx.link().send_future(async move {
+                    ctx.link().send_future_batch(async move {
                         crate::delete_list(&id).await.unwrap();
                         navigator.push(&Route::Home);
-                        Msg::None
+                        None
                     });
                 }
                 false
