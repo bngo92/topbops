@@ -78,6 +78,7 @@ pub enum SourceType {
     Custom(Value),
     Spotify(Spotify),
     Setlist(Id),
+    ListItems(String),
 }
 
 impl List {

@@ -380,7 +380,7 @@ async fn get_list(
     auth: AuthContext,
 ) -> Result<Json<List>, Response> {
     let user_id = get_user_or_demo_user(auth);
-    let list = get_list_doc(&state.client, &user_id, &id).await?;
+    let list = source::get_list(&state.client, &user_id, &id).await?;
     Ok(Json(list))
 }
 
@@ -390,7 +390,7 @@ async fn get_list_query(
     auth: AuthContext,
 ) -> Result<Json<ItemQuery>, Response> {
     let user_id = get_user_or_demo_user(auth);
-    let list = get_list_doc(&state.client, &user_id, &id).await?;
+    let list = source::get_list(&state.client, &user_id, &id).await?;
     Ok(Json(
         get_list_query_impl(&state.client, &user_id, list).await?,
     ))
@@ -453,7 +453,7 @@ async fn get_list_items(
     auth: AuthContext,
 ) -> Result<Json<ItemQuery>, Response> {
     let user_id = get_user_or_demo_user(auth);
-    let list = get_list_doc(&state.client, &user_id, &id).await?;
+    let list = source::get_list(&state.client, &user_id, &id).await?;
     if list.items.is_empty() {
         Ok(Json(ItemQuery {
             fields: Vec::new(),
@@ -510,22 +510,6 @@ fn format_value(v: &Value) -> String {
     }
 }
 
-async fn get_list_doc(client: &SessionClient, user_id: &UserId, id: &str) -> Result<List, Error> {
-    if let Some(list) = client
-        .get_document(|db| {
-            Ok(db
-                .collection_client("lists")
-                .document_client(id, &user_id.0)?
-                .get_document())
-        })
-        .await?
-    {
-        Ok(list)
-    } else {
-        todo!()
-    }
-}
-
 async fn create_list(
     State(state): State<Arc<AppState>>,
     auth: AuthContext,
@@ -556,7 +540,7 @@ async fn update_list(
     let user_id = UserId(user.user_id);
     let user_id = &user_id;
     let client = &state.client;
-    let current_list = get_list_doc(client, user_id, &id).await?;
+    let current_list = source::get_list(client, user_id, &id).await?;
     // Avoid updating sources if they haven't changed
     // TODO: we should also check the snapshot ID
     if current_list
@@ -568,12 +552,11 @@ async fn update_list(
         list.items.clear();
         let sources = list.sources;
         list.sources = Vec::with_capacity(sources.len());
-        for (source, items) in futures::stream::iter(sources.into_iter().map(|source| async move {
-            let (updated_source, items) = source::get_source_and_items(user_id, source).await?;
-            let list_items = zeroflops_web::convert_items(&items);
-            create_items(client, items, false).await?;
-            Ok::<_, Error>((updated_source, list_items))
-        }))
+        for (source, items) in futures::stream::iter(
+            sources
+                .into_iter()
+                .map(|source| source::get_source_and_items(&state.client, user_id, source)),
+        )
         .buffered(5)
         .try_collect::<Vec<_>>()
         .await?
@@ -699,7 +682,7 @@ async fn handle_stats_update(
 ) -> Result<StatusCode, Error> {
     let client = &state.client;
     let (list, win_item, lose_item) = futures::future::join3(
-        get_list_doc(client, &user_id, id),
+        source::get_list(client, &user_id, id),
         get_item_doc(client, &user_id, win),
         get_item_doc(client, &user_id, lose),
     )
@@ -758,7 +741,7 @@ async fn handle_stats_update(
 
 async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<StatusCode, Error> {
     let user_id = UserId(user.user_id.clone());
-    let list = get_list_doc(&state.client, &user_id, id).await?;
+    let list = source::get_list(&state.client, &user_id, id).await?;
     // TODO: create new playlist if one doesn't exist
     let (_, external_id) = list.get_unique_source()?;
     let ids: Vec<_> = get_list_query_impl(&state.client, &user_id, list)
@@ -838,38 +821,7 @@ async fn create_external_list(
     is_upsert: bool,
 ) -> Result<(), Error> {
     create_list_doc(client, list, is_upsert).await?;
-    create_items(client, items, is_upsert).await
-}
-
-async fn create_items(
-    client: &SessionClient,
-    items: Vec<Item>,
-    is_upsert: bool,
-) -> Result<(), Error> {
-    futures::stream::iter(items.into_iter().map(|item| async move {
-        match client
-            .write_document(|db| {
-                Ok(db
-                    .collection_client("items")
-                    .create_document(item)
-                    .is_upsert(is_upsert))
-            })
-            .await
-        {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                if let azure_core::StatusCode::Conflict = e.as_http_error().unwrap().status() {
-                    Ok(())
-                } else {
-                    Err(e)
-                }
-            }
-        }
-    }))
-    .buffered(5)
-    .try_collect()
-    .await
-    .map_err(Error::from)
+    source::create_items(client, items, is_upsert).await
 }
 
 async fn update_items(

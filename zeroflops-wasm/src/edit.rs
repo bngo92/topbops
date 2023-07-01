@@ -56,7 +56,7 @@ impl Component for Edit {
             .iter()
             .enumerate()
             .map(|(i, (source_ref, id, source))| {
-                let mut selected = [false; 3];
+                let mut selected = [false; 4];
                 let value = match source {
                     None => {
                         selected[1] = true;
@@ -77,6 +77,10 @@ impl Component for Edit {
                         selected[2] = true;
                         raw_id.clone()
                     }
+                    Some(SourceType::ListItems(id)) => {
+                        selected[3] = true;
+                        id.clone()
+                    }
                 };
                 let onclick = ctx.link().callback(move |_| Msg::DeleteSource(i));
                 html! {
@@ -86,6 +90,7 @@ impl Component for Edit {
                                 <option selected={selected[0]}>{"Custom"}</option>
                                 <option selected={selected[1]}>{"Spotify"}</option>
                                 <option selected={selected[2]}>{"Setlist"}</option>
+                                <option selected={selected[3]}>{"List Items"}</option>
                             </select>
                         </div>
                         <input class="col-9 col-sm-7 col-md-8" {value} ref={id}/>
@@ -225,6 +230,12 @@ impl Component for Edit {
                             } else {
                                 return false;
                             }
+                        }
+                        "List Items" => {
+                            self.list.sources.push(Source {
+                                source_type: SourceType::ListItems(id),
+                                name: String::new(),
+                            });
                         }
                         _ => {
                             return false;
