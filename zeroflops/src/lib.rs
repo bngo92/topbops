@@ -82,12 +82,12 @@ pub enum SourceType {
 }
 
 impl List {
-    pub fn get_unique_source(&self) -> Result<(Option<&str>, String), Error> {
-        let ListMode::User(Some(external_id)) = &self.mode else {
-        return Err(Error::client_error("Push is not supported for this list type"));
-    };
+    pub fn get_unique_source(&self) -> Result<(Option<&str>, &Option<Id>), Error> {
+        let ListMode::User(external_id) = &self.mode else {
+            return Err(Error::client_error("Push is not supported for this list type"));
+        };
         let mut iter = self.sources.iter().map(get_source_id);
-        let source = if let Some(source) = iter.next() {
+        let mut source = if let Some(source) = iter.next() {
             if source.is_none() {
                 return Err(Error::client_error("Push is not supported for the source"));
             }
@@ -100,7 +100,24 @@ impl List {
                 return Err(Error::client_error("List has multiple sources"));
             }
         }
-        Ok((source, external_id.id.clone()))
+        if source == Some("list") {
+            let mut iter = self
+                .items
+                .iter()
+                .map(|i| i.id.split_once(':').map(|t| t.0).unwrap_or(""));
+            let prefix = if let Some(prefix) = iter.next() {
+                prefix
+            } else {
+                return Err(Error::client_error("List has no items"));
+            };
+            for s in iter {
+                if s != prefix {
+                    return Err(Error::client_error("List has items from multiple sources"));
+                }
+            }
+            source = Some("spotify")
+        }
+        Ok((source, external_id))
     }
 }
 
@@ -108,6 +125,7 @@ fn get_source_id(source: &Source) -> Option<&str> {
     match source.source_type {
         SourceType::Spotify(_) => Some("spotify"),
         SourceType::Setlist(_) => Some("spotify"),
+        SourceType::ListItems(_) => Some("list"),
         _ => None,
     }
 }

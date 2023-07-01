@@ -13,7 +13,12 @@ struct Playlists {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct Playlist {
+pub struct CreatePlaylist {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Playlist {
     pub id: String,
     pub href: String,
     pub name: String,
@@ -285,6 +290,32 @@ pub async fn import_album(user_id: &UserId, id: String) -> Result<(List, Vec<cra
         query: String::from("SELECT name, user_score FROM tracks"),
     };
     Ok((list, items))
+}
+
+pub async fn create_playlist(access_token: &str, user_id: &UserId, name: &str) -> Result<Playlist, Error> {
+    let https = HttpsConnector::new();
+    let client = Client::builder().build::<_, hyper::Body>(https);
+    let uri: Uri = format!("https://api.spotify.com/v1/users/{}/playlists", user_id.0)
+        .parse()
+        .unwrap();
+    // TODO: error handling
+    let playlist = CreatePlaylist {
+        name: name.to_owned()
+    };
+    let body = serde_json::to_string(&playlist)?;
+    let resp = client
+        .request(
+            Request::builder()
+                .method(Method::POST)
+                .uri(uri)
+                .header("Authorization", format!("Bearer {}", access_token))
+                .header("Content-Type", "application/json")
+                .header("Content-Length", body.len().to_string())
+                .body(Body::from(body))?,
+        )
+        .await?;
+    let got = hyper::body::to_bytes(resp.into_body()).await?;
+    Ok(serde_json::from_slice(&got)?)
 }
 
 pub async fn update_list(

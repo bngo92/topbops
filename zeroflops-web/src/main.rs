@@ -22,10 +22,10 @@ use std::{
 use tower_http::services::ServeFile;
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
-use zeroflops::{Error, ItemQuery, List, ListMode, Lists};
+use zeroflops::{Error, Id, ItemQuery, List, ListMode, Lists};
 use zeroflops_web::{
     cosmos::SessionClient,
-    query, source,
+    query, source, source::spotify,
     user::{CosmosStore, GoogleCredentials, GoogleUser, SpotifyCredentials, User},
     Item, Token, UserId,
 };
@@ -137,7 +137,7 @@ async fn login(
         )
         .await?;
     let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let spotify_user: source::spotify::User = serde_json::from_slice(&got)?;
+    let spotify_user: spotify::User = serde_json::from_slice(&got)?;
     let spotify_credentials = Some(SpotifyCredentials {
         user_id: spotify_user.id.clone(),
         url: spotify_user.external_urls["spotify"].clone(),
@@ -569,23 +569,31 @@ async fn update_list(
             list.items.extend(items);
         }
     }
-    if let Ok((Some("spotify"), external_id)) = list.get_unique_source() {
+    if let Ok((Some("spotify"), Some(external_id))) = list.get_unique_source() {
         list.iframe = Some(format!(
             "https://open.spotify.com/embed/playlist/{}?utm_source=generator",
-            external_id
+            external_id.id
         ));
     }
-    state
-        .client
+    update_list_doc(&state.client, user_id, list).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn update_list_doc(
+    client: &SessionClient,
+    user_id: &UserId,
+    list: List,
+) -> Result<(), Error> {
+        client
         .write_document(|db| {
             Ok(db
                 .collection_client("lists")
-                .document_client(id, &user_id.0)?
+                .document_client(list.id.clone(), &user_id.0)?
                 .replace_document(list))
         })
         .await
         .map_err(Error::from)?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(())
 }
 
 /// Does not delete items
@@ -745,17 +753,29 @@ async fn handle_stats_update(
 
 async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<StatusCode, Error> {
     let user_id = UserId(user.user_id.clone());
-    let list = source::get_list(&state.client, &user_id, id).await?;
+    let mut list = source::get_list(&state.client, &user_id, id).await?;
     // TODO: create new playlist if one doesn't exist
     let (_, external_id) = list.get_unique_source()?;
+    let access_token = spotify::get_access_token(&state.client, user).await?;
+    let external_id = if let Some(external_id) = external_id {
+        external_id.id.clone()
+    } else {
+        let playlist = spotify::create_playlist(access_token, &user_id, &list.name).await?;
+        let id = Id {
+            id: playlist.id,
+            raw_id: playlist.href,
+        };
+        list.mode = ListMode::User(Some(id.clone()));
+        update_list_doc(&state.client, &user_id, list.clone()).await?;
+        id.id
+    };
     let ids: Vec<_> = get_list_query_impl(&state.client, &user_id, list)
         .await?
         .items
         .into_iter()
         .map(|i| i.metadata.unwrap().id)
         .collect();
-    let access_token = source::spotify::get_access_token(&state.client, user).await?;
-    source::spotify::update_list(access_token, &external_id, &ids).await?;
+    spotify::update_list(access_token, &external_id, &ids).await?;
     Ok(StatusCode::OK)
 }
 
@@ -767,7 +787,7 @@ async fn import_list(
     favorite: bool,
 ) -> Result<StatusCode, Error> {
     let (mut list, items) = match source.split_once(':') {
-        Some(("spotify", source)) => source::spotify::import(&user_id, source, id).await?,
+        Some(("spotify", source)) => spotify::import(&user_id, source, id).await?,
         _ => todo!(),
     };
     list.favorite = favorite;
