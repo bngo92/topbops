@@ -4,8 +4,80 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use web_sys::HtmlSelectElement;
 use yew::{html, Callback, Component, Context, Html, NodeRef, Properties};
-use yew_router::scope_ext::RouterScopeExt;
 use zeroflops::{ItemMetadata, List};
+
+#[derive(Eq, PartialEq, Properties)]
+pub struct TournamentLoaderProps {
+    pub list: List,
+}
+
+pub struct TournamentLoader;
+
+impl Component for TournamentLoader {
+    type Message = ();
+    type Properties = TournamentLoaderProps;
+
+    fn create(_: &Context<Self>) -> Self {
+        TournamentLoader
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let mut items: Vec<_> = (0..ctx.props().list.items.len()).collect();
+        items.sort_by_key(|&i| -ctx.props().list.items[i].score);
+        let previous_ranks = ctx
+            .props()
+            .list
+            .items
+            .iter()
+            .map(|i| (i.id.clone(), i.rank))
+            .collect();
+        let bracket = TournamentBracket::new(items, usize::MAX);
+        let state = TournamentFields {
+            state: TournamentState::Tournament,
+            view_state: ViewState::Tournament,
+            list: ctx.props().list.clone(),
+            previous_ranks,
+            bracket,
+        };
+        html! {
+            <Tournament {state}/>
+        }
+    }
+}
+
+pub struct RandomTournamentLoader;
+
+impl Component for RandomTournamentLoader {
+    type Message = ();
+    type Properties = TournamentLoaderProps;
+
+    fn create(_: &Context<Self>) -> Self {
+        RandomTournamentLoader
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let mut items: Vec<_> = (0..ctx.props().list.items.len()).collect();
+        items.shuffle(&mut rand::thread_rng());
+        let previous_ranks = ctx
+            .props()
+            .list
+            .items
+            .iter()
+            .map(|i| (i.id.clone(), i.rank))
+            .collect();
+        let bracket = TournamentBracket::new(items, usize::MAX);
+        let state = TournamentFields {
+            state: TournamentState::Tournament,
+            view_state: ViewState::Tournament,
+            list: ctx.props().list.clone(),
+            previous_ranks,
+            bracket,
+        };
+        html! {
+            <Tournament {state}/>
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Node<T: Clone> {
@@ -243,15 +315,8 @@ impl<I: Iterator, J: Iterator<Item = I::Item>> Iterator for Interleave<I, J> {
     }
 }
 
-// We mutate ComponentState in place so boxing doesn't help
-#[allow(clippy::large_enum_variant)]
-enum ComponentState {
-    Fetching,
-    Success(TournamentFields),
-}
-
-struct TournamentFields {
-    title: String,
+#[derive(Clone, PartialEq)]
+pub struct TournamentFields {
     state: TournamentState,
     view_state: ViewState,
     list: List,
@@ -259,32 +324,32 @@ struct TournamentFields {
     bracket: TournamentBracket<usize>,
 }
 
+#[derive(Clone, PartialEq)]
 enum TournamentState {
     Tournament,
     Match,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 enum ViewState {
     Tournament,
     List,
 }
 
 pub enum Msg {
-    Load(bool, List),
     Update(usize),
     Toggle,
     SelectView,
     Reset,
 }
 
-#[derive(Eq, PartialEq, Properties)]
+#[derive(PartialEq, Properties)]
 pub struct TournamentProps {
-    pub id: String,
+    pub state: TournamentFields,
 }
 
 pub struct Tournament {
-    state: ComponentState,
+    state: TournamentFields,
     select_ref: NodeRef,
 }
 
@@ -293,26 +358,14 @@ impl Component for Tournament {
     type Properties = TournamentProps;
 
     fn create(ctx: &Context<Self>) -> Self {
-        let query = ctx
-            .link()
-            .location()
-            .unwrap()
-            .query::<HashMap<String, String>>()
-            .unwrap_or_default();
-        let random = query.get("mode").map(String::as_str) == Some("random");
-        let id = ctx.props().id.clone();
-        ctx.link().send_future(async move {
-            let list = crate::fetch_list(&id).await.unwrap();
-            Msg::Load(random, list)
-        });
         Tournament {
-            state: ComponentState::Fetching,
+            state: ctx.props().state.clone(),
             select_ref: NodeRef::default(),
         }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let ComponentState::Success(fields) = &self.state else { return html! {}; };
+        let fields = &self.state;
         let (toggle, html) = match &fields.state {
             TournamentState::Tournament => ("Match Mode", {
                 let winner = if let Some(winner) = fields.bracket.winner() {
@@ -349,9 +402,6 @@ impl Component for Tournament {
         html! {
             <div>
                 <div class="row">
-                    <div class="col-12 col-xl-8">
-                        <h1>{&fields.title}</h1>
-                    </div>
                     <div class="col-2 align-self-center min-width">
                         <button type="button" class="btn btn-primary w-100 mb-1" onclick={ctx.link().callback(|_| Msg::Toggle)}>{toggle}</button>
                     </div>
@@ -365,87 +415,58 @@ impl Component for Tournament {
     }
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
-        match &mut self.state {
-            ComponentState::Fetching => match msg {
-                Msg::Load(random, list) => {
-                    let title = if random {
-                        format!("{} - Random Tournament", list.name)
+        let fields = &mut self.state;
+        match msg {
+            Msg::Update(i) => {
+                if let Some((win, lose)) = fields.bracket.update(i, &mut fields.list.items) {
+                    let id = fields.list.id.clone();
+                    let win = win.id.clone();
+                    let lose = lose.id.clone();
+                    let updated_ranks = if fields.bracket.winner().is_some() {
+                        fields.list.items.iter().map(|i| i.rank).collect()
                     } else {
-                        format!("{} - Tournament", list.name)
+                        Vec::new()
                     };
-                    let mut items: Vec<_> = (0..list.items.len()).collect();
-                    if random {
-                        items.shuffle(&mut rand::thread_rng());
-                    } else {
-                        items.sort_by_key(|&i| -list.items[i].score);
-                    }
-                    let previous_ranks =
-                        list.items.iter().map(|i| (i.id.clone(), i.rank)).collect();
-                    let bracket = TournamentBracket::new(items, usize::MAX);
-                    self.state = ComponentState::Success(TournamentFields {
-                        title,
-                        state: TournamentState::Tournament,
-                        view_state: ViewState::Tournament,
-                        list,
-                        previous_ranks,
-                        bracket,
+                    ctx.link().send_future_batch(async move {
+                        crate::update_stats(&id, &win, &lose).await.unwrap();
+                        if !updated_ranks.is_empty() {
+                            // TODO: handle state syncing better
+                            let mut list = crate::fetch_list(&id).await.unwrap();
+                            for (item, rank) in &mut list.items.iter_mut().zip(updated_ranks) {
+                                item.rank = rank;
+                            }
+                            crate::update_list(&list).await.unwrap();
+                        }
+                        Vec::new()
                     });
                 }
-                _ => unreachable!(),
-            },
-            ComponentState::Success(fields) => match msg {
-                Msg::Load(..) => unreachable!(),
-                Msg::Update(i) => {
-                    if let Some((win, lose)) = fields.bracket.update(i, &mut fields.list.items) {
-                        let id = ctx.props().id.clone();
-                        let win = win.id.clone();
-                        let lose = lose.id.clone();
-                        let updated_ranks = if fields.bracket.winner().is_some() {
-                            fields.list.items.iter().map(|i| i.rank).collect()
-                        } else {
-                            Vec::new()
-                        };
-                        ctx.link().send_future_batch(async move {
-                            crate::update_stats(&id, &win, &lose).await.unwrap();
-                            if !updated_ranks.is_empty() {
-                                // TODO: handle state syncing better
-                                let mut list = crate::fetch_list(&id).await.unwrap();
-                                for (item, rank) in &mut list.items.iter_mut().zip(updated_ranks) {
-                                    item.rank = rank;
-                                }
-                                crate::update_list(&list).await.unwrap();
-                            }
-                            Vec::new()
-                        });
-                    }
+            }
+            Msg::Toggle => {
+                fields.state = match fields.state {
+                    TournamentState::Tournament => TournamentState::Match,
+                    TournamentState::Match => TournamentState::Tournament,
+                };
+            }
+            Msg::SelectView => {
+                fields.view_state = match self
+                    .select_ref
+                    .cast::<HtmlSelectElement>()
+                    .map(|s| s.value())
+                    .as_deref()
+                    .unwrap_or("Tournament View")
+                {
+                    "Tournament View" => ViewState::Tournament,
+                    "List View" => ViewState::List,
+                    _ => unreachable!(),
+                };
+            }
+            Msg::Reset => {
+                fields.bracket.data = fields.bracket.initial_data.clone();
+                for item in &mut fields.bracket.finished {
+                    *item = None;
                 }
-                Msg::Toggle => {
-                    fields.state = match fields.state {
-                        TournamentState::Tournament => TournamentState::Match,
-                        TournamentState::Match => TournamentState::Tournament,
-                    };
-                }
-                Msg::SelectView => {
-                    fields.view_state = match self
-                        .select_ref
-                        .cast::<HtmlSelectElement>()
-                        .map(|s| s.value())
-                        .as_deref()
-                        .unwrap_or("Tournament View")
-                    {
-                        "Tournament View" => ViewState::Tournament,
-                        "List View" => ViewState::List,
-                        _ => unreachable!(),
-                    };
-                }
-                Msg::Reset => {
-                    fields.bracket.data = fields.bracket.initial_data.clone();
-                    for item in &mut fields.bracket.finished {
-                        *item = None;
-                    }
-                    fields.bracket.finished_index = fields.bracket.finished.len() - 1;
-                }
-            },
+                fields.bracket.finished_index = fields.bracket.finished.len() - 1;
+            }
         }
         true
     }

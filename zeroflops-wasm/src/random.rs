@@ -1,13 +1,50 @@
 use crate::base::IframeCompare;
 use rand::prelude::SliceRandom;
 use std::borrow::Cow;
-use std::collections::HashMap;
 use yew::{html, Component, Context, Html, Properties};
-use yew_router::scope_ext::RouterScopeExt;
 use zeroflops::{ItemMetadata, ItemQuery};
 
+#[derive(Clone, PartialEq, Properties)]
+pub struct MatchProps {
+    pub id: String,
+}
+
+pub struct RandomMatches;
+
+impl Component for RandomMatches {
+    type Message = ();
+    type Properties = MatchProps;
+
+    fn create(_: &Context<Self>) -> Self {
+        RandomMatches
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        html! {
+            <Match id={ctx.props().id.clone()} mode={Mode::Match}/>
+        }
+    }
+}
+
+pub struct RandomRounds;
+
+impl Component for RandomRounds {
+    type Message = ();
+    type Properties = MatchProps;
+
+    fn create(_: &Context<Self>) -> Self {
+        RandomRounds
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        html! {
+            <Match id={ctx.props().id.clone()} mode={Mode::Round}/>
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
-enum Mode {
+pub enum Mode {
     Match,
     Round,
 }
@@ -24,49 +61,34 @@ pub enum Msg {
     UpdateStats((String, String)),
 }
 
-#[derive(Clone, Eq, PartialEq, Properties)]
-pub struct MatchProps {
+#[derive(Clone, PartialEq, Properties)]
+pub struct MatchComponentProps {
     pub id: String,
+    pub mode: Mode,
 }
 
 pub struct Match {
-    mode: Mode,
     random_queue: Vec<zeroflops::Item>,
     data: Option<MatchData>,
 }
 
 impl Component for Match {
     type Message = Msg;
-    type Properties = MatchProps;
+    type Properties = MatchComponentProps;
 
     fn create(ctx: &Context<Self>) -> Self {
-        let query = ctx
-            .link()
-            .location()
-            .unwrap()
-            .query::<HashMap<String, String>>()
-            .unwrap_or_default();
-        let mode = match query.get("mode").map_or("", String::as_str) {
-            "rounds" => Mode::Round,
-            _ => Mode::Match,
-        };
         let id = ctx.props().id.clone();
         ctx.link().send_future(async move {
             let query = crate::query_items(&id).await.unwrap();
             Msg::LoadRandom(query)
         });
         Match {
-            mode,
             random_queue: Vec::new(),
             data: None,
         }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let mode = match self.mode {
-            Mode::Match => String::from("Random Matches"),
-            Mode::Round => String::from("Random Rounds"),
-        };
         let Some(MatchData{left, right, query}) = self.data.clone() else { return html! {}; };
         let left_param = (left.id.clone(), right.id.clone());
         let on_left_select = ctx
@@ -95,7 +117,6 @@ impl Component for Match {
             .collect();
         html! {
             <div>
-                <h1>{mode}</h1>
                 <IframeCompare left={left} {on_left_select} right={right} {on_right_select}/>
                 {crate::base::responsive_table_view(&["Track", "Record", "Score"], items)}
             </div>
@@ -105,7 +126,7 @@ impl Component for Match {
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
             Msg::LoadRandom(query) => {
-                let (left, right) = match self.mode {
+                let (left, right) = match ctx.props().mode {
                     Mode::Round => {
                         match self.random_queue.len() {
                             // Reload the queue if it's empty
