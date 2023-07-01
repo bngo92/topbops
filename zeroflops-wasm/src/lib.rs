@@ -32,7 +32,17 @@ enum Route {
     #[at("/")]
     Home,
     #[at("/lists")]
+    ListsRoot,
+    #[at("/lists/*")]
     Lists,
+    #[at("/search")]
+    Search,
+    #[at("/settings")]
+    Settings,
+}
+
+#[derive(Clone, Routable, PartialEq)]
+pub enum ListsRoute {
     #[at("/lists/:id")]
     View { id: String },
     #[at("/lists/:id/items")]
@@ -43,24 +53,16 @@ enum Route {
     Match { id: String },
     #[at("/lists/:id/tournament")]
     Tournament { id: String },
-    #[at("/search")]
-    Search,
-    #[at("/settings")]
-    Settings,
 }
 
 fn switch(routes: Route, user: Rc<Option<User>>) -> Html {
     let logged_in = user.is_some();
     let content = match routes {
         Route::Home => html! { <Home {logged_in}/> },
-        Route::Lists => html! { <crate::list::Lists {logged_in}/> },
-        Route::List { id } => html! { <ListComponent {user} {id} view={ListTab::Items}/> },
-        Route::View { id } => html! { <ListComponent {user} {id} view={ListTab::View}/> },
-        Route::Edit { id } => html! { <ListComponent {user} {id} view={ListTab::Edit}/> },
-        Route::Match { id } => html! { <Match {id}/> },
-        Route::Tournament { id } => html! {
-            <Tournament {id}/>
-        },
+        Route::ListsRoot => html! { <crate::list::Lists {logged_in}/> },
+        Route::Lists => {
+            html! { <Switch<ListsRoute> render={move |r| switch_lists(r, Rc::clone(&user))}/> }
+        }
         Route::Search => return html! { <Search/> },
         Route::Settings => html! {
             if let Some(user) = (*user).clone() {
@@ -74,6 +76,18 @@ fn switch(routes: Route, user: Rc<Option<User>>) -> Html {
         <div class="container-lg my-md-4">
             { content }
         </div>
+    }
+}
+
+fn switch_lists(routes: ListsRoute, user: Rc<Option<User>>) -> Html {
+    match &routes {
+        ListsRoute::List { id } => html! { <ListComponent {user} id={id.clone()} view={routes}/> },
+        ListsRoute::View { id } => html! { <ListComponent {user} id={id.clone()} view={routes}/> },
+        ListsRoute::Edit { id } => html! { <ListComponent {user} id={id.clone()} view={routes}/> },
+        ListsRoute::Match { id } => html! { <Match id={id.clone()}/> },
+        ListsRoute::Tournament { id } => html! {
+            <Tournament id={id.clone()}/>
+        },
     }
 }
 
@@ -145,7 +159,7 @@ impl Component for App {
                             <Link<Route> classes="navbar-brand" to={Route::Home}>{"zeroflops"}</Link<Route>>
                             <ul class="navbar-nav me-auto">
                                 <li class="nav-item">
-                                    <Link<Route> classes={search} to={Route::Lists}>{"Lists"}</Link<Route>>
+                                    <Link<Route> classes={search} to={Route::ListsRoot}>{"Lists"}</Link<Route>>
                                 </li>
                                 <li class="nav-item">
                                     <Link<Route> classes={search} to={Route::Search}>{"Search"}</Link<Route>>
@@ -315,7 +329,7 @@ impl Component for Home {
                 let navigator = ctx.link().navigator().unwrap();
                 ctx.link().send_future_batch(async move {
                     let list = create_list().await.unwrap();
-                    navigator.push(&Route::Edit { id: list.id });
+                    navigator.push(&ListsRoute::Edit { id: list.id });
                     None
                 });
                 false
@@ -403,23 +417,23 @@ impl Component for Widget {
             let mode = select_ref.cast::<HtmlSelectElement>().unwrap().value();
             match mode.as_ref() {
                 "Random Matches" => {
-                    navigator_copy.push(&Route::Match { id });
+                    navigator_copy.push(&ListsRoute::Match { id });
                 }
                 "Random Rounds" => {
                     navigator_copy
                         .push_with_query(
-                            &Route::Match { id },
+                            &ListsRoute::Match { id },
                             &[("mode", "rounds")].into_iter().collect::<HashMap<_, _>>(),
                         )
                         .unwrap();
                 }
                 "Tournament" => {
-                    navigator_copy.push(&Route::Tournament { id });
+                    navigator_copy.push(&ListsRoute::Tournament { id });
                 }
                 "Random Tournament" => {
                     navigator_copy
                         .push_with_query(
-                            &Route::Tournament { id },
+                            &ListsRoute::Tournament { id },
                             &[("mode", "random")].into_iter().collect::<HashMap<_, _>>(),
                         )
                         .unwrap();
@@ -431,7 +445,7 @@ impl Component for Widget {
         });
         let id = list.id.clone();
         let go = Callback::from(move |_| {
-            navigator.push(&Route::List { id: id.clone() });
+            navigator.push(&ListsRoute::List { id: id.clone() });
         });
         // TODO: support actions on views
         let disabled = matches!(list.mode, ListMode::View);
@@ -558,9 +572,9 @@ pub enum ListMsg {
     Load(List),
 }
 
-#[derive(Eq, PartialEq, Properties)]
+#[derive(PartialEq, Properties)]
 pub struct ListProps {
-    pub view: ListTab,
+    pub view: ListsRoute,
     pub user: Rc<Option<User>>,
     pub id: String,
 }
@@ -589,24 +603,26 @@ impl Component for ListComponent {
                 let mut tabs = ["nav-link"; 3];
                 let active = "nav-link active";
                 match ctx.props().view {
-                    ListTab::View => {
+                    ListsRoute::View { .. } => {
                         tabs[0] = active;
                     }
-                    ListTab::Items => {
+                    ListsRoute::List { .. } => {
                         tabs[1] = active;
                     }
-                    ListTab::Edit => {
+                    ListsRoute::Edit { .. } => {
                         tabs[2] = active;
                     }
+                    _ => todo!(),
                 }
                 let view = match ctx.props().view {
-                    ListTab::View => html! { <ListView id={list.id.clone()}/> },
-                    ListTab::Items => {
+                    ListsRoute::View { .. } => html! { <ListView id={list.id.clone()}/> },
+                    ListsRoute::List { .. } => {
                         html! { <ListItems user={Rc::clone(&ctx.props().user)} list={list.clone()}/> }
                     }
-                    ListTab::Edit => {
+                    ListsRoute::Edit { .. } => {
                         html! { <Edit logged_in={ctx.props().user.is_some()} list={list.clone()}/> }
                     }
+                    _ => todo!(),
                 };
                 html! {
                     <div class="row">
@@ -614,13 +630,13 @@ impl Component for ListComponent {
                             <h2 class="col-11">{&list.name}</h2>
                             <ul class="nav nav-tabs mb-3">
                                 <li class="nav-item">
-                                    <Link<Route> classes={tabs[0]} to={Route::View{id: list.id.clone()}}>{"View"}</Link<Route>>
+                                    <Link<ListsRoute> classes={tabs[0]} to={ListsRoute::View{id: list.id.clone()}}>{"View"}</Link<ListsRoute>>
                                 </li>
                                 <li class="nav-item">
-                                    <Link<Route> classes={tabs[1]} to={Route::List{id: list.id.clone()}}>{"Items"}</Link<Route>>
+                                    <Link<ListsRoute> classes={tabs[1]} to={ListsRoute::List{id: list.id.clone()}}>{"Items"}</Link<ListsRoute>>
                                 </li>
                                 <li class="nav-item">
-                                    <Link<Route> classes={tabs[2]} to={Route::Edit{id: list.id.clone()}}>{"Settings"}</Link<Route>>
+                                    <Link<ListsRoute> classes={tabs[2]} to={ListsRoute::Edit{id: list.id.clone()}}>{"Settings"}</Link<ListsRoute>>
                                 </li>
                             </ul>
                             {view}
@@ -639,13 +655,6 @@ impl Component for ListComponent {
             }
         }
     }
-}
-
-#[derive(Eq, PartialEq)]
-pub enum ListTab {
-    View,
-    Items,
-    Edit,
 }
 
 #[derive(Eq, PartialEq, Properties)]

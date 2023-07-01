@@ -1,4 +1,4 @@
-use crate::{Route, UserProps};
+use crate::{ListsRoute, UserProps};
 use web_sys::HtmlSelectElement;
 use yew::{html, Component, Context, Html, NodeRef};
 use yew_router::prelude::Link;
@@ -39,7 +39,7 @@ impl Component for Lists {
                 <div class="col-12 col-md-6 mb-4">
                     <div class="card">
                         <div class="card-body">
-                            <Link<Route> to={Route::View{id: l.id.clone()}}>{&l.name}</Link<Route>>
+                            <Link<ListsRoute> to={ListsRoute::View{id: l.id.clone()}}>{&l.name}</Link<ListsRoute>>
                         </div>
                     </div>
                 </div>
@@ -85,7 +85,7 @@ impl Component for Lists {
                 let navigator = ctx.link().navigator().unwrap();
                 ctx.link().send_future_batch(async move {
                     let list = crate::create_list().await.unwrap();
-                    navigator.push(&Route::Edit { id: list.id });
+                    navigator.push(&ListsRoute::Edit { id: list.id });
                     None
                 });
                 false
