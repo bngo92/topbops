@@ -758,6 +758,7 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
     let (_, external_id) = list.get_unique_source()?;
     let access_token = spotify::get_access_token(&state.client, user).await?;
     let external_id = if let Some(external_id) = external_id {
+        spotify::update_playlist(access_token, &external_id.id, &list.name).await?;
         external_id.id.clone()
     } else {
         let playlist = spotify::create_playlist(access_token, &user_id, &list.name).await?;

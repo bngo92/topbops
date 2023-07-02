@@ -31,6 +31,11 @@ struct PlaylistItems {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct UpdatePlaylist {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 struct Item {
     pub track: Track,
 }
@@ -316,6 +321,31 @@ pub async fn create_playlist(access_token: &str, user_id: &UserId, name: &str) -
         .await?;
     let got = hyper::body::to_bytes(resp.into_body()).await?;
     Ok(serde_json::from_slice(&got)?)
+}
+
+pub async fn update_playlist(access_token: &str, playlist_id: &str, name: &str) -> Result<(), Error> {
+    let https = HttpsConnector::new();
+    let client = Client::builder().build::<_, hyper::Body>(https);
+    let uri: Uri = format!("https://api.spotify.com/v1/playlists/{playlist_id}")
+        .parse()
+        .unwrap();
+    // TODO: error handling
+    let playlist = UpdatePlaylist {
+        name: name.to_owned()
+    };
+    let body = serde_json::to_string(&playlist)?;
+    client
+        .request(
+            Request::builder()
+                .method(Method::PUT)
+                .uri(uri)
+                .header("Authorization", format!("Bearer {}", access_token))
+                .header("Content-Type", "application/json")
+                .header("Content-Length", body.len().to_string())
+                .body(Body::from(body))?,
+        )
+        .await?;
+    Ok(())
 }
 
 pub async fn update_list(
