@@ -1,4 +1,7 @@
-use crate::{bootstrap::Alert, ListsRoute};
+use crate::{
+    bootstrap::{Alert, Modal},
+    ListsRoute,
+};
 use js_sys::Error;
 use serde_json::Value;
 use std::{collections::HashMap, rc::Rc};
@@ -24,6 +27,8 @@ pub enum Msg {
     HideAlert,
     SaveSuccess(Vec<(usize, HashMap<String, Value>)>),
     Push,
+    Open(ItemMetadata),
+    HideModal,
 }
 
 #[derive(PartialEq, Properties)]
@@ -35,6 +40,7 @@ pub struct ListProps {
 pub struct ListItems {
     state: ListState,
     alert: Option<Result<String, String>>,
+    modal: Option<ItemMetadata>,
 }
 
 impl Component for ListItems {
@@ -48,6 +54,7 @@ impl Component for ListItems {
         ListItems {
             state: ListState::Fetching,
             alert: None,
+            modal: None,
         }
     }
 
@@ -80,9 +87,13 @@ impl Component for ListItems {
                 });
                 let html = items.iter().map(|(item, rating, hidden, rating_ref, hidden_ref)| {
                     let checked = hidden == "true";
+                    let open = {
+                        let item = item.clone();
+                        ctx.link().callback(move |_| Msg::Open(item.clone()))
+                    };
                     html! {
                         <div class="row mb-1">
-                            <label class="col-9 col-form-label">{&item.name}</label>
+                            <label class="col-9 col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
                             <div class="col-2">
                                 <select ref={rating_ref} class="form-select" {disabled}>
                                     <option selected={rating == "null"}></option>
@@ -119,6 +130,13 @@ impl Component for ListItems {
                 let hide = ctx.link().callback(|_| Msg::HideAlert);
                 html! {
                     <div>
+                        if let Some(item) = &self.modal {
+                            <Modal header={item.name.clone()} hide={ctx.link().callback(|_| Msg::HideModal)}>
+                                if let Some(iframe) = &item.iframe {
+                                    <iframe width="100%" height="380" frameborder="0" src={iframe.clone()}></iframe>
+                                }
+                            </Modal>
+                        }
                         if let Some(src) = list.iframe.clone() {
                             <div class="row">
                                 <div class="col-12 col-xl-11">
@@ -275,6 +293,14 @@ impl Component for ListItems {
                     Msg::None
                 });
                 false
+            }
+            Msg::Open(item) => {
+                self.modal = Some(item);
+                true
+            }
+            Msg::HideModal => {
+                self.modal = None;
+                true
             }
         }
     }
