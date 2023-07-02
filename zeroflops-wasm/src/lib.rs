@@ -225,7 +225,6 @@ impl Component for App {
                                 <a class="btn btn-success" href={format!("https://accounts.google.com/o/oauth2/v2/auth?client_id=1038220726403-n55jha2cvprd8kdb4akdfvo0uiok4p5u.apps.googleusercontent.com&redirect_uri={}/api/login/google&response_type=code&scope=email", location.origin().unwrap().as_str())}>{"Log in with Google"}</a>
                             </div>
                         </Modal>
-                        <div class="modal-backdrop show"></div>
                     }
                     if self.user_loaded {
                         <Switch<Route> {render} />

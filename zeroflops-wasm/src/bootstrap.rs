@@ -138,16 +138,19 @@ impl Component for Modal {
     fn view(&self, ctx: &Context<Self>) -> Html {
         let onclick = ctx.props().hide.clone();
         html! {
-            <div class="modal d-block">
-                <div class="modal-dialog">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h1 class="modal-title">{&ctx.props().header}</h1>
-                            <button type="button" class="btn-close" {onclick}></button>
+            <div>
+                <div class="modal d-block" onclick={onclick.clone()}>
+                    <div class="modal-dialog" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h1 class="modal-title">{&ctx.props().header}</h1>
+                                <button type="button" class="btn-close" {onclick}></button>
+                            </div>
+                            {for ctx.props().children.iter()}
                         </div>
-                        {for ctx.props().children.iter()}
                     </div>
                 </div>
+                <div class="modal-backdrop show"></div>
             </div>
         }
     }
