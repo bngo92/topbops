@@ -1,5 +1,4 @@
-use crate::cosmos::SessionClient;
-use crate::UserId;
+use crate::{cosmos::SessionClient, UserId};
 use futures::{StreamExt, TryStreamExt};
 use serde_json::{Map, Value};
 use zeroflops::{Error, ItemMetadata, List, Source, SourceType, Spotify};

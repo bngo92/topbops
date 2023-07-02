@@ -1,7 +1,6 @@
 use crate::base::IframeCompare;
 use rand::prelude::SliceRandom;
-use std::borrow::Cow;
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 use web_sys::HtmlSelectElement;
 use yew::{html, Callback, Component, Context, Html, NodeRef, Properties};
 use zeroflops::{ItemMetadata, List};

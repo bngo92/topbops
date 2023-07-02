@@ -10,8 +10,7 @@ use azure_data_cosmos::{
 };
 use base64::prelude::{Engine, BASE64_STANDARD};
 use rand::Rng;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct User {

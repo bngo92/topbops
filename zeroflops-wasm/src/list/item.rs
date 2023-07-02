@@ -1,8 +1,7 @@
 use crate::bootstrap::Alert;
 use js_sys::Error;
 use serde_json::Value;
-use std::collections::HashMap;
-use std::rc::Rc;
+use std::{collections::HashMap, rc::Rc};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{

@@ -1,8 +1,7 @@
 use crate::{ListsRoute, UserProps};
 use web_sys::HtmlSelectElement;
 use yew::{html, Component, Context, Html, NodeRef};
-use yew_router::prelude::Link;
-use yew_router::scope_ext::RouterScopeExt;
+use yew_router::{prelude::Link, scope_ext::RouterScopeExt};
 use zeroflops::{List, Spotify};
 
 pub mod item;

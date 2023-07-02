@@ -1,10 +1,12 @@
 use crate::{UserId, ITEM_FIELDS};
-use sqlparser::ast::{
-    BinaryOperator, Expr, FunctionArg, FunctionArgExpr, Ident, Query, SelectItem, SetExpr,
-    Statement, TableFactor,
+use sqlparser::{
+    ast::{
+        BinaryOperator, Expr, FunctionArg, FunctionArgExpr, Ident, Query, SelectItem, SetExpr,
+        Statement, TableFactor,
+    },
+    dialect::MySqlDialect,
+    parser::Parser,
 };
-use sqlparser::dialect::MySqlDialect;
-use sqlparser::parser::Parser;
 use std::collections::{HashMap, VecDeque};
 use zeroflops::{Error, ItemMetadata, List, ListMode};
 

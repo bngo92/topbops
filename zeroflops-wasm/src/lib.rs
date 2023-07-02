@@ -1,22 +1,23 @@
 #![feature(iter_intersperse)]
-use crate::bootstrap::{Accordion, Collapse, Modal};
-use crate::edit::Edit;
-use crate::list::item::ListItems;
-use crate::random::{RandomMatches, RandomRounds};
-use crate::search::Search;
-use crate::tournament::{RandomTournamentLoader, TournamentLoader};
+use crate::{
+    bootstrap::{Accordion, Collapse, Modal},
+    edit::Edit,
+    list::item::ListItems,
+    random::{RandomMatches, RandomRounds},
+    search::Search,
+    tournament::{RandomTournamentLoader, TournamentLoader},
+};
 use regex::Regex;
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::rc::Rc;
-use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
+use std::{borrow::Cow, collections::HashMap, rc::Rc};
+use wasm_bindgen::{prelude::*, JsCast};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlSelectElement, MouseEvent, Request, RequestInit, RequestMode, Response, Window};
 use yew::{html, Callback, Component, Context, Html, NodeRef, Properties};
-use yew_router::prelude::{Link, Redirect};
-use yew_router::scope_ext::RouterScopeExt;
-use yew_router::{BrowserRouter, Routable, Switch};
+use yew_router::{
+    prelude::{Link, Redirect},
+    scope_ext::RouterScopeExt,
+    BrowserRouter, Routable, Switch,
+};
 use zeroflops::{Id, ItemQuery, List, ListMode, Lists, Spotify, User};
 
 mod base;
