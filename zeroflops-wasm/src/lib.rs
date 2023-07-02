@@ -28,6 +28,8 @@ mod random;
 mod search;
 pub mod tournament;
 
+type RouteQuery = &'static [(&'static str, &'static str)];
+
 #[derive(Clone, Routable, PartialEq)]
 enum Route {
     #[at("/")]
@@ -711,55 +713,14 @@ impl Component for ListComponent {
                 } else {
                     "dropdown-menu"
                 };
-                let navigator = ctx.link().navigator().unwrap();
-                let id = list.id.clone();
-                let tournament = {
-                    let navigator = navigator.clone();
-                    let id = id.clone();
-                    ctx.link().batch_callback(move |_| {
-                        navigator.push(&ListsRoute::Tournament { id: id.clone() });
-                        None
-                    })
-                };
-                let random_tournament = {
-                    let navigator = navigator.clone();
-                    let id = id.clone();
-                    ctx.link().batch_callback(move |_| {
-                        navigator
-                            .push_with_query(
-                                &ListsRoute::Tournament { id: id.clone() },
-                                &[("mode", "random")].into_iter().collect::<HashMap<_, _>>(),
-                            )
-                            .unwrap();
-                        None
-                    })
-                };
-                let random_matches = {
-                    let navigator = navigator.clone();
-                    let id = id.clone();
-                    ctx.link().batch_callback(move |_| {
-                        navigator.push(&ListsRoute::Match { id: id.clone() });
-                        None
-                    })
-                };
-                let random_rounds = ctx.link().batch_callback(move |_| {
-                    let id = id.clone();
-                    navigator
-                        .push_with_query(
-                            &ListsRoute::Match { id },
-                            &[("mode", "rounds")].into_iter().collect::<HashMap<_, _>>(),
-                        )
-                        .unwrap();
-                    None
-                });
                 let dropdown_html = html! {
                     <li class="nav-item dropdown">
                         <a class={toggle_class} href="#" onclick={(*ctx.props().show_dropdown).clone()}>{toggle}</a>
                         <ul class={menu_class}>
-                            <li><a class="dropdown-item" href="#" onclick={tournament}>{"Tournament"}</a></li>
-                            <li><a class="dropdown-item" href="#" onclick={random_tournament}>{"Random Tournament"}</a></li>
-                            <li><a class="dropdown-item" href="#" onclick={random_matches}>{"Random Matches"}</a></li>
-                            <li><a class="dropdown-item" href="#" onclick={random_rounds}>{"Random Rounds"}</a></li>
+                            <li><Link<ListsRoute> classes="dropdown-item" to={ListsRoute::Tournament{ id: list.id.clone() }}>{"Tournament"}</Link<ListsRoute>></li>
+                            <li><Link<ListsRoute, RouteQuery> classes="dropdown-item" to={ListsRoute::Tournament{ id: list.id.clone() }} query={Some(&[("mode", "random")][..])}>{"Random Tournament"}</Link<ListsRoute, RouteQuery>></li>
+                            <li><Link<ListsRoute> classes="dropdown-item" to={ListsRoute::Match{ id: list.id.clone() }}>{"Random Matches"}</Link<ListsRoute>></li>
+                            <li><Link<ListsRoute, RouteQuery> classes="dropdown-item" to={ListsRoute::Match{ id: list.id.clone() }} query={Some(&[("mode", "rounds")][..])}>{"Random Rounds"}</Link<ListsRoute, RouteQuery>></li>
                         </ul>
                     </li>
                 };
