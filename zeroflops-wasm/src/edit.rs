@@ -77,9 +77,9 @@ impl Component for Edit {
                         selected[2] = true;
                         raw_id.clone()
                     }
-                    Some(SourceType::ListItems(Id { raw_id, .. })) => {
+                    Some(SourceType::ListItems(id)) => {
                         selected[3] = true;
-                        raw_id.clone()
+                        id.clone()
                     }
                 };
                 let onclick = ctx.link().callback(move |_| Msg::DeleteSource(i));
@@ -232,14 +232,10 @@ impl Component for Edit {
                             }
                         }
                         "List Items" => {
-                            if let Some(id) = crate::parse_list_source(id) {
-                                self.list.sources.push(Source {
-                                    source_type: SourceType::ListItems(id),
-                                    name: String::new(),
-                                });
-                            } else {
-                                return false;
-                            }
+                            self.list.sources.push(Source {
+                                source_type: SourceType::ListItems(id),
+                                name: String::new(),
+                            });
                         }
                         _ => {
                             return false;

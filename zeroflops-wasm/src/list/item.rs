@@ -1,4 +1,4 @@
-use crate::bootstrap::Alert;
+use crate::{bootstrap::Alert, ListsRoute};
 use js_sys::Error;
 use serde_json::Value;
 use std::{collections::HashMap, rc::Rc};
@@ -8,6 +8,7 @@ use web_sys::{
     HtmlInputElement, HtmlSelectElement, Request, RequestInit, RequestMode, Response, Url,
 };
 use yew::{html, Component, Context, Html, NodeRef, Properties};
+use yew_router::prelude::Link;
 use zeroflops::{Id, ItemMetadata, ItemQuery, List, ListMode, SourceType, Spotify, User};
 
 enum ListState {
@@ -61,7 +62,6 @@ impl Component for ListItems {
                         SourceType::Spotify(Spotify::Playlist(Id { raw_id, .. }))
                         | SourceType::Spotify(Spotify::Album(Id { raw_id, .. }))
                         | SourceType::Setlist(Id { raw_id, .. })
-                        | SourceType::ListItems(Id { raw_id, .. })
                             if Url::new(raw_id).is_ok() =>
                         {
                             Some(raw_id.clone())
@@ -69,7 +69,9 @@ impl Component for ListItems {
                         _ => None,
                     };
                     html! {
-                        if let Some(href) = raw_id {
+                        if let SourceType::ListItems(id) = &source.source_type {
+                            <div class="mb-2"><Link<ListsRoute> to={ListsRoute::View { id: id.clone() }}>{&source.name}</Link<ListsRoute>></div>
+                        } else if let Some(href) = raw_id {
                             <div class="mb-2"><a {href}>{&source.name}</a></div>
                         } else {
                             <p class="mb-2">{&source.name}</p>

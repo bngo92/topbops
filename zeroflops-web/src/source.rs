@@ -21,7 +21,7 @@ pub async fn get_source_and_items(
         SourceType::Spotify(Spotify::Album(id)) => spotify::get_album(user_id, id).await?,
         SourceType::Setlist(id) => setlist::get_setlist(user_id, id).await?,
         SourceType::ListItems(ref id) => {
-            let list = get_list(client, user_id, &id.id).await?;
+            let list = get_list(client, user_id, &id).await?;
             source.name = list.name;
             return Ok((source, list.items));
         }

@@ -408,18 +408,6 @@ fn parse_setlist_source(input: String) -> Option<Id> {
     };
 }
 
-fn parse_list_source(input: String) -> Option<Id> {
-    let re = Regex::new(r"https://zeroflops.com/lists/([[:alnum:]-]*)").unwrap();
-    return if let Some(caps) = re.captures_iter(&input).next() {
-        Some(Id {
-            id: caps[1].to_owned(),
-            raw_id: input,
-        })
-    } else {
-        None
-    };
-}
-
 impl Home {
     async fn fetch_lists() -> HomeMsg {
         let lists = fetch_lists(true).await.unwrap();
@@ -767,6 +755,20 @@ impl Component for ListComponent {
                 true
             }
         }
+    }
+
+    // Navigation within the list page doesn't update the component so we need to implement changed
+    fn changed(&mut self, ctx: &Context<Self>, _: &Self::Properties) -> bool {
+        let id = match &ctx.props().view {
+            ListsRoute::List { id }
+            | ListsRoute::View { id }
+            | ListsRoute::Edit { id }
+            | ListsRoute::Match { id }
+            | ListsRoute::Tournament { id } => id.clone(),
+        };
+        ctx.link()
+            .send_future(async move { ListMsg::Load(crate::fetch_list(&id).await.unwrap()) });
+        false
     }
 }
 
