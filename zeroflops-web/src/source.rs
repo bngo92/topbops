@@ -33,14 +33,20 @@ pub async fn get_source_and_items(
 
 // TODO: support arbitrary input
 fn get_custom_items(user_id: &UserId, value: &Value) -> Result<Vec<super::Item>, Error> {
-    let Value::Array(a) = value else { return Err(Error::client_error("invalid custom type")); };
+    let Value::Array(a) = value else {
+        return Err(Error::client_error("invalid custom type"));
+    };
     a.iter()
         .map(|i| match i {
             Value::String(s) => Ok(new_custom_item(s, user_id, s.to_owned(), Map::new())),
             Value::Object(o) => {
                 let mut o = o.clone();
-                let Some(Value::String(id)) = o.remove("id") else { return Err(Error::client_error("invalid id")) };
-                let Some(Value::String(name)) = o.remove("name") else { return Err(Error::client_error("invalid name")) };
+                let Some(Value::String(id)) = o.remove("id") else {
+                    return Err(Error::client_error("invalid id"));
+                };
+                let Some(Value::String(name)) = o.remove("name") else {
+                    return Err(Error::client_error("invalid name"));
+                };
                 Ok(new_custom_item(&id, user_id, name, o))
             }
             _ => Err(Error::client_error("invalid custom type")),

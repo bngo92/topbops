@@ -84,7 +84,9 @@ pub enum SourceType {
 impl List {
     pub fn get_unique_source(&self) -> Result<(Option<&str>, &Option<Id>), Error> {
         let ListMode::User(external_id) = &self.mode else {
-            return Err(Error::client_error("Push is not supported for this list type"));
+            return Err(Error::client_error(
+                "Push is not supported for this list type",
+            ));
         };
         let mut iter = self.sources.iter().map(get_source_id);
         let mut source = if let Some(source) = iter.next() {

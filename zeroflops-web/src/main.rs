@@ -25,7 +25,8 @@ use uuid::Uuid;
 use zeroflops::{Error, Id, ItemQuery, List, ListMode, Lists};
 use zeroflops_web::{
     cosmos::SessionClient,
-    query, source, source::spotify,
+    query, source,
+    source::spotify,
     user::{CosmosStore, GoogleCredentials, GoogleUser, SpotifyCredentials, User},
     Item, Token, UserId,
 };
@@ -584,7 +585,7 @@ async fn update_list_doc(
     user_id: &UserId,
     list: List,
 ) -> Result<(), Error> {
-        client
+    client
         .write_document(|db| {
             Ok(db
                 .collection_client("lists")
@@ -623,7 +624,9 @@ async fn find_items(
     auth: AuthContext,
 ) -> Result<impl IntoResponse, Response> {
     let user_id = get_user_or_demo_user(auth);
-    let Some(query) = params.get("query") else { return Err(Error::client_error("invalid finder").into()); };
+    let Some(query) = params.get("query") else {
+        return Err(Error::client_error("invalid finder").into());
+    };
 
     let (query, fields) = query::rewrite_query(query, &user_id)?;
     let values: Vec<Map<String, Value>> = state
@@ -667,7 +670,9 @@ async fn handle_action(
         }
         Some("push") => {
             if let Some(id) = params.get("list") {
-                let Some(mut user) = user else { return Err(StatusCode::UNAUTHORIZED.into_response()); };
+                let Some(mut user) = user else {
+                    return Err(StatusCode::UNAUTHORIZED.into_response());
+                };
                 return Ok(push_list(state, &mut user, id).await?);
             }
         }

@@ -89,7 +89,9 @@ impl Component for Match {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let Some(MatchData{left, right, query}) = self.data.clone() else { return html! {}; };
+        let Some(MatchData { left, right, query }) = self.data.clone() else {
+            return html! {};
+        };
         let left_param = (left.id.clone(), right.id.clone());
         let on_left_select = ctx
             .link()

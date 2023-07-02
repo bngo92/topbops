@@ -192,7 +192,9 @@ impl Component for ListItems {
                 true
             }
             Msg::Save => {
-                let ListState::Success(items) = &mut self.state else { unreachable!() };
+                let ListState::Success(items) = &mut self.state else {
+                    unreachable!()
+                };
                 let mut update_ids = HashMap::new();
                 let mut update_indexes = Vec::new();
                 for (i, (item, rating, hidden, rating_ref, hidden_ref)) in items.iter().enumerate()
@@ -267,7 +269,9 @@ impl Component for ListItems {
             // Update the rating and hidden state values if the save request is successful.
             // We check if the values are the same to avoid no-op requests.
             Msg::SaveSuccess(updates) => {
-                let ListState::Success(items) = &mut self.state else { unreachable!() };
+                let ListState::Success(items) = &mut self.state else {
+                    unreachable!()
+                };
                 for (i, update) in updates {
                     for (k, v) in update {
                         let (_item, rating, hidden, _rating_ref, _hidden_ref) = &mut items[i];

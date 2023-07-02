@@ -297,7 +297,11 @@ pub async fn import_album(user_id: &UserId, id: String) -> Result<(List, Vec<cra
     Ok((list, items))
 }
 
-pub async fn create_playlist(access_token: &str, user_id: &UserId, name: &str) -> Result<Playlist, Error> {
+pub async fn create_playlist(
+    access_token: &str,
+    user_id: &UserId,
+    name: &str,
+) -> Result<Playlist, Error> {
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
     let uri: Uri = format!("https://api.spotify.com/v1/users/{}/playlists", user_id.0)
@@ -305,7 +309,7 @@ pub async fn create_playlist(access_token: &str, user_id: &UserId, name: &str) -
         .unwrap();
     // TODO: error handling
     let playlist = CreatePlaylist {
-        name: name.to_owned()
+        name: name.to_owned(),
     };
     let body = serde_json::to_string(&playlist)?;
     let resp = client
@@ -323,7 +327,11 @@ pub async fn create_playlist(access_token: &str, user_id: &UserId, name: &str) -
     Ok(serde_json::from_slice(&got)?)
 }
 
-pub async fn update_playlist(access_token: &str, playlist_id: &str, name: &str) -> Result<(), Error> {
+pub async fn update_playlist(
+    access_token: &str,
+    playlist_id: &str,
+    name: &str,
+) -> Result<(), Error> {
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
     let uri: Uri = format!("https://api.spotify.com/v1/playlists/{playlist_id}")
@@ -331,7 +339,7 @@ pub async fn update_playlist(access_token: &str, playlist_id: &str, name: &str) 
         .unwrap();
     // TODO: error handling
     let playlist = UpdatePlaylist {
-        name: name.to_owned()
+        name: name.to_owned(),
     };
     let body = serde_json::to_string(&playlist)?;
     client
@@ -443,7 +451,9 @@ pub async fn get_access_token<'a>(
     _client: &'_ SessionClient,
     user: &'a mut crate::user::User,
 ) -> Result<&'a str, Error> {
-    let Some(credentials) = &mut user.spotify_credentials else { return Err(Error::client_error("User hasn't set up Spotify auth")) };
+    let Some(credentials) = &mut user.spotify_credentials else {
+        return Err(Error::client_error("User hasn't set up Spotify auth"));
+    };
     let token = get_user_token(&credentials.refresh_token).await?;
     credentials.access_token = token.access_token;
     // TODO: reuse existing access token if it hasn't expired

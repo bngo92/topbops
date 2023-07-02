@@ -24,7 +24,9 @@ pub fn rewrite_list_query<'a>(
 > {
     // TODO: clean up column parsing
     let mut query = parse_select(&list.query)?;
-    let SetExpr::Select(select) = &mut *query.body else { return Err(Error::client_error("Only SELECT queries are supported")) };
+    let SetExpr::Select(select) = &mut *query.body else {
+        return Err(Error::client_error("Only SELECT queries are supported"));
+    };
     let fields = select.projection.iter().map(ToString::to_string).collect();
 
     let mut map = HashMap::new();
@@ -72,11 +74,15 @@ fn rewrite_query_impl(
     filter: Option<Expr>,
 ) -> Result<(Query, Vec<String>), Error> {
     let mut query = parse_select(s)?;
-    let SetExpr::Select(select) = &mut *query.body else { return Err(Error::client_error("Only SELECT queries are supported")) };
+    let SetExpr::Select(select) = &mut *query.body else {
+        return Err(Error::client_error("Only SELECT queries are supported"));
+    };
 
     // TODO: do we still need this
     // TODO: support having via subquery
-    let Some(from) = select.from.get_mut(0) else { return Err(Error::client_error("FROM clause is omitted")); };
+    let Some(from) = select.from.get_mut(0) else {
+        return Err(Error::client_error("FROM clause is omitted"));
+    };
     if let TableFactor::Table { name, alias, .. } = &mut from.relation {
         if alias.is_some() {
             return Err(Error::client_error("alias is not supported"));

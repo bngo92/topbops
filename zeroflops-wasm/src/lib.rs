@@ -557,7 +557,9 @@ impl Component for ListView {
     }
 
     fn view(&self, _: &Context<Self>) -> Html {
-        let Some(query) = &self.query else { return html! {}; };
+        let Some(query) = &self.query else {
+            return html! {};
+        };
         crate::base::table_view(
             &query.fields.iter().map(String::as_str).collect::<Vec<_>>(),
             query
