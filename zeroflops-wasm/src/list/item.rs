@@ -61,6 +61,7 @@ impl Component for ListItems {
                         SourceType::Spotify(Spotify::Playlist(Id { raw_id, .. }))
                         | SourceType::Spotify(Spotify::Album(Id { raw_id, .. }))
                         | SourceType::Setlist(Id { raw_id, .. })
+                        | SourceType::ListItems(Id { raw_id, .. })
                             if Url::new(raw_id).is_ok() =>
                         {
                             Some(raw_id.clone())

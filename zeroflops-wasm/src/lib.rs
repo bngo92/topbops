@@ -408,6 +408,18 @@ fn parse_setlist_source(input: String) -> Option<Id> {
     };
 }
 
+fn parse_list_source(input: String) -> Option<Id> {
+    let re = Regex::new(r"https://zeroflops.com/lists/([[:alnum:]-]*)").unwrap();
+    return if let Some(caps) = re.captures_iter(&input).next() {
+        Some(Id {
+            id: caps[1].to_owned(),
+            raw_id: input,
+        })
+    } else {
+        None
+    };
+}
+
 impl Home {
     async fn fetch_lists() -> HomeMsg {
         let lists = fetch_lists(true).await.unwrap();
