@@ -29,6 +29,9 @@ pub enum Msg {
     Push,
     Open(ItemMetadata),
     HideModal,
+    SelectView,
+    Delete((String, usize)),
+    DeleteSuccess(usize),
 }
 
 #[derive(PartialEq, Properties)]
@@ -39,8 +42,15 @@ pub struct ListProps {
 
 pub struct ListItems {
     state: ListState,
+    select_ref: NodeRef,
+    mode: ItemMode,
     alert: Option<Result<String, String>>,
     modal: Option<ItemMetadata>,
+}
+
+enum ItemMode {
+    Update,
+    Delete,
 }
 
 impl Component for ListItems {
@@ -53,6 +63,8 @@ impl Component for ListItems {
             .send_future(async move { Msg::Load(crate::get_items(&id).await.unwrap()) });
         ListItems {
             state: ListState::Fetching,
+            select_ref: NodeRef::default(),
+            mode: ItemMode::Update,
             alert: None,
             modal: None,
         }
@@ -85,37 +97,68 @@ impl Component for ListItems {
                         }
                     }
                 });
-                let html = items.iter().map(|(item, rating, hidden, rating_ref, hidden_ref)| {
-                    let checked = hidden == "true";
-                    let open = {
-                        let item = item.clone();
-                        ctx.link().callback(move |_| Msg::Open(item.clone()))
-                    };
-                    html! {
-                        <div class="row mb-1">
-                            <label class="col-9 col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
-                            <div class="col-2">
-                                <select ref={rating_ref} class="form-select" {disabled}>
-                                    <option selected={rating == "null"}></option>
-                                    <option selected={rating == "0"}>{"0"}</option>
-                                    <option selected={rating == "1"}>{"1"}</option>
-                                    <option selected={rating == "2"}>{"2"}</option>
-                                    <option selected={rating == "3"}>{"3"}</option>
-                                    <option selected={rating == "4"}>{"4"}</option>
-                                    <option selected={rating == "5"}>{"5"}</option>
-                                    <option selected={rating == "6"}>{"6"}</option>
-                                    <option selected={rating == "7"}>{"7"}</option>
-                                    <option selected={rating == "8"}>{"8"}</option>
-                                    <option selected={rating == "9"}>{"9"}</option>
-                                    <option selected={rating == "10"}>{"10"}</option>
-                                </select>
-                            </div>
-                            <div class="col-1 d-flex justify-content-center">
-                                <input ref={hidden_ref} class="form-check-input mt-2" type="checkbox" {checked}/>
-                            </div>
-                        </div>
+                let html: Html = match self.mode {
+                    ItemMode::Update => {
+                        items
+                            .iter()
+                            .map(|(item, rating, hidden, rating_ref, hidden_ref)| {
+                                let checked = hidden == "true";
+                                let open = {
+                                    let item = item.clone();
+                                    ctx.link().callback(move |_| Msg::Open(item.clone()))
+                                };
+                                html! {
+                                    <div class="row mb-1">
+                                        <label class="col-9 col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
+                                        <div class="col-2">
+                                            <select ref={rating_ref} class="form-select" {disabled}>
+                                                <option selected={rating == "null"}></option>
+                                                <option selected={rating == "0"}>{"0"}</option>
+                                                <option selected={rating == "1"}>{"1"}</option>
+                                                <option selected={rating == "2"}>{"2"}</option>
+                                                <option selected={rating == "3"}>{"3"}</option>
+                                                <option selected={rating == "4"}>{"4"}</option>
+                                                <option selected={rating == "5"}>{"5"}</option>
+                                                <option selected={rating == "6"}>{"6"}</option>
+                                                <option selected={rating == "7"}>{"7"}</option>
+                                                <option selected={rating == "8"}>{"8"}</option>
+                                                <option selected={rating == "9"}>{"9"}</option>
+                                                <option selected={rating == "10"}>{"10"}</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-1 d-flex justify-content-center">
+                                            <input ref={hidden_ref} class="form-check-input mt-2" type="checkbox" {checked}/>
+                                        </div>
+                                    </div>
+                                }
+                            })
+                        .collect()
                     }
-                });
+                    ItemMode::Delete => {
+                        items
+                            .iter()
+                            .enumerate()
+                            .map(|(i, (item, _, _, _, _))| {
+                                let open = {
+                                    let item = item.clone();
+                                    ctx.link().callback(move |_| Msg::Open(item.clone()))
+                                };
+                                let delete = {
+                                    let id = item.id.clone();
+                                    ctx.link().callback(move |_| Msg::Delete((id.clone(), i)))
+                                };
+                                html! {
+                                    <div class="row mb-1">
+                                        <label class="col col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
+                                        <div class="col-auto">
+                                            <button type="button" class="btn btn-danger" onclick={delete} {disabled}>{"Delete"}</button>
+                                        </div>
+                                    </div>
+                                }
+                            })
+                        .collect()
+                    }
+                };
                 let save = ctx.link().callback(|_| Msg::Save);
                 let push = ctx.link().callback(|_| Msg::Push);
                 let push_available = if let Some(user) = &*ctx.props().user {
@@ -137,6 +180,17 @@ impl Component for ListItems {
                                 }
                             </Modal>
                         }
+                        <div class="row mb-3">
+                            <label class="col-auto col-form-label">
+                                <strong>{"Item Mode:"}</strong>
+                            </label>
+                            <div class="col-auto">
+                                <select ref={self.select_ref.clone()} class="form-select" onchange={ctx.link().callback(|_| Msg::SelectView)}>
+                                    <option selected=true>{"Update"}</option>
+                                    <option>{"Delete"}</option>
+                                </select>
+                            </div>
+                        </div>
                         if let Some(src) = list.iframe.clone() {
                             <div class="row">
                                 <div class="col-12 col-xl-11">
@@ -144,13 +198,15 @@ impl Component for ListItems {
                                 </div>
                             </div>
                         }
-                        <div class="row">
-                            <p class="col-2 offset-9"><strong>{"Rating"}</strong></p>
-                            <p class="col-1"><strong>{"Hidden"}</strong></p>
-                        </div>
+                        if let ItemMode::Update = self.mode {
+                            <div class="row">
+                                <p class="col-2 offset-9"><strong>{"Rating"}</strong></p>
+                                <p class="col-1"><strong>{"Hidden"}</strong></p>
+                            </div>
+                        }
                         <form>
                             <div class="overflow-y-auto mb-3" style="max-height: 800px">
-                                {for html}
+                                {html}
                             </div>
                             if let Some(result) = self.alert.clone() {
                                 <button type="button" class="btn btn-success mb-3" onclick={save} {disabled}>{"Save"}</button>
@@ -304,6 +360,34 @@ impl Component for ListItems {
             }
             Msg::HideModal => {
                 self.modal = None;
+                true
+            }
+            Msg::SelectView => {
+                self.mode = match self
+                    .select_ref
+                    .cast::<HtmlSelectElement>()
+                    .map(|s| s.value())
+                    .as_deref()
+                    .unwrap_or("Update")
+                {
+                    "Update" => ItemMode::Update,
+                    "Delete" => ItemMode::Delete,
+                    _ => unreachable!(),
+                };
+                true
+            }
+            Msg::Delete((id, i)) => {
+                ctx.link().send_future(async move {
+                    crate::delete_items(&[id]).await.unwrap();
+                    Msg::DeleteSuccess(i)
+                });
+                false
+            }
+            Msg::DeleteSuccess(i) => {
+                let ListState::Success(items) = &mut self.state else {
+                    unreachable!()
+                };
+                items.remove(i);
                 true
             }
         }

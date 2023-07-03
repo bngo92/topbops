@@ -937,6 +937,13 @@ async fn find_items(search: &str) -> Result<ItemQuery, JsValue> {
     Ok(serde_wasm_bindgen::from_value(json).unwrap())
 }
 
+async fn delete_items(ids: &[String]) -> Result<(), JsValue> {
+    let window = window();
+    let request = query(&format!("/api/items?ids={}", ids.join(",")), "DELETE")?;
+    JsFuture::from(window.fetch_with_request(&request)).await?;
+    Ok(())
+}
+
 fn query(url: &str, method: &str) -> Result<Request, JsValue> {
     let mut opts = RequestInit::new();
     opts.method(method);
