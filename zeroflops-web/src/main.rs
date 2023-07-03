@@ -891,6 +891,33 @@ async fn update_items(
     Ok(StatusCode::NO_CONTENT)
 }
 
+async fn delete_items(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<HashMap<String, String>>,
+    auth: AuthContext,
+) -> Result<StatusCode, Response> {
+    let user = require_user(auth)?;
+    let user_id = UserId(user.user_id);
+    let ids: Vec<_> = params["ids"].split(',').map(ToOwned::to_owned).collect();
+    let user_id = &user_id;
+    futures::stream::iter(ids.into_iter().map(|id| async {
+        state
+            .client
+            .write_document(move |db| {
+                Ok(db
+                    .collection_client("items")
+                    .document_client(id, &user_id.0)?
+                    .delete_document())
+            })
+            .await
+            .map_err(Error::from)
+    }))
+    .buffered(5)
+    .try_collect::<()>()
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn user_handler(auth: AuthContext) -> Result<Json<zeroflops::User>, Response> {
     let user = require_user(auth)?;
     Ok(Json(zeroflops::User {
@@ -993,7 +1020,7 @@ async fn main() {
         )
         .route("/lists/:id/items", get(get_list_items))
         .route("/lists/:id/query", get(get_list_query))
-        .route("/items", get(find_items))
+        .route("/items", get(find_items).delete(delete_items))
         .route("/", post(handle_action))
         .route("/login", get(login_handler))
         .route("/login/google", get(google_login_handler))
