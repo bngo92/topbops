@@ -23,7 +23,7 @@ rustup run nightly wasm-pack build --target web
 - [x] Support user lists
 - [ ] Add dedicated import page
 - [ ] Add documentation
-- [ ] Support resetting/deleting items
+- [ ] Support resetting items
 - [ ] Add Spotify search support
 - [ ] Add chart visualization
 - [ ] Add custom tournaments

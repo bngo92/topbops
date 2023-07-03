@@ -759,16 +759,19 @@ impl Component for ListComponent {
     }
 
     // Navigation within the list page doesn't update the component so we need to implement changed
-    fn changed(&mut self, ctx: &Context<Self>, _: &Self::Properties) -> bool {
-        let id = match &ctx.props().view {
-            ListsRoute::List { id }
-            | ListsRoute::View { id }
-            | ListsRoute::Edit { id }
-            | ListsRoute::Match { id }
-            | ListsRoute::Tournament { id } => id.clone(),
-        };
-        ctx.link()
-            .send_future(async move { ListMsg::Load(crate::fetch_list(&id).await.unwrap()) });
+    fn changed(&mut self, ctx: &Context<Self>, old_props: &Self::Properties) -> bool {
+        // Should we compare IDs instead
+        if ctx.props().view != old_props.view {
+            let id = match &ctx.props().view {
+                ListsRoute::List { id }
+                | ListsRoute::View { id }
+                | ListsRoute::Edit { id }
+                | ListsRoute::Match { id }
+                | ListsRoute::Tournament { id } => id.clone(),
+            };
+            ctx.link()
+                .send_future(async move { ListMsg::Load(crate::fetch_list(&id).await.unwrap()) });
+        }
         false
     }
 }
