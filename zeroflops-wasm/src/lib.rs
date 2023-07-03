@@ -772,7 +772,8 @@ impl Component for ListComponent {
             ctx.link()
                 .send_future(async move { ListMsg::Load(crate::fetch_list(&id).await.unwrap()) });
         }
-        false
+        // Rank dropdown breaks if this is set to false
+        true
     }
 }
 
