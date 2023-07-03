@@ -11,6 +11,7 @@ pub enum Msg {
     DeleteSource(usize),
     Save,
     Delete,
+    DeleteAll,
 }
 
 // TODO: need to refresh list after edit
@@ -109,6 +110,7 @@ impl Component for Edit {
         let add_source = ctx.link().callback(|_| Msg::AddSource);
         let save = ctx.link().callback(|_| Msg::Save);
         let delete = ctx.link().callback(|_| Msg::Delete);
+        let delete_all = ctx.link().callback(|_| Msg::DeleteAll);
         html! {
             <div>
                 <h4>{"List Settings"}</h4>
@@ -145,18 +147,15 @@ impl Component for Edit {
                 <div class="mb-3">
                     {for source_html}
                 </div>
-                <div class="row mb-3">
-                    <div class="col-auto">
-                        <button type="button" class="btn btn-primary" onclick={add_source}>{"Add source"}</button>
-                    </div>
-                    <div class="col-auto">
-                        <button type="button" class="btn btn-success" onclick={save} {disabled}>{"Save all settings"}</button>
-                    </div>
+                <div class="d-flex gap-3">
+                    <button type="button" class="btn btn-primary" onclick={add_source}>{"Add source"}</button>
+                    <button type="button" class="btn btn-success" onclick={save} {disabled}>{"Save all settings"}</button>
                 </div>
                 <hr/>
                 <h4>{"Delete List"}</h4>
-                <div>
+                <div class="d-flex gap-3">
                     <button type="button" class="btn btn-danger" onclick={delete}>{"Delete"}</button>
+                    <button type="button" class="btn btn-danger" onclick={delete_all}>{"Delete All"}</button>
                 </div>
             </div>
         }
@@ -257,6 +256,23 @@ impl Component for Edit {
                 {
                     let navigator = ctx.link().navigator().unwrap();
                     ctx.link().send_future_batch(async move {
+                        crate::delete_list(&id).await.unwrap();
+                        navigator.push(&Route::Home);
+                        None
+                    });
+                }
+                false
+            }
+            Msg::DeleteAll => {
+                let id = self.list.id.clone();
+                let items: Vec<_> = self.list.items.iter().map(|i| i.id.clone()).collect();
+                if crate::window()
+                    .confirm_with_message(&format!("Delete all items in {id} and list?"))
+                    .unwrap()
+                {
+                    let navigator = ctx.link().navigator().unwrap();
+                    ctx.link().send_future_batch(async move {
+                        crate::delete_items(&items).await.unwrap();
                         crate::delete_list(&id).await.unwrap();
                         navigator.push(&Route::Home);
                         None

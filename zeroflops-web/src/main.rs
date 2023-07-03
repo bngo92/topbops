@@ -901,7 +901,7 @@ async fn delete_items(
     let ids: Vec<_> = params["ids"].split(',').map(ToOwned::to_owned).collect();
     let user_id = &user_id;
     futures::stream::iter(ids.into_iter().map(|id| async {
-        state
+        match state
             .client
             .write_document(move |db| {
                 Ok(db
@@ -910,7 +910,16 @@ async fn delete_items(
                     .delete_document())
             })
             .await
-            .map_err(Error::from)
+        {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                if let azure_core::StatusCode::NotFound = e.as_http_error().unwrap().status() {
+                    Ok(())
+                } else {
+                    Err(Error::from(e))
+                }
+            }
+        }
     }))
     .buffered(5)
     .try_collect::<()>()
