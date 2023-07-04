@@ -22,7 +22,10 @@ use std::{
 use tower_http::services::ServeFile;
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
-use zeroflops::{Error, Id, ItemQuery, List, ListMode, Lists};
+use zeroflops::{
+    spotify::{Playlists, RecentTracks},
+    Error, Id, ItemQuery, List, ListMode, Lists,
+};
 use zeroflops_web::{
     cosmos::SessionClient,
     query, source,
@@ -182,7 +185,7 @@ async fn login(
         .await?;
     let user = if let Some(map) = results.pop() {
         let id = &map["id"];
-        state
+        let mut user: User = state
             .client
             .get_document(|db| {
                 Ok(db
@@ -193,7 +196,18 @@ async fn login(
             .await?
             .ok_or(Error::internal_error(format!(
                 "User doesn't exist for {id}"
-            )))?
+            )))?;
+        user.spotify_credentials = spotify_credentials;
+        state
+            .client
+            .write_document(|db| {
+                Ok(db
+                    .collection_client("users")
+                    .document_client(user.id.clone(), &user.id)?
+                    .replace_document(user.clone()))
+            })
+            .await?;
+        user
     } else {
         User {
             id: Uuid::new_v4().to_hyphenated().to_string(),
@@ -766,10 +780,10 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
         spotify::update_playlist(access_token, &external_id.id, &list.name).await?;
         external_id.id.clone()
     } else {
-        let playlist = spotify::create_playlist(access_token, &user_id, &list.name).await?;
+        let mut playlist = spotify::create_playlist(access_token, &user_id, &list.name).await?;
         let id = Id {
             id: playlist.id,
-            raw_id: playlist.href,
+            raw_id: playlist.external_urls.remove("spotify").unwrap(),
         };
         list.mode = ListMode::User(Some(id.clone()));
         update_list_doc(&state.client, &user_id, list.clone()).await?;
@@ -937,6 +951,33 @@ async fn user_handler(auth: AuthContext) -> Result<Json<zeroflops::User>, Respon
     }))
 }
 
+async fn get_spotify_recent_tracks(
+    State(state): State<Arc<AppState>>,
+    auth: AuthContext,
+) -> Result<Json<RecentTracks>, Response> {
+    let mut user = require_user(auth)?;
+    let user_id = UserId(user.user_id.clone());
+    if user.spotify_credentials.is_none() {
+        return Err(Error::client_error("Spotify integration is required").into());
+    };
+    let access_token = spotify::get_access_token(&state.client, &mut user).await?;
+    Ok(Json(
+        spotify::get_recent_tracks(&state.client, &user_id, access_token).await?,
+    ))
+}
+
+async fn get_spotify_playlists(
+    State(state): State<Arc<AppState>>,
+    auth: AuthContext,
+) -> Result<Json<Playlists>, Response> {
+    let mut user = require_user(auth)?;
+    if user.spotify_credentials.is_none() {
+        return Err(Error::client_error("Spotify integration is required").into());
+    };
+    let access_token = spotify::get_access_token(&state.client, &mut user).await?;
+    Ok(Json(spotify::get_playlists(access_token).await?))
+}
+
 struct AppState {
     client: SessionClient,
 }
@@ -1035,6 +1076,8 @@ async fn main() {
         .route("/login/google", get(google_login_handler))
         .route("/logout", get(logout_handler))
         .route("/user", get(user_handler))
+        .route("/spotify/recentTracks", get(get_spotify_recent_tracks))
+        .route("/spotify/playlists", get(get_spotify_playlists))
         .with_state(shared_state);
 
     let app = Router::new()

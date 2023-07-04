@@ -2,6 +2,7 @@
 use crate::{
     bootstrap::{Accordion, Collapse, Modal},
     edit::Edit,
+    integrations::spotify,
     list::item::ListItems,
     random::{RandomMatches, RandomRounds},
     search::Search,
@@ -23,6 +24,7 @@ use zeroflops::{Id, ItemQuery, List, ListMode, Lists, Spotify, User};
 mod base;
 mod bootstrap;
 mod edit;
+mod integrations;
 mod list;
 mod random;
 mod search;
@@ -42,6 +44,8 @@ enum Route {
     Search,
     #[at("/settings")]
     Settings,
+    #[at("/integrations/spotify")]
+    Spotify,
 }
 
 #[derive(Clone, Routable, PartialEq)]
@@ -89,6 +93,7 @@ fn switch(
                 <Redirect<Route> to={Route::Home}/>
             }
         },
+        Route::Spotify => html! { <spotify::Spotify/> },
     };
     html! {
         <div class="container-lg my-md-4">
@@ -221,7 +226,7 @@ impl Component for App {
                     if self.login {
                         <Modal header={"Log in"} {hide}>
                             <div class="modal-body d-grid gap-2">
-                                <a class="btn btn-success" href={format!("https://accounts.spotify.com/authorize?client_id=ee3d1b4f8d80477ea48743a511ef3018&redirect_uri={}/api/login&response_type=code&scope=playlist-modify-public playlist-modify-private", location.origin().unwrap().as_str())}>{"Log in with Spotify"}</a>
+                                <a class="btn btn-success" href={format!("https://accounts.spotify.com/authorize?client_id=ee3d1b4f8d80477ea48743a511ef3018&redirect_uri={}/api/login&response_type=code&scope=playlist-modify-public playlist-modify-private user-read-recently-played playlist-read-private", location.origin().unwrap().as_str())}>{"Log in with Spotify"}</a>
                                 <a class="btn btn-success" href={format!("https://accounts.google.com/o/oauth2/v2/auth?client_id=1038220726403-n55jha2cvprd8kdb4akdfvo0uiok4p5u.apps.googleusercontent.com&redirect_uri={}/api/login/google&response_type=code&scope=email", location.origin().unwrap().as_str())}>{"Log in with Google"}</a>
                             </div>
                         </Modal>
@@ -804,7 +809,7 @@ impl Component for Settings {
                 if let (Some(url), Some(user)) = (&ctx.props().user.spotify_url, &ctx.props().user.spotify_user) {
                     <a href={url.clone()}>{&user}</a>
                 } else {
-                    <a class="btn btn-success" href={format!("https://accounts.spotify.com/authorize?client_id=ee3d1b4f8d80477ea48743a511ef3018&redirect_uri={}/api/login&response_type=code&scope=playlist-modify-public playlist-modify-private", location.origin().unwrap().as_str())}>{"Log in with Spotify"}</a>
+                    <a class="btn btn-success" href={format!("https://accounts.spotify.com/authorize?client_id=ee3d1b4f8d80477ea48743a511ef3018&redirect_uri={}/api/login&response_type=code&scope=playlist-modify-public playlist-modify-private user-read-recently-played playlist-read-private", location.origin().unwrap().as_str())}>{"Log in with Spotify"}</a>
                 }
                 <h2>{"Google"}</h2>
                 if let Some(google_email) = &ctx.props().user.google_email {

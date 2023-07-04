@@ -1,26 +1,18 @@
 use crate::{cosmos::SessionClient, UserId};
+use azure_data_cosmos::prelude::{Param, Query};
 use futures::{StreamExt, TryStreamExt};
 use hyper::{Body, Client, Method, Request, Uri};
 use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
-use zeroflops::{Error, Id, List, ListMode, Source, SourceType, Spotify};
-
-#[derive(Debug, Deserialize, Serialize)]
-struct Playlists {
-    pub items: Vec<Playlist>,
-}
+use zeroflops::{
+    spotify::{Playlist, Playlists, RecentTrack},
+    Error, Id, List, ListMode, Source, SourceType, Spotify,
+};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CreatePlaylist {
-    pub name: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Playlist {
-    pub id: String,
-    pub href: String,
     pub name: String,
 }
 
@@ -52,6 +44,7 @@ struct Track {
     pub album: Album,
     pub artists: Vec<Artist>,
     pub duration_ms: i32,
+    pub external_urls: HashMap<String, String>,
     pub popularity: i32,
     pub track_number: i32,
     pub uri: String,
@@ -87,6 +80,16 @@ struct SearchTracks {
 pub struct User {
     pub id: String,
     pub external_urls: HashMap<String, String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct RecentTracks {
+    items: Vec<PlayHistory>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct PlayHistory {
+    track: Track,
 }
 
 pub async fn import(
@@ -584,4 +587,96 @@ pub async fn search_song(
             .ok_or(Error::client_error("Couldn't find song for query"))?,
         user_id,
     ))
+}
+
+pub async fn get_recent_tracks(
+    cosmos_client: &SessionClient,
+    user_id: &UserId,
+    access_token: &str,
+) -> Result<zeroflops::spotify::RecentTracks, Error> {
+    let https = HttpsConnector::new();
+    let client = Client::builder().build::<_, hyper::Body>(https);
+    let uri: Uri = "https://api.spotify.com/v1/me/player/recently-played?limit=50"
+        .parse()
+        .unwrap();
+    let resp = client
+        .request(
+            Request::builder()
+                .uri(uri)
+                .header("Authorization", format!("Bearer {}", access_token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    let got = hyper::body::to_bytes(resp.into_body()).await?;
+    let recent_tracks: RecentTracks = serde_json::from_slice(&got)?;
+    let ids: Vec<_> = recent_tracks
+        .items
+        .iter()
+        .map(|i| i.track.uri.to_owned())
+        .collect();
+    let query = "SELECT c.id, c.rating, c.user_score FROM c WHERE c.user_id = @user_id AND ARRAY_CONTAINS(@ids, c.id)".to_owned();
+    let items = cosmos_client
+        .query_documents(|db| {
+            db.collection_client("items")
+                .query_documents(Query::with_params(
+                    query,
+                    [
+                        Param::new(String::from("@user_id"), user_id.0.clone()),
+                        Param::new(String::from("@ids"), ids.clone()),
+                    ],
+                ))
+        })
+        .await
+        .map_err(Error::from)?;
+    let map: HashMap<_, _> = items
+        .into_iter()
+        .map(|r: Map<String, Value>| (r["id"].as_str().expect("string id").to_owned(), r))
+        .collect();
+    Ok(zeroflops::spotify::RecentTracks {
+        tracks: recent_tracks
+            .items
+            .into_iter()
+            .map(|mut i| {
+                let id = i.track.uri;
+                if let Some(m) = map.get(&id) {
+                    RecentTrack {
+                        id,
+                        name: i.track.name,
+                        url: i.track.external_urls.remove("spotify").unwrap(),
+                        added: true,
+                        rating: m.get("rating").and_then(|v| v.as_i64()).map(|i| i as i32),
+                        user_score: m
+                            .get("user_score")
+                            .and_then(|v| v.as_i64())
+                            .map(|i| i as i32),
+                    }
+                } else {
+                    RecentTrack {
+                        id,
+                        name: i.track.name,
+                        url: i.track.external_urls.remove("spotify").unwrap(),
+                        added: false,
+                        rating: None,
+                        user_score: None,
+                    }
+                }
+            })
+            .collect(),
+    })
+}
+
+pub async fn get_playlists(access_token: &str) -> Result<Playlists, Error> {
+    let https = HttpsConnector::new();
+    let client = Client::builder().build::<_, hyper::Body>(https);
+    let uri: Uri = "https://api.spotify.com/v1/me/playlists".parse().unwrap();
+    let resp = client
+        .request(
+            Request::builder()
+                .uri(uri)
+                .header("Authorization", format!("Bearer {}", access_token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    let got = hyper::body::to_bytes(resp.into_body()).await?;
+    Ok(serde_json::from_slice(&got)?)
 }

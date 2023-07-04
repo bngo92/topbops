@@ -20,12 +20,14 @@ impl Component for Accordion {
     type Message = AccordionMsg;
     type Properties = AccordionProps;
 
-    fn create(_: &Context<Self>) -> Self {
-        Accordion { collapsed: true }
+    fn create(ctx: &Context<Self>) -> Self {
+        Accordion {
+            collapsed: ctx.props().collapsed.unwrap_or(true),
+        }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let (button_class, body_class) = if ctx.props().collapsed.unwrap_or(self.collapsed) {
+        let (button_class, body_class) = if self.collapsed {
             ("accordion-button collapsed", "accordion-collapse collapse")
         } else {
             ("accordion-button", "accordion-collapse collapse show")
@@ -51,6 +53,13 @@ impl Component for Accordion {
 
     fn update(&mut self, _: &Context<Self>, _: Self::Message) -> bool {
         self.collapsed = !self.collapsed;
+        true
+    }
+
+    fn changed(&mut self, ctx: &Context<Self>, _: &Self::Properties) -> bool {
+        if let Some(collapsed) = ctx.props().collapsed {
+            self.collapsed = collapsed;
+        }
         true
     }
 }
