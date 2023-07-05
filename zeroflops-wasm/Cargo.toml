@@ -23,6 +23,8 @@ wasm-bindgen = { version = "0.2.78", features = ["serde-serialize"]  }
 wasm-bindgen-futures = "0.4.28"
 yew = { version = "0.20", features = ["csr"] }
 yew-router = "0.17"
+plotters = { git = "https://github.com/plotters-rs/plotters" }
+plotters-canvas = { git = "https://github.com/AE1020/plotters-canvas", rev = "aacc00b" }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.0"

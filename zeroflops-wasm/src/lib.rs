@@ -8,6 +8,10 @@ use crate::{
     search::Search,
     tournament::{RandomTournamentLoader, TournamentLoader},
 };
+use plotters::prelude::{
+    ChartBuilder, Color, Histogram, IntoDrawingArea, IntoSegmentedCoord, RED, WHITE,
+};
+use plotters_canvas::CanvasBackend;
 use regex::Regex;
 use std::{borrow::Cow, collections::HashMap, rc::Rc};
 use wasm_bindgen::{prelude::*, JsCast};
@@ -539,6 +543,7 @@ impl Component for Widget {
 
 enum ListViewMsg {
     Success(ItemQuery),
+    Select,
 }
 
 #[derive(PartialEq, Properties)]
@@ -548,6 +553,8 @@ pub struct ListViewProps {
 
 struct ListView {
     query: Option<ItemQuery>,
+    select_ref: NodeRef,
+    view: DataView,
 }
 
 impl Component for ListView {
@@ -558,28 +565,101 @@ impl Component for ListView {
         let id = ctx.props().id.clone();
         ctx.link()
             .send_future(async move { ListViewMsg::Success(query_items(&id).await.unwrap()) });
-        Self { query: None }
+        Self {
+            query: None,
+            select_ref: NodeRef::default(),
+            view: DataView::Table,
+        }
     }
 
-    fn view(&self, _: &Context<Self>) -> Html {
-        let Some(query) = &self.query else {
-            return html! {};
-        };
-        crate::base::table_view(
-            &query.fields.iter().map(String::as_str).collect::<Vec<_>>(),
-            query
-                .items
-                .iter()
-                .zip(1..)
-                .map(|(item, i)| Some((i, Cow::from(&item.values)))),
-        )
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let onchange = ctx.link().callback(|_| ListViewMsg::Select);
+        html! {
+            <div class="row">
+                <div class="col-auto">
+                    <select ref={self.select_ref.clone()} class="form-select mb-3" {onchange}>
+                        <option selected=true>{"Table"}</option>
+                        <option>{"Column Graph"}</option>
+                    </select>
+                </div>
+                <canvas id="canvas" width="640" height="426" class={if let DataView::Table = self.view { "d-none" } else { "" }}></canvas>
+                if let (DataView::Table, Some(query)) = (&self.view, &self.query) {
+                    {crate::base::table_view(
+                        &query.fields.iter().map(String::as_str).collect::<Vec<_>>(),
+                        query
+                            .items
+                            .iter()
+                            .zip(1..)
+                            .map(|(item, i)| Some((i, Cow::from(&item.values)))),
+                    )}
+                }
+            </div>
+        }
     }
 
     fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
-        let ListViewMsg::Success(query) = msg;
-        self.query = Some(query);
+        match msg {
+            ListViewMsg::Success(query) => self.query = Some(query),
+            ListViewMsg::Select => {
+                let view = self.select_ref.cast::<HtmlSelectElement>().unwrap().value();
+                self.view = match &*view {
+                    "Table" => DataView::Table,
+                    "Column Graph" => DataView::ColumnGraph,
+                    _ => unreachable!(),
+                };
+            }
+        }
+        if let Some(query) = &self.query {
+            match self.view {
+                DataView::Table => {}
+                DataView::ColumnGraph => draw_column_graph(query).unwrap(),
+            }
+        }
         true
     }
+}
+
+enum DataView {
+    Table,
+    ColumnGraph,
+}
+
+fn draw_column_graph(query: &ItemQuery) -> Result<(), Box<dyn std::error::Error>> {
+    let backend = CanvasBackend::new("canvas").expect("cannot find canvas");
+    let root = backend.into_drawing_area();
+
+    root.fill(&WHITE)?;
+
+    let mut data = HashMap::new();
+    for i in &query.items {
+        *data.entry(i.values[1].parse::<u32>().unwrap()).or_insert(0) += 1;
+    }
+
+    let mut chart = ChartBuilder::on(&root)
+        .x_label_area_size(35)
+        .y_label_area_size(40)
+        .margin(5)
+        .build_cartesian_2d(
+            (0u32..10u32).into_segmented(),
+            0u32..*data.values().max().unwrap(),
+        )?;
+
+    chart
+        .configure_mesh()
+        .disable_x_mesh()
+        .bold_line_style(WHITE.mix(0.3))
+        .y_desc("Count")
+        .x_desc("Bucket")
+        .axis_desc_style(("sans-serif", 15))
+        .draw()?;
+
+    chart.draw_series(
+        Histogram::vertical(&chart)
+            .style(RED.mix(0.5).filled())
+            .data(data.into_iter()),
+    )?;
+
+    Ok(())
 }
 
 #[derive(Eq, PartialEq, Properties)]
