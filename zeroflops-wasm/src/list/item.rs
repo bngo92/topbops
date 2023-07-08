@@ -14,11 +14,6 @@ use yew::{html, Component, Context, Html, NodeRef, Properties};
 use yew_router::prelude::Link;
 use zeroflops::{Id, ItemMetadata, ItemQuery, List, ListMode, SourceType, Spotify, User};
 
-enum ListState {
-    Fetching,
-    Success(Vec<(ItemMetadata, String, String, NodeRef, NodeRef)>),
-}
-
 pub enum Msg {
     None,
     Load(ItemQuery),
@@ -41,11 +36,18 @@ pub struct ListProps {
 }
 
 pub struct ListItems {
-    state: ListState,
+    state: Vec<ListItem>,
     select_ref: NodeRef,
     mode: ItemMode,
     alert: Option<Result<String, String>>,
     modal: Option<ItemMetadata>,
+}
+
+struct ListItem {
+    item: ItemMetadata,
+    rating_hidden: Option<(String, String)>,
+    rating_ref: NodeRef,
+    hidden_ref: NodeRef,
 }
 
 enum ItemMode {
@@ -62,7 +64,18 @@ impl Component for ListItems {
         ctx.link()
             .send_future(async move { Msg::Load(crate::get_items(&id).await.unwrap()) });
         ListItems {
-            state: ListState::Fetching,
+            state: ctx
+                .props()
+                .list
+                .items
+                .iter()
+                .map(|i| ListItem {
+                    item: i.clone(),
+                    rating_hidden: None,
+                    rating_ref: NodeRef::default(),
+                    hidden_ref: NodeRef::default(),
+                })
+                .collect(),
             select_ref: NodeRef::default(),
             mode: ItemMode::Update,
             alert: None,
@@ -72,158 +85,159 @@ impl Component for ListItems {
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         let disabled = ctx.props().user.is_none();
-        match &self.state {
-            ListState::Fetching => html! {},
-            ListState::Success(items) => {
-                let list = &ctx.props().list;
-                let source_html = list.sources.iter().map(|source| {
-                    let raw_id = match &source.source_type {
-                        SourceType::Spotify(Spotify::Playlist(Id { raw_id, .. }))
-                        | SourceType::Spotify(Spotify::Album(Id { raw_id, .. }))
-                        | SourceType::Setlist(Id { raw_id, .. })
-                            if Url::new(raw_id).is_ok() =>
-                        {
-                            Some(raw_id.clone())
-                        }
-                        _ => None,
-                    };
-                    html! {
-                        if let SourceType::ListItems(id) = &source.source_type {
-                            <div class="mb-2"><Link<ListsRoute> to={ListsRoute::View { id: id.clone() }}>{&source.name}</Link<ListsRoute>></div>
-                        } else if let Some(href) = raw_id {
-                            <div class="mb-2"><a {href}>{&source.name}</a></div>
-                        } else {
-                            <p class="mb-2">{&source.name}</p>
-                        }
-                    }
-                });
-                let html: Html = match self.mode {
-                    ItemMode::Update => {
-                        items
-                            .iter()
-                            .map(|(item, rating, hidden, rating_ref, hidden_ref)| {
-                                let checked = hidden == "true";
-                                let open = {
-                                    let item = item.clone();
-                                    ctx.link().callback(move |_| Msg::Open(item.clone()))
-                                };
-                                html! {
-                                    <div class="row mb-1">
-                                        <label class="col-9 col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
-                                        <div class="col-2">
-                                            <select ref={rating_ref} class="form-select" {disabled}>
-                                                <option selected={rating == "null"}></option>
-                                                <option selected={rating == "0"}>{"0"}</option>
-                                                <option selected={rating == "1"}>{"1"}</option>
-                                                <option selected={rating == "2"}>{"2"}</option>
-                                                <option selected={rating == "3"}>{"3"}</option>
-                                                <option selected={rating == "4"}>{"4"}</option>
-                                                <option selected={rating == "5"}>{"5"}</option>
-                                                <option selected={rating == "6"}>{"6"}</option>
-                                                <option selected={rating == "7"}>{"7"}</option>
-                                                <option selected={rating == "8"}>{"8"}</option>
-                                                <option selected={rating == "9"}>{"9"}</option>
-                                                <option selected={rating == "10"}>{"10"}</option>
-                                            </select>
-                                        </div>
-                                        <div class="col-1 d-flex justify-content-center">
-                                            <input ref={hidden_ref} class="form-check-input mt-2" type="checkbox" {checked}/>
-                                        </div>
-                                    </div>
-                                }
-                            })
-                        .collect()
-                    }
-                    ItemMode::Delete => {
-                        items
-                            .iter()
-                            .enumerate()
-                            .map(|(i, (item, _, _, _, _))| {
-                                let open = {
-                                    let item = item.clone();
-                                    ctx.link().callback(move |_| Msg::Open(item.clone()))
-                                };
-                                let delete = {
-                                    let id = item.id.clone();
-                                    ctx.link().callback(move |_| Msg::Delete((id.clone(), i)))
-                                };
-                                html! {
-                                    <div class="row mb-1">
-                                        <label class="col col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
-                                        <div class="col-auto">
-                                            <button type="button" class="btn btn-danger" onclick={delete} {disabled}>{"Delete"}</button>
-                                        </div>
-                                    </div>
-                                }
-                            })
-                        .collect()
-                    }
-                };
-                let save = ctx.link().callback(|_| Msg::Save);
-                let push = ctx.link().callback(|_| Msg::Push);
-                let push_available = if let Some(user) = &*ctx.props().user {
-                    if let Ok((Some(source), _)) = list.get_unique_source() {
-                        source == "spotify" && user.spotify_user.is_some()
-                    } else {
-                        false
-                    }
+        let list = &ctx.props().list;
+        let source_html = list.sources.iter().map(|source| {
+            let raw_id = match &source.source_type {
+                SourceType::Spotify(Spotify::Playlist(Id { raw_id, .. }))
+                | SourceType::Spotify(Spotify::Album(Id { raw_id, .. }))
+                | SourceType::Setlist(Id { raw_id, .. })
+                    if Url::new(raw_id).is_ok() =>
+                {
+                    Some(raw_id.clone())
+                }
+                _ => None,
+            };
+            html! {
+                if let SourceType::ListItems(id) = &source.source_type {
+                    <div class="mb-2"><Link<ListsRoute> to={ListsRoute::View { id: id.clone() }}>{&source.name}</Link<ListsRoute>></div>
+                } else if let Some(href) = raw_id {
+                    <div class="mb-2"><a {href}>{&source.name}</a></div>
                 } else {
-                    false
-                };
-                let hide = ctx.link().callback(|_| Msg::HideAlert);
-                html! {
-                    <div>
-                        if let Some(item) = &self.modal {
-                            <Modal header={item.name.clone()} hide={ctx.link().callback(|_| Msg::HideModal)}>
-                                if let Some(iframe) = &item.iframe {
-                                    <iframe width="100%" height="380" frameborder="0" src={iframe.clone()}></iframe>
-                                }
-                            </Modal>
-                        }
-                        <div class="row mb-3">
-                            <label class="col-auto col-form-label">
-                                <strong>{"Item Mode:"}</strong>
-                            </label>
-                            <div class="col-auto">
-                                <select ref={self.select_ref.clone()} class="form-select" onchange={ctx.link().callback(|_| Msg::SelectView)}>
-                                    <option selected=true>{"Update"}</option>
-                                    <option>{"Delete"}</option>
-                                </select>
-                            </div>
-                        </div>
-                        if let Some(src) = list.iframe.clone() {
-                            <div class="row">
-                                <div class="col-12 col-xl-11">
-                                    <iframe width="100%" height="380" frameborder="0" {src}></iframe>
-                                </div>
-                            </div>
-                        }
-                        if let ItemMode::Update = self.mode {
-                            <div class="row">
-                                <p class="col-2 offset-9"><strong>{"Rating"}</strong></p>
-                                <p class="col-1"><strong>{"Hidden"}</strong></p>
-                            </div>
-                        }
-                        <form>
-                            <div class="overflow-y-auto mb-3" style="max-height: 800px">
-                                {html}
-                            </div>
-                            if let Some(result) = self.alert.clone() {
-                                <button type="button" class="btn btn-success mb-3" onclick={save} {disabled}>{"Save"}</button>
-                                <Alert {result} {hide}/>
-                            } else {
-                                <button type="button" class="btn btn-success" onclick={save} {disabled}>{"Save"}</button>
-                            }
-                        </form>
-                        <hr/>
-                        <h4>{"Data Sources"}</h4>
-                        {for source_html}
-                        if !matches!(list.mode, ListMode::External) {
-                            <button type="button" class="btn btn-success" onclick={push} disabled={!push_available}>{"Push"}</button>
-                        }
-                    </div>
+                    <p class="mb-2">{&source.name}</p>
                 }
             }
+        });
+        let html: Html = match self.mode {
+            ItemMode::Update => self
+                .state
+                .iter()
+                .map(
+                    |ListItem {
+                         item,
+                         rating_hidden,
+                         rating_ref,
+                         hidden_ref,
+                     }| {
+                        let open = {
+                            let item = item.clone();
+                            ctx.link().callback(move |_| Msg::Open(item.clone()))
+                        };
+                        html! {
+                            <div class="row mb-1">
+                                <label class="col-9 col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
+                                if let Some((rating, hidden)) = rating_hidden {
+                                    <div class="col-2">
+                                        <select ref={rating_ref} class="form-select" {disabled}>
+                                            <option selected={rating == "null"}></option>
+                                            <option selected={rating == "0"}>{"0"}</option>
+                                            <option selected={rating == "1"}>{"1"}</option>
+                                            <option selected={rating == "2"}>{"2"}</option>
+                                            <option selected={rating == "3"}>{"3"}</option>
+                                            <option selected={rating == "4"}>{"4"}</option>
+                                            <option selected={rating == "5"}>{"5"}</option>
+                                            <option selected={rating == "6"}>{"6"}</option>
+                                            <option selected={rating == "7"}>{"7"}</option>
+                                            <option selected={rating == "8"}>{"8"}</option>
+                                            <option selected={rating == "9"}>{"9"}</option>
+                                            <option selected={rating == "10"}>{"10"}</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-1 d-flex justify-content-center">
+                                        <input ref={hidden_ref} class="form-check-input mt-2" type="checkbox" checked={hidden == "true"}/>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    },
+                )
+                .collect(),
+            ItemMode::Delete => self
+                .state
+                .iter()
+                .enumerate()
+                .map(|(i, ListItem { item, .. })| {
+                    let open = {
+                        let item = item.clone();
+                        ctx.link().callback(move |_| Msg::Open(item.clone()))
+                    };
+                    let delete = {
+                        let id = item.id.clone();
+                        ctx.link().callback(move |_| Msg::Delete((id.clone(), i)))
+                    };
+                    html! {
+                        <div class="row mb-1">
+                            <label class="col col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
+                            <div class="col-auto">
+                                <button type="button" class="btn btn-danger" onclick={delete} {disabled}>{"Delete"}</button>
+                            </div>
+                        </div>
+                    }
+                })
+                .collect(),
+        };
+        let save = ctx.link().callback(|_| Msg::Save);
+        let push = ctx.link().callback(|_| Msg::Push);
+        let push_available = if let Some(user) = &*ctx.props().user {
+            if let Ok((Some(source), _)) = list.get_unique_source() {
+                source == "spotify" && user.spotify_user.is_some()
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        let hide = ctx.link().callback(|_| Msg::HideAlert);
+        html! {
+            <div>
+                if let Some(item) = &self.modal {
+                    <Modal header={item.name.clone()} hide={ctx.link().callback(|_| Msg::HideModal)}>
+                        if let Some(iframe) = &item.iframe {
+                            <iframe width="100%" height="380" frameborder="0" src={iframe.clone()}></iframe>
+                        }
+                    </Modal>
+                }
+                <div class="row mb-3">
+                    <label class="col-auto col-form-label">
+                        <strong>{"Item Mode:"}</strong>
+                    </label>
+                    <div class="col-auto">
+                        <select ref={self.select_ref.clone()} class="form-select" onchange={ctx.link().callback(|_| Msg::SelectView)}>
+                            <option selected=true>{"Update"}</option>
+                            <option>{"Delete"}</option>
+                        </select>
+                    </div>
+                </div>
+                if let Some(src) = list.iframe.clone() {
+                    <div class="row">
+                        <div class="col-12 col-xl-11">
+                            <iframe width="100%" height="380" frameborder="0" {src}></iframe>
+                        </div>
+                    </div>
+                }
+                if let ItemMode::Update = self.mode {
+                    <div class="row">
+                        <p class="col-2 offset-9"><strong>{"Rating"}</strong></p>
+                        <p class="col-1"><strong>{"Hidden"}</strong></p>
+                    </div>
+                }
+                <form>
+                    <div class="overflow-y-auto mb-3" style="max-height: 800px">
+                        {html}
+                    </div>
+                    if let Some(result) = self.alert.clone() {
+                        <button type="button" class="btn btn-success mb-3" onclick={save} {disabled}>{"Save"}</button>
+                        <Alert {result} {hide}/>
+                    } else {
+                        <button type="button" class="btn btn-success" onclick={save} {disabled}>{"Save"}</button>
+                    }
+                </form>
+                <hr/>
+                <h4>{"Data Sources"}</h4>
+                {for source_html}
+                if !matches!(list.mode, ListMode::External) {
+                    <button type="button" class="btn btn-success" onclick={push} disabled={!push_available}>{"Push"}</button>
+                }
+            </div>
         }
     }
 
@@ -231,30 +245,26 @@ impl Component for ListItems {
         match msg {
             Msg::None => false,
             Msg::Load(query) => {
-                let items = query
-                    .items
-                    .into_iter()
-                    .map(|mut i| {
-                        (
-                            i.metadata.unwrap(),
-                            i.values.pop().unwrap(),
-                            i.values.pop().unwrap(),
-                            NodeRef::default(),
-                            NodeRef::default(),
-                        )
-                    })
-                    .collect();
-                self.state = ListState::Success(items);
+                for (i, mut item) in query.items.into_iter().enumerate() {
+                    self.state[i].rating_hidden =
+                        Some((item.values.pop().unwrap(), item.values.pop().unwrap()));
+                }
                 true
             }
             Msg::Save => {
-                let ListState::Success(items) = &mut self.state else {
-                    unreachable!()
-                };
                 let mut update_ids = HashMap::new();
                 let mut update_indexes = Vec::new();
-                for (i, (item, rating, hidden, rating_ref, hidden_ref)) in items.iter().enumerate()
+                for (
+                    i,
+                    ListItem {
+                        item,
+                        rating_hidden,
+                        rating_ref,
+                        hidden_ref,
+                    },
+                ) in self.state.iter().enumerate()
                 {
+                    let (rating, hidden) = rating_hidden.as_ref().unwrap();
                     let mut updates = HashMap::new();
                     let mut value = rating_ref.cast::<HtmlSelectElement>().unwrap().value();
                     if value.is_empty() {
@@ -325,12 +335,15 @@ impl Component for ListItems {
             // Update the rating and hidden state values if the save request is successful.
             // We check if the values are the same to avoid no-op requests.
             Msg::SaveSuccess(updates) => {
-                let ListState::Success(items) = &mut self.state else {
-                    unreachable!()
-                };
                 for (i, update) in updates {
                     for (k, v) in update {
-                        let (_item, rating, hidden, _rating_ref, _hidden_ref) = &mut items[i];
+                        let (rating, hidden) = self
+                            .state
+                            .get_mut(i)
+                            .unwrap()
+                            .rating_hidden
+                            .as_mut()
+                            .unwrap();
                         let v = v.to_string();
                         match k.as_str() {
                             "rating" => {
@@ -384,10 +397,7 @@ impl Component for ListItems {
                 false
             }
             Msg::DeleteSuccess(i) => {
-                let ListState::Success(items) = &mut self.state else {
-                    unreachable!()
-                };
-                items.remove(i);
+                self.state.remove(i);
                 true
             }
         }
