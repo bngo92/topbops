@@ -1,3 +1,4 @@
+use crate::base::Input;
 use std::collections::HashMap;
 use web_sys::{HtmlSelectElement, KeyboardEvent};
 use yew::{html, Component, Context, Html, NodeRef, Properties};
@@ -107,14 +108,6 @@ impl Component for SearchPane {
     fn view(&self, ctx: &Context<Self>) -> Html {
         let default_search = "SELECT name, user_score FROM tracks";
         let search = ctx.link().callback(|_| Msg::Fetching);
-        let (class, error) = if let Some(error) = &self.error {
-            (
-                "w-100 is-invalid",
-                Some(html! {<div class="invalid-feedback">{error}</div>}),
-            )
-        } else {
-            ("w-100", None)
-        };
         let onkeydown = ctx.link().batch_callback(|event: KeyboardEvent| {
             if event.key_code() == 13 {
                 event.prevent_default();
@@ -126,16 +119,7 @@ impl Component for SearchPane {
         html! {
             <div>
                 <form {onkeydown}>
-                    <div class="row">
-                        <div class="col-12 col-md">
-                            // Copy only the styles from .form-control that are needed for sizing
-                            <input ref={self.search_ref.clone()} type="text" {class} style="padding: .5rem 1rem; font-size: .875rem; border-width: 1px" placeholder={default_search}/>
-                            {for error}
-                        </div>
-                        <div class="col-auto">
-                            <button type="button" class="btn btn-success" onclick={search}>{"Search"}</button>
-                        </div>
-                    </div>
+                    <Input input_ref={self.search_ref.clone()} default={default_search} onclick={search.clone()} error={self.error.clone()}/>
                 </form>
                 if let Some(query) = &self.query {
                     if let Format::Table = self.format {

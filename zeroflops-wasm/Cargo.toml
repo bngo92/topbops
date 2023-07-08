@@ -46,6 +46,7 @@ features = [
   "dtype-struct",
   "lazy",
   "serde",
+  "sql",
 ]
 default-features = false
 git = "https://github.com/gitkwr/polars"

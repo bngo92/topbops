@@ -1,6 +1,6 @@
 use polars::prelude::DataFrame;
 use std::borrow::Cow;
-use yew::{html, Callback, Component, Context, Html, MouseEvent, Properties};
+use yew::{html, Callback, Component, Context, Html, MouseEvent, NodeRef, Properties};
 use zeroflops::ItemMetadata;
 
 pub enum IframeCompareMsg {
@@ -73,6 +73,48 @@ impl Component for IframeCompare {
     fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
         self.flag = msg;
         true
+    }
+}
+
+#[derive(Clone, PartialEq, Properties)]
+pub struct InputProps {
+    pub input_ref: NodeRef,
+    pub default: String,
+    pub onclick: Callback<MouseEvent>,
+    pub error: Option<String>,
+}
+
+pub struct Input;
+
+impl Component for Input {
+    type Message = ();
+    type Properties = InputProps;
+
+    fn create(_: &Context<Self>) -> Self {
+        Input
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let (class, error) = if let Some(error) = &ctx.props().error {
+            (
+                "w-100 is-invalid",
+                Some(html! {<div class="invalid-feedback">{error}</div>}),
+            )
+        } else {
+            ("w-100", None)
+        };
+        html! {
+            <div class="row">
+                <div class="col-12 col-md">
+                    // Copy only the styles from .form-control that are needed for sizing
+                    <input ref={&ctx.props().input_ref} type="text" {class} style="padding: .5rem 1rem; font-size: .875rem; border-width: 1px" placeholder={ctx.props().default.clone()}/>
+                    {for error}
+                </div>
+                <div class="col-auto">
+                    <button type="button" class="btn btn-success" onclick={&ctx.props().onclick}>{"Search"}</button>
+                </div>
+            </div>
+        }
     }
 }
 
@@ -157,7 +199,7 @@ pub fn df_table_view(df: &DataFrame) -> Html {
                         })}
                     </tr>
                 </thead>
-                <tbody>{for (0..df.height()).map(|i| df_item_view(&df, i))}</tbody>
+                <tbody>{for (0..df.height()).map(|i| df_item_view(df, i))}</tbody>
             </table>
         </div>
     }

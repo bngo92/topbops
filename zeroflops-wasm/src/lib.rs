@@ -1,5 +1,6 @@
 #![feature(iter_intersperse)]
 use crate::{
+    base::Input,
     bootstrap::{Accordion, Collapse, Modal},
     edit::Edit,
     integrations::spotify,
@@ -12,7 +13,10 @@ use plotters::prelude::{
     ChartBuilder, Color, Histogram, IntoDrawingArea, IntoSegmentedCoord, RED, WHITE,
 };
 use plotters_canvas::CanvasBackend;
-use polars::prelude::{col, DataFrame, IntoLazy};
+use polars::{
+    prelude::{col, DataFrame, IntoLazy},
+    sql::SQLContext,
+};
 use regex::Regex;
 use std::{borrow::Cow, collections::HashMap, rc::Rc};
 use wasm_bindgen::{prelude::*, JsCast};
@@ -545,6 +549,7 @@ impl Component for Widget {
 enum ListViewMsg {
     Success(DataFrame),
     Select,
+    Query,
 }
 
 #[derive(PartialEq, Properties)]
@@ -553,9 +558,12 @@ pub struct ListViewProps {
 }
 
 struct ListView {
-    query: Option<DataFrame>,
+    data: Option<DataFrame>,
     select_ref: NodeRef,
     view: DataView,
+    df: Option<DataFrame>,
+    query_ref: NodeRef,
+    error: Option<String>,
 }
 
 impl Component for ListView {
@@ -567,14 +575,18 @@ impl Component for ListView {
         ctx.link()
             .send_future(async move { ListViewMsg::Success(get_items(&id).await.unwrap()) });
         Self {
-            query: None,
+            data: None,
             select_ref: NodeRef::default(),
             view: DataView::Table,
+            df: None,
+            query_ref: NodeRef::default(),
+            error: None,
         }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         let onchange = ctx.link().callback(|_| ListViewMsg::Select);
+        let query = ctx.link().callback(|_| ListViewMsg::Query);
         html! {
             <div class="row">
                 <div class="col-auto">
@@ -584,8 +596,9 @@ impl Component for ListView {
                     </select>
                 </div>
                 <canvas id="canvas" width="640" height="426" class={if let DataView::Table = self.view { "d-none" } else { "" }}></canvas>
-                if let (DataView::Table, Some(query)) = (&self.view, &self.query) {
-                    {crate::base::df_table_view(query)}
+                if let (DataView::Table, Some(df)) = (&self.view, &self.df) {
+                    <Input input_ref={self.query_ref.clone()} default={""} onclick={query.clone()} error={self.error.clone()}/>
+                    {crate::base::df_table_view(df)}
                 }
             </div>
         }
@@ -593,14 +606,14 @@ impl Component for ListView {
 
     fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
-            ListViewMsg::Success(query) => {
-                self.query = Some(
-                    query
-                        .lazy()
+            ListViewMsg::Success(data) => {
+                self.data = Some(
+                    data.lazy()
                         .select(&[col("*").exclude(["id"])])
                         .collect()
                         .unwrap(),
-                )
+                );
+                self.df = self.data.clone();
             }
             ListViewMsg::Select => {
                 let view = self.select_ref.cast::<HtmlSelectElement>().unwrap().value();
@@ -610,11 +623,36 @@ impl Component for ListView {
                     _ => unreachable!(),
                 };
             }
+            ListViewMsg::Query => {
+                let query = self.query_ref.cast::<HtmlSelectElement>().unwrap().value();
+                let data = self
+                    .data
+                    .clone()
+                    .unwrap()
+                    .lazy()
+                    .select(&[col("*").exclude(["id"])]);
+                let mut ctx = SQLContext::try_new().unwrap();
+                ctx.register("c", data);
+                let lf = match ctx.execute(&query) {
+                    Ok(lf) => lf,
+                    Err(e) => {
+                        self.error = Some(e.to_string());
+                        return true;
+                    }
+                };
+                match lf.collect() {
+                    Ok(df) => {
+                        self.error = None;
+                        self.df = Some(df);
+                    }
+                    Err(e) => self.error = Some(e.to_string()),
+                }
+            }
         }
-        if let Some(query) = &self.query {
+        if let Some(data) = &self.data {
             match self.view {
                 DataView::Table => {}
-                DataView::ColumnGraph => draw_column_graph(query).unwrap(),
+                DataView::ColumnGraph => draw_column_graph(data).unwrap(),
             }
         }
         true
@@ -626,14 +664,14 @@ enum DataView {
     ColumnGraph,
 }
 
-fn draw_column_graph(query: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
+fn draw_column_graph(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
     let backend = CanvasBackend::new("canvas").expect("cannot find canvas");
     let root = backend.into_drawing_area();
 
     root.fill(&WHITE)?;
 
     let mut data = HashMap::new();
-    for i in query["rating"].i64().unwrap() {
+    for i in df["rating"].i64().unwrap() {
         *data.entry(i.unwrap() as u32).or_insert(0) += 1;
     }
 
