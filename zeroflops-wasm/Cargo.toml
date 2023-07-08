@@ -13,18 +13,18 @@ crate-type = ["cdylib", "lib"]
 futures = "0"
 getrandom = { version = "0.2.2", features = [ "js" ] }
 js-sys = "0.3.64"
+plotters = { git = "https://github.com/plotters-rs/plotters" }
+plotters-canvas = { git = "https://github.com/AE1020/plotters-canvas", rev = "aacc00b" }
 rand = "0.8.3"
 regex = "1"
 serde = { version = "1.0.80", features = ["derive"] }
 serde_json = "1.0"
 serde-wasm-bindgen = "0.4"
-zeroflops = { path = "../zeroflops/" }
 wasm-bindgen = { version = "0.2.78", features = ["serde-serialize"]  }
 wasm-bindgen-futures = "0.4.28"
 yew = { version = "0.20", features = ["csr"] }
 yew-router = "0.17"
-plotters = { git = "https://github.com/plotters-rs/plotters" }
-plotters-canvas = { git = "https://github.com/AE1020/plotters-canvas", rev = "aacc00b" }
+zeroflops = { path = "../zeroflops/" }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.0"
@@ -40,3 +40,12 @@ features = [
   'RequestMode',
   'Response',
 ]
+
+[dependencies.polars]
+features = [
+  "dtype-struct",
+  "lazy",
+  "serde",
+]
+default-features = false
+git = "https://github.com/gitkwr/polars"

@@ -3,6 +3,7 @@ use crate::{
     ListsRoute,
 };
 use js_sys::Error;
+use polars::prelude::{col, df, DataFrame, IntoLazy, NamedFrom, TakeRandom};
 use serde_json::Value;
 use std::{collections::HashMap, rc::Rc};
 use wasm_bindgen::{JsCast, JsValue};
@@ -12,11 +13,11 @@ use web_sys::{
 };
 use yew::{html, Component, Context, Html, NodeRef, Properties};
 use yew_router::prelude::Link;
-use zeroflops::{Id, ItemMetadata, ItemQuery, List, ListMode, SourceType, Spotify, User};
+use zeroflops::{Id, ItemMetadata, List, ListMode, SourceType, Spotify, User};
 
 pub enum Msg {
     None,
-    Load(ItemQuery),
+    Load(DataFrame),
     Save,
     SaveError(String),
     HideAlert,
@@ -45,7 +46,7 @@ pub struct ListItems {
 
 struct ListItem {
     item: ItemMetadata,
-    rating_hidden: Option<(String, String)>,
+    rating_hidden: Option<(Option<i64>, bool)>,
     rating_ref: NodeRef,
     hidden_ref: NodeRef,
 }
@@ -128,22 +129,22 @@ impl Component for ListItems {
                                 if let Some((rating, hidden)) = rating_hidden {
                                     <div class="col-2">
                                         <select ref={rating_ref} class="form-select" {disabled}>
-                                            <option selected={rating == "null"}></option>
-                                            <option selected={rating == "0"}>{"0"}</option>
-                                            <option selected={rating == "1"}>{"1"}</option>
-                                            <option selected={rating == "2"}>{"2"}</option>
-                                            <option selected={rating == "3"}>{"3"}</option>
-                                            <option selected={rating == "4"}>{"4"}</option>
-                                            <option selected={rating == "5"}>{"5"}</option>
-                                            <option selected={rating == "6"}>{"6"}</option>
-                                            <option selected={rating == "7"}>{"7"}</option>
-                                            <option selected={rating == "8"}>{"8"}</option>
-                                            <option selected={rating == "9"}>{"9"}</option>
-                                            <option selected={rating == "10"}>{"10"}</option>
+                                            <option selected={rating.is_none()}></option>
+                                            <option selected={*rating == Some(0)}>{"0"}</option>
+                                            <option selected={*rating == Some(1)}>{"1"}</option>
+                                            <option selected={*rating == Some(2)}>{"2"}</option>
+                                            <option selected={*rating == Some(3)}>{"3"}</option>
+                                            <option selected={*rating == Some(4)}>{"4"}</option>
+                                            <option selected={*rating == Some(5)}>{"5"}</option>
+                                            <option selected={*rating == Some(6)}>{"6"}</option>
+                                            <option selected={*rating == Some(7)}>{"7"}</option>
+                                            <option selected={*rating == Some(8)}>{"8"}</option>
+                                            <option selected={*rating == Some(9)}>{"9"}</option>
+                                            <option selected={*rating == Some(10)}>{"10"}</option>
                                         </select>
                                     </div>
                                     <div class="col-1 d-flex justify-content-center">
-                                        <input ref={hidden_ref} class="form-check-input mt-2" type="checkbox" checked={hidden == "true"}/>
+                                        <input ref={hidden_ref} class="form-check-input mt-2" type="checkbox" checked={*hidden}/>
                                     </div>
                                 }
                             </div>
@@ -245,9 +246,20 @@ impl Component for ListItems {
         match msg {
             Msg::None => false,
             Msg::Load(query) => {
-                for (i, mut item) in query.items.into_iter().enumerate() {
-                    self.state[i].rating_hidden =
-                        Some((item.values.pop().unwrap(), item.values.pop().unwrap()));
+                let ids = self
+                    .state
+                    .iter()
+                    .map(|i| i.item.id.as_str())
+                    .collect::<Vec<_>>();
+                let df = query
+                    .lazy()
+                    .inner_join(df!("id" => ids).unwrap().lazy(), col("id"), col("id"))
+                    .collect()
+                    .unwrap();
+                let ratings = df["rating"].i64().unwrap();
+                let hidden = df["hidden"].bool().unwrap();
+                for i in 0..ratings.len() {
+                    self.state[i].rating_hidden = Some((ratings.get(i), hidden.get(i).unwrap()));
                 }
                 true
             }
@@ -266,20 +278,19 @@ impl Component for ListItems {
                 {
                     let (rating, hidden) = rating_hidden.as_ref().unwrap();
                     let mut updates = HashMap::new();
-                    let mut value = rating_ref.cast::<HtmlSelectElement>().unwrap().value();
-                    if value.is_empty() {
-                        value = String::from("null");
-                    }
+                    let value = rating_ref
+                        .cast::<HtmlSelectElement>()
+                        .unwrap()
+                        .value()
+                        .parse::<i64>()
+                        .ok();
                     if value != *rating {
-                        updates.insert(
-                            String::from("rating"),
-                            serde_json::from_str(&value).unwrap(),
-                        );
+                        updates.insert(String::from("rating"), value.into());
                     }
                     let value =
                         Value::Bool(hidden_ref.cast::<HtmlInputElement>().unwrap().checked());
                     #[allow(clippy::cmp_owned)]
-                    if value.to_string() != *hidden {
+                    if value != *hidden {
                         updates.insert(String::from("hidden"), value);
                     }
                     if !updates.is_empty() {
@@ -344,13 +355,12 @@ impl Component for ListItems {
                             .rating_hidden
                             .as_mut()
                             .unwrap();
-                        let v = v.to_string();
                         match k.as_str() {
                             "rating" => {
-                                *rating = v;
+                                *rating = v.as_i64();
                             }
                             "hidden" => {
-                                *hidden = v;
+                                *hidden = v.as_bool().unwrap();
                             }
                             _ => unimplemented!(),
                         }

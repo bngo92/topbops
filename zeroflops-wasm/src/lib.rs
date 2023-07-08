@@ -12,6 +12,7 @@ use plotters::prelude::{
     ChartBuilder, Color, Histogram, IntoDrawingArea, IntoSegmentedCoord, RED, WHITE,
 };
 use plotters_canvas::CanvasBackend;
+use polars::prelude::{col, DataFrame, IntoLazy};
 use regex::Regex;
 use std::{borrow::Cow, collections::HashMap, rc::Rc};
 use wasm_bindgen::{prelude::*, JsCast};
@@ -542,7 +543,7 @@ impl Component for Widget {
 }
 
 enum ListViewMsg {
-    Success(ItemQuery),
+    Success(DataFrame),
     Select,
 }
 
@@ -552,7 +553,7 @@ pub struct ListViewProps {
 }
 
 struct ListView {
-    query: Option<ItemQuery>,
+    query: Option<DataFrame>,
     select_ref: NodeRef,
     view: DataView,
 }
@@ -564,7 +565,7 @@ impl Component for ListView {
     fn create(ctx: &Context<Self>) -> Self {
         let id = ctx.props().id.clone();
         ctx.link()
-            .send_future(async move { ListViewMsg::Success(query_items(&id).await.unwrap()) });
+            .send_future(async move { ListViewMsg::Success(get_items(&id).await.unwrap()) });
         Self {
             query: None,
             select_ref: NodeRef::default(),
@@ -584,14 +585,7 @@ impl Component for ListView {
                 </div>
                 <canvas id="canvas" width="640" height="426" class={if let DataView::Table = self.view { "d-none" } else { "" }}></canvas>
                 if let (DataView::Table, Some(query)) = (&self.view, &self.query) {
-                    {crate::base::table_view(
-                        &query.fields.iter().map(String::as_str).collect::<Vec<_>>(),
-                        query
-                            .items
-                            .iter()
-                            .zip(1..)
-                            .map(|(item, i)| Some((i, Cow::from(&item.values)))),
-                    )}
+                    {crate::base::df_table_view(query)}
                 }
             </div>
         }
@@ -599,7 +593,15 @@ impl Component for ListView {
 
     fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
-            ListViewMsg::Success(query) => self.query = Some(query),
+            ListViewMsg::Success(query) => {
+                self.query = Some(
+                    query
+                        .lazy()
+                        .select(&[col("*").exclude(["id"])])
+                        .collect()
+                        .unwrap(),
+                )
+            }
             ListViewMsg::Select => {
                 let view = self.select_ref.cast::<HtmlSelectElement>().unwrap().value();
                 self.view = match &*view {
@@ -624,15 +626,15 @@ enum DataView {
     ColumnGraph,
 }
 
-fn draw_column_graph(query: &ItemQuery) -> Result<(), Box<dyn std::error::Error>> {
+fn draw_column_graph(query: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
     let backend = CanvasBackend::new("canvas").expect("cannot find canvas");
     let root = backend.into_drawing_area();
 
     root.fill(&WHITE)?;
 
     let mut data = HashMap::new();
-    for i in &query.items {
-        *data.entry(i.values[1].parse::<u32>().unwrap()).or_insert(0) += 1;
+    for i in query["rating"].i64().unwrap() {
+        *data.entry(i.unwrap() as u32).or_insert(0) += 1;
     }
 
     let mut chart = ChartBuilder::on(&root)
@@ -966,7 +968,7 @@ async fn delete_list(id: &str) -> Result<(), JsValue> {
     Ok(())
 }
 
-async fn get_items(id: &str) -> Result<ItemQuery, JsValue> {
+async fn get_items(id: &str) -> Result<DataFrame, JsValue> {
     let window = window();
     let request = query(&format!("/api/lists/{}/items", id), "GET").unwrap();
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;

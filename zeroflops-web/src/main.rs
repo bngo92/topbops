@@ -11,6 +11,7 @@ use base64::prelude::{Engine, BASE64_STANDARD};
 use futures::{StreamExt, TryStreamExt};
 use hyper::{Body, Client, Method, Request, StatusCode, Uri};
 use hyper_tls::HttpsConnector;
+use polars::prelude::{col, df, DataFrame, IntoLazy, NamedFrom, SerReader};
 use serde_json::{Map, Value};
 use std::{
     collections::HashMap,
@@ -470,52 +471,65 @@ async fn get_list_items(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     auth: AuthContext,
-) -> Result<Json<ItemQuery>, Response> {
+) -> Result<Json<DataFrame>, Response> {
     let user_id = get_user_or_demo_user(auth);
     let list = source::get_list(&state.client, &user_id, &id).await?;
     if list.items.is_empty() {
-        Ok(Json(ItemQuery {
-            fields: Vec::new(),
-            items: Vec::new(),
-        }))
+        Ok(Json(DataFrame::default()))
     } else {
-        let query = String::from("SELECT c.id, c.name, c.hidden, c.rating FROM c WHERE c.user_id = @user_id AND ARRAY_CONTAINS(@ids, c.id)");
-        let items = state
-            .client
-            .query_documents(|db| {
-                db.collection_client("items")
-                    .query_documents(CosmosQuery::with_params(
-                        query,
-                        [
-                            Param::new(String::from("@user_id"), user_id.0.clone()),
-                            Param::new(
-                                String::from("@ids"),
-                                list.items.iter().cloned().map(|i| i.id).collect::<Vec<_>>(),
-                            ),
-                        ],
-                    ))
-            })
-            .await
-            .map_err(Error::from)?;
-        let map: HashMap<_, _> = items
-            .into_iter()
-            .map(|r: Map<String, Value>| (r["id"].as_str().expect("string id").to_owned(), r))
-            .collect();
-        Ok(Json(ItemQuery {
-            fields: Vec::new(),
-            items: list
-                .items
-                .into_iter()
-                .map(|i| {
-                    let iter = map[&i.id].values();
-                    zeroflops::Item {
-                        values: iter.map(format_value).collect(),
-                        metadata: Some(i),
-                    }
-                })
-                .collect(),
-        }))
+        Ok(Json(
+            get_list_items_impl(&state.client, &user_id, list).await?,
+        ))
     }
+}
+
+async fn get_list_items_impl(
+    client: &SessionClient,
+    user_id: &UserId,
+    list: List,
+) -> Result<DataFrame, Error> {
+    let query = String::from("SELECT c.id, c.name, c.rating, c.user_score, c.user_wins, c.user_losses, c.hidden, c.metadata FROM c WHERE c.user_id = @user_id AND ARRAY_CONTAINS(@ids, c.id)");
+    let mut items: Vec<Map<String, Value>> = client
+        .query_documents(|db| {
+            db.collection_client("items")
+                .query_documents(CosmosQuery::with_params(
+                    query,
+                    [
+                        Param::new(String::from("@user_id"), user_id.0.clone()),
+                        Param::new(
+                            String::from("@ids"),
+                            list.items.iter().map(|i| i.id.clone()).collect::<Vec<_>>(),
+                        ),
+                    ],
+                ))
+        })
+        .await
+        .map_err(Error::from)?;
+    items = items
+        .into_iter()
+        .map(|mut m| {
+            if let Some(Value::Object(mut metadata)) = m.remove("metadata") {
+                m.append(&mut metadata);
+            }
+            m
+        })
+        .collect();
+    let json = serde_json::to_string(&items).unwrap();
+    let cursor = std::io::Cursor::new(json);
+    let items = polars::prelude::JsonReader::new(cursor)
+        .finish()
+        .unwrap()
+        .lazy()
+        .inner_join(
+            df!("id" => &list.items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>())
+                .unwrap()
+                .lazy(),
+            col("id"),
+            col("id"),
+        )
+        .collect()
+        .unwrap();
+    Ok(items)
 }
 
 fn format_value(v: &Value) -> String {
