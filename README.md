@@ -31,7 +31,7 @@ rustup run nightly wasm-pack build --target web
 - [ ] Add item notes
 - [ ] Add description
 - [ ] Add lists as a data source
-- [ ] Add time weighted averages
+- [x] Add time weighted averages
 - [ ] Support data source refresh
 ### P2
 - [ ] Add list sort mode (via rank or rating)

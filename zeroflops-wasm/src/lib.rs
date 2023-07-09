@@ -593,6 +593,7 @@ impl Component for ListView {
                         <option>{"Column Graph"}</option>
                         <option>{"Line Graph"}</option>
                         <option>{"Scatter Plot"}</option>
+                        <option>{"Cumulative Line Graph"}</option>
                     </select>
                 </div>
                 <Input input_ref={self.query_ref.clone()} default={""} onclick={query.clone()} error={self.error.clone()}/>
@@ -622,6 +623,7 @@ impl Component for ListView {
                     "Column Graph" => DataView::ColumnGraph,
                     "Line Graph" => DataView::LineGraph,
                     "Scatter Plot" => DataView::ScatterPlot,
+                    "Cumulative Line Graph" => DataView::CumLineGraph,
                     _ => unreachable!(),
                 };
             }

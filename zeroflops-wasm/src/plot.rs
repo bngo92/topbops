@@ -11,6 +11,7 @@ pub enum DataView {
     ColumnGraph,
     LineGraph,
     ScatterPlot,
+    CumLineGraph,
 }
 
 impl DataView {
@@ -20,6 +21,7 @@ impl DataView {
             DataView::ColumnGraph => draw_column_graph(df),
             DataView::LineGraph => draw_line_graph(df),
             DataView::ScatterPlot => draw_scatter_plot(df),
+            DataView::CumLineGraph => draw_cum_line_graph(df),
         }
     }
 }
@@ -145,5 +147,33 @@ fn draw_scatter_plot(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
         .disable_y_mesh()
         .draw()?;
     chart.draw_series(data.into_iter())?;
+    Ok(())
+}
+
+fn draw_cum_line_graph(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
+    let backend = CanvasBackend::new("canvas").expect("cannot find canvas");
+    let root = backend.into_drawing_area();
+
+    root.fill(&WHITE)?;
+
+    let mut builder = ChartBuilder::on(&root);
+    builder
+        .x_label_area_size(35)
+        .y_label_area_size(40)
+        .margin(5);
+    let domain = df[0].cast(&DataType::Float64)?;
+    let range = df[1].cast(&DataType::Float64)?;
+    let mut cum_sum = 0.0;
+    let mut data = Vec::new();
+    let mut max = 0.0;
+    for (d, f) in domain.f64()?.into_iter().zip(range.f64()?.into_iter()) {
+        data.push((cum_sum, f.unwrap()));
+        cum_sum += d.unwrap();
+        data.push((cum_sum, f.unwrap()));
+        max = f64::max(max, f.unwrap());
+    }
+    let mut chart = builder.build_cartesian_2d(0f64..cum_sum, 0f64..max)?;
+    chart.configure_mesh().draw()?;
+    chart.draw_series(LineSeries::new(data.into_iter(), BLACK))?;
     Ok(())
 }
