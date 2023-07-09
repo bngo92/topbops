@@ -14,7 +14,7 @@ use plotters::prelude::{
 };
 use plotters_canvas::CanvasBackend;
 use polars::{
-    prelude::{col, DataFrame, IntoLazy},
+    prelude::{col, DataFrame, DataType, IntoLazy},
     sql::SQLContext,
 };
 use regex::Regex;
@@ -595,9 +595,9 @@ impl Component for ListView {
                         <option>{"Column Graph"}</option>
                     </select>
                 </div>
+                <Input input_ref={self.query_ref.clone()} default={""} onclick={query.clone()} error={self.error.clone()}/>
                 <canvas id="canvas" width="640" height="426" class={if let DataView::Table = self.view { "d-none" } else { "" }}></canvas>
                 if let (DataView::Table, Some(df)) = (&self.view, &self.df) {
-                    <Input input_ref={self.query_ref.clone()} default={""} onclick={query.clone()} error={self.error.clone()}/>
                     {crate::base::df_table_view(df)}
                 }
             </div>
@@ -649,10 +649,10 @@ impl Component for ListView {
                 }
             }
         }
-        if let Some(data) = &self.data {
+        if let Some(df) = &self.df {
             match self.view {
                 DataView::Table => {}
-                DataView::ColumnGraph => draw_column_graph(data).unwrap(),
+                DataView::ColumnGraph => draw_column_graph(df).unwrap(),
             }
         }
         true
@@ -670,35 +670,93 @@ fn draw_column_graph(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
 
     root.fill(&WHITE)?;
 
-    let mut data = HashMap::new();
-    for i in df["rating"].i64().unwrap() {
-        *data.entry(i.unwrap() as u32).or_insert(0) += 1;
-    }
-
-    let mut chart = ChartBuilder::on(&root)
+    let mut builder = ChartBuilder::on(&root);
+    builder
         .x_label_area_size(35)
         .y_label_area_size(40)
-        .margin(5)
-        .build_cartesian_2d(
-            (0u32..10u32).into_segmented(),
-            0u32..*data.values().max().unwrap(),
-        )?;
-
-    chart
-        .configure_mesh()
-        .disable_x_mesh()
-        .bold_line_style(WHITE.mix(0.3))
-        .y_desc("Count")
-        .x_desc("Bucket")
-        .axis_desc_style(("sans-serif", 15))
-        .draw()?;
-
-    chart.draw_series(
-        Histogram::vertical(&chart)
-            .style(RED.mix(0.5).filled())
-            .data(data.into_iter()),
-    )?;
-
+        .margin(5);
+    match df[0].dtype() {
+        DataType::Int64 => {
+            let mut data = HashMap::new();
+            for i in df[1].i64().unwrap() {
+                *data.entry(i.unwrap() as u32).or_insert(0) += 1;
+            }
+            let domain = 0u32..df[0].max().unwrap();
+            let mut chart = builder
+                .build_cartesian_2d(domain.into_segmented(), 0u32..*data.values().max().unwrap())?;
+            chart
+                .configure_mesh()
+                .disable_x_mesh()
+                .bold_line_style(WHITE.mix(0.3))
+                .y_desc(&df.fields()[1].name)
+                .x_desc(&df.fields()[0].name)
+                .axis_desc_style(("sans-serif", 15))
+                .draw()?;
+            chart.draw_series(
+                Histogram::vertical(&chart)
+                    .style(RED.mix(0.5).filled())
+                    .data(data.into_iter()),
+            )?;
+        }
+        DataType::Utf8 => match df[1].dtype() {
+            DataType::Int64 => {
+                let data: HashMap<_, _> = df[0]
+                    .utf8()
+                    .unwrap()
+                    .into_iter()
+                    .zip(df[1].i64().unwrap().into_iter())
+                    .map(|(o1, o2)| (o1.unwrap(), o2.unwrap() as u32))
+                    .collect();
+                let keys = data.keys().cloned().collect::<Vec<_>>();
+                let mut chart = builder.build_cartesian_2d(
+                    keys.into_segmented(),
+                    0u32..*data.values().max().unwrap(),
+                )?;
+                chart
+                    .configure_mesh()
+                    .disable_x_mesh()
+                    .bold_line_style(WHITE.mix(0.3))
+                    .y_desc(&df.fields()[1].name)
+                    .x_desc(&df.fields()[0].name)
+                    .axis_desc_style(("sans-serif", 15))
+                    .draw()?;
+                chart.draw_series(
+                    Histogram::vertical(&chart)
+                        .style(RED.mix(0.5).filled())
+                        .data(data.iter().map(|(s, i)| (s, *i))),
+                )?;
+            }
+            DataType::Float64 => {
+                let data: HashMap<_, _> = df[0]
+                    .utf8()
+                    .unwrap()
+                    .into_iter()
+                    .zip(df[1].f64().unwrap().into_iter())
+                    .map(|(o1, o2)| (o1.unwrap(), o2.unwrap() as f64))
+                    .collect();
+                let keys = data.keys().cloned().collect::<Vec<_>>();
+                let mut chart = builder.build_cartesian_2d(
+                    keys.into_segmented(),
+                    0f64..*data.values().max_by(|a, b| a.total_cmp(b)).unwrap(),
+                )?;
+                chart
+                    .configure_mesh()
+                    .disable_x_mesh()
+                    .bold_line_style(WHITE.mix(0.3))
+                    .y_desc(&df.fields()[1].name)
+                    .x_desc(&df.fields()[0].name)
+                    .axis_desc_style(("sans-serif", 15))
+                    .draw()?;
+                chart.draw_series(
+                    Histogram::vertical(&chart)
+                        .style(RED.mix(0.5).filled())
+                        .data(data.iter().map(|(s, i)| (s, *i))),
+                )?;
+            }
+            _ => todo!(),
+        },
+        _ => todo!(),
+    }
     Ok(())
 }
 
