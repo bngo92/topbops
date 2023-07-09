@@ -16,6 +16,7 @@ rustup run nightly wasm-pack build --target web
 - [x] Support hiding items
 - [x] Support deleting lists
 - [ ] Debug session issues
+- [ ] Audit authz
 ### P1
 - [x] Add sort/rank page to lists
 - [x] Add Google auth
@@ -25,7 +26,7 @@ rustup run nightly wasm-pack build --target web
 - [ ] Add documentation
 - [ ] Support resetting items
 - [ ] Add Spotify search support
-- [ ] Add chart visualization
+- [x] Add chart visualization
 - [ ] Add custom tournaments
 - [ ] Add item notes
 - [ ] Add description

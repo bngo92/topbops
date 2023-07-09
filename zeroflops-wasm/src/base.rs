@@ -208,7 +208,7 @@ pub fn df_table_view(df: &DataFrame) -> Html {
 fn df_item_view(df: &DataFrame, i: usize) -> Html {
     html! {
         <tr>
-            <th>{i}</th>
+            <th>{i + 1}</th>
             {for df.iter().map(|item| html! {
                 <td class="text-truncate max-width">{item.str_value(i).unwrap()}</td>
             })}
