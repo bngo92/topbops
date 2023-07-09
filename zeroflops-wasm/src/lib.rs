@@ -630,12 +630,7 @@ impl Component for ListView {
             }
             ListViewMsg::Query => {
                 let query = self.query_ref.cast::<HtmlSelectElement>().unwrap().value();
-                let data = self
-                    .data
-                    .clone()
-                    .unwrap()
-                    .lazy()
-                    .select(&[col("*").exclude(["id"])]);
+                let data = self.data.clone().unwrap().lazy();
                 let mut ctx = SQLContext::try_new().unwrap();
                 ctx.register("c", data);
                 let lf = match ctx.execute(&query) {
