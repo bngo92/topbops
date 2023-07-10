@@ -106,7 +106,7 @@ impl Component for SearchPane {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let default_search = "SELECT name, user_score FROM tracks";
+        let default_search = Some("SELECT name, user_score FROM tracks");
         let search = ctx.link().callback(|_| Msg::Fetching);
         let onkeydown = ctx.link().batch_callback(|event: KeyboardEvent| {
             if event.key_code() == 13 {

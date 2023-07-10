@@ -105,18 +105,11 @@ fn draw_line_graph(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
         .x_label_area_size(35)
         .y_label_area_size(40)
         .margin(5);
-    let domain = df[0].cast(&DataType::Float64)?;
-    let range = df[1].cast(&DataType::Float64)?;
-    let data: Vec<_> = domain
-        .f64()?
-        .into_iter()
-        .zip(range.f64()?.into_iter())
-        .map(|(o1, o2)| (o1.unwrap(), o2.unwrap()))
-        .collect();
+    let data = df_coords(df)?;
     let mut chart =
         builder.build_cartesian_2d(0f64..df[0].max().unwrap(), 0f64..df[1].max().unwrap())?;
     chart.configure_mesh().draw()?;
-    chart.draw_series(LineSeries::new(data.into_iter(), BLACK))?;
+    chart.draw_series(LineSeries::new(data, BLACK))?;
     Ok(())
 }
 
@@ -131,14 +124,7 @@ fn draw_scatter_plot(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
         .x_label_area_size(35)
         .y_label_area_size(40)
         .margin(5);
-    let domain = df[0].cast(&DataType::Float64)?;
-    let range = df[1].cast(&DataType::Float64)?;
-    let data: Vec<_> = domain
-        .f64()?
-        .into_iter()
-        .zip(range.f64()?.into_iter())
-        .map(|(o1, o2)| Circle::new((o1.unwrap(), o2.unwrap()), 2, BLACK.filled()))
-        .collect();
+    let data = df_coords(df)?;
     let mut chart =
         builder.build_cartesian_2d(0f64..df[0].max().unwrap(), 0f64..df[1].max().unwrap())?;
     chart
@@ -146,7 +132,7 @@ fn draw_scatter_plot(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
         .disable_x_mesh()
         .disable_y_mesh()
         .draw()?;
-    chart.draw_series(data.into_iter())?;
+    chart.draw_series(data.into_iter().map(|c| Circle::new(c, 2, BLACK.filled())))?;
     Ok(())
 }
 
@@ -161,19 +147,46 @@ fn draw_cum_line_graph(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>>
         .x_label_area_size(35)
         .y_label_area_size(40)
         .margin(5);
-    let domain = df[0].cast(&DataType::Float64)?;
-    let range = df[1].cast(&DataType::Float64)?;
+    let df = df_coords(df)?;
     let mut cum_sum = 0.0;
-    let mut data = Vec::new();
+    let mut data = Vec::with_capacity(2 * df.len());
     let mut max = 0.0;
-    for (d, f) in domain.f64()?.into_iter().zip(range.f64()?.into_iter()) {
-        data.push((cum_sum, f.unwrap()));
-        cum_sum += d.unwrap();
-        data.push((cum_sum, f.unwrap()));
-        max = f64::max(max, f.unwrap());
+    for (d, f) in df {
+        data.push((cum_sum, f));
+        cum_sum += d;
+        data.push((cum_sum, f));
+        max = f64::max(max, f);
     }
     let mut chart = builder.build_cartesian_2d(0f64..cum_sum, 0f64..max)?;
     chart.configure_mesh().draw()?;
     chart.draw_series(LineSeries::new(data.into_iter(), BLACK))?;
     Ok(())
+}
+
+fn df_coords(df: &DataFrame) -> Result<Vec<(f64, f64)>, Box<dyn std::error::Error>> {
+    let domain = df
+        .select_at_idx(0)
+        .ok_or("query should return 2 columns")?
+        .cast(&DataType::Float64)?;
+    let range = df
+        .select_at_idx(1)
+        .ok_or("query should return 2 columns")?
+        .cast(&DataType::Float64)?;
+    domain
+        .f64()?
+        .into_iter()
+        .zip(range.f64()?.into_iter())
+        .map(|(o1, o2)| {
+            Ok((
+                o1.ok_or(format!(
+                    "unsupported data type for line graph: {}",
+                    df[0].dtype()
+                ))?,
+                o2.ok_or(format!(
+                    "unsupported data type for line graph: {}",
+                    df[1].dtype()
+                ))?,
+            ))
+        })
+        .collect()
 }

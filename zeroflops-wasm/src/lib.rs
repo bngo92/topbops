@@ -597,7 +597,8 @@ impl Component for ListView {
                         <option>{"Cumulative Line Graph"}</option>
                     </select>
                 </div>
-                <Input input_ref={self.query_ref.clone()} default={""} onclick={query.clone()} error={self.error.clone()}/>
+                // TODO: fix input clearing during errors
+                <Input input_ref={self.query_ref.clone()} onclick={query.clone()} error={self.error.clone()}/>
                 <canvas id="canvas" width="640" height="426" class={if let DataView::Table = self.view { "d-none" } else { "" }}></canvas>
                 if let (DataView::Table, Some(df)) = (&self.view, &self.df) {
                     {crate::base::df_table_view(df)}
@@ -606,7 +607,7 @@ impl Component for ListView {
         }
     }
 
-    fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
+    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
             ListViewMsg::Success(data) => {
                 self.data = Some(
@@ -615,7 +616,7 @@ impl Component for ListView {
                         .collect()
                         .unwrap(),
                 );
-                self.df = self.data.clone();
+                update_list_view(self, ctx.props().list.query.clone());
             }
             ListViewMsg::Select => {
                 let view = self.select_ref.cast::<HtmlSelectElement>().unwrap().value();
@@ -630,29 +631,46 @@ impl Component for ListView {
             }
             ListViewMsg::Query => {
                 let query = self.query_ref.cast::<HtmlSelectElement>().unwrap().value();
-                let data = self.data.clone().unwrap().lazy();
-                let mut ctx = SQLContext::try_new().unwrap();
-                ctx.register("c", data);
-                let lf = match ctx.execute(&query) {
-                    Ok(lf) => lf,
-                    Err(e) => {
-                        self.error = Some(e.to_string());
-                        return true;
-                    }
-                };
-                match lf.collect() {
-                    Ok(df) => {
-                        self.error = None;
-                        self.df = Some(df);
-                    }
-                    Err(e) => self.error = Some(e.to_string()),
+                if query.is_empty() {
+                    self.df = self.data.clone();
+                } else {
+                    update_list_view(self, query);
                 }
             }
         }
         if let Some(df) = &self.df {
-            self.view.draw(df).unwrap();
+            if let Err(e) = self.view.draw(df) {
+                self.error = Some(e.to_string());
+            }
         }
         true
+    }
+
+    fn rendered(&mut self, ctx: &Context<Self>, first_render: bool) {
+        if first_render {
+            let query = self.query_ref.cast::<HtmlSelectElement>().unwrap();
+            query.set_value(&ctx.props().list.query);
+        }
+    }
+}
+
+fn update_list_view(list_view: &mut ListView, query: String) {
+    let data = list_view.data.clone().unwrap().lazy();
+    let mut ctx = SQLContext::try_new().unwrap();
+    ctx.register("c", data);
+    let lf = match ctx.execute(&query) {
+        Ok(lf) => lf,
+        Err(e) => {
+            list_view.error = Some(e.to_string());
+            return;
+        }
+    };
+    match lf.collect() {
+        Ok(df) => {
+            list_view.error = None;
+            list_view.df = Some(df);
+        }
+        Err(e) => list_view.error = Some(e.to_string()),
     }
 }
 

@@ -79,7 +79,7 @@ impl Component for IframeCompare {
 #[derive(Clone, PartialEq, Properties)]
 pub struct InputProps {
     pub input_ref: NodeRef,
-    pub default: String,
+    pub default: Option<&'static str>,
     pub onclick: Callback<MouseEvent>,
     pub error: Option<String>,
 }
@@ -107,7 +107,7 @@ impl Component for Input {
             <div class="row">
                 <div class="col-12 col-md">
                     // Copy only the styles from .form-control that are needed for sizing
-                    <input ref={&ctx.props().input_ref} type="text" {class} style="padding: .5rem 1rem; font-size: .875rem; border-width: 1px" placeholder={ctx.props().default.clone()}/>
+                    <input ref={&ctx.props().input_ref} type="text" {class} style="padding: .5rem 1rem; font-size: .875rem; border-width: 1px" placeholder={ctx.props().default}/>
                     {for error}
                 </div>
                 <div class="col-auto">
