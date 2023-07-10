@@ -5,7 +5,7 @@ COSMOS_MASTER_KEY= COSMOS_ACCOUNT= SPOTIFY_TOKEN= cargo +nightly run --features 
 ```
 ## zeroflops-wasm
 ```
-RUSTFLAGS='-C target-feature=+simd128' rustup run nightly wasm-pack build --target web
+rustup run nightly wasm-pack build --target web
 ```
 ## TODO
 ### P0
