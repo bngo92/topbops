@@ -44,9 +44,9 @@ features = [
 [dependencies.polars]
 features = [
   "dtype-struct",
+  "json",
   "lazy",
-  "serde",
   "sql",
 ]
 default-features = false
-git = "https://github.com/gitkwr/polars"
+git = "https://github.com/bngo92/polars"

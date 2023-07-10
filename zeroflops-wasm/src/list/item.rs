@@ -61,9 +61,9 @@ impl Component for ListItems {
     type Properties = ListProps;
 
     fn create(ctx: &Context<Self>) -> Self {
-        let id = ctx.props().list.id.clone();
+        let list = ctx.props().list.clone();
         ctx.link()
-            .send_future(async move { Msg::Load(crate::get_items(&id).await.unwrap()) });
+            .send_future(async move { Msg::Load(crate::get_items(&list).await.unwrap()) });
         ListItems {
             state: ctx
                 .props()

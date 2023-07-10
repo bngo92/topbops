@@ -11,10 +11,11 @@ use crate::{
     tournament::{RandomTournamentLoader, TournamentLoader},
 };
 use polars::{
-    prelude::{col, DataFrame, IntoLazy},
+    prelude::{col, df, DataFrame, IntoLazy, NamedFrom, SerReader},
     sql::SQLContext,
 };
 use regex::Regex;
+use serde_json::{Map, Value};
 use std::{borrow::Cow, collections::HashMap, rc::Rc};
 use wasm_bindgen::{prelude::*, JsCast};
 use wasm_bindgen_futures::JsFuture;
@@ -552,7 +553,7 @@ enum ListViewMsg {
 
 #[derive(PartialEq, Properties)]
 pub struct ListViewProps {
-    id: String,
+    list: List,
 }
 
 struct ListView {
@@ -569,9 +570,9 @@ impl Component for ListView {
     type Properties = ListViewProps;
 
     fn create(ctx: &Context<Self>) -> Self {
-        let id = ctx.props().id.clone();
+        let list = ctx.props().list.clone();
         ctx.link()
-            .send_future(async move { ListViewMsg::Success(get_items(&id).await.unwrap()) });
+            .send_future(async move { ListViewMsg::Success(get_items(&list).await.unwrap()) });
         Self {
             data: None,
             select_ref: NodeRef::default(),
@@ -760,7 +761,7 @@ impl Component for ListComponent {
                     _ => {}
                 }
                 let component = match view {
-                    ListPage::View => html! { <ListView id={list.id.clone()}/> },
+                    ListPage::View => html! { <ListView list={list.clone()}/> },
                     ListPage::List => {
                         html! { <ListItems user={Rc::clone(&ctx.props().user)} list={list.clone()}/> }
                     }
@@ -959,13 +960,38 @@ async fn delete_list(id: &str) -> Result<(), JsValue> {
     Ok(())
 }
 
-async fn get_items(id: &str) -> Result<DataFrame, JsValue> {
+async fn get_items(list: &List) -> Result<DataFrame, JsValue> {
     let window = window();
-    let request = query(&format!("/api/lists/{}/items", id), "GET").unwrap();
+    let request = query(&format!("/api/lists/{}/items", list.id), "GET").unwrap();
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
     let json = JsFuture::from(resp.json()?).await?;
-    Ok(serde_wasm_bindgen::from_value(json).unwrap())
+    let mut items: Vec<Map<String, Value>> = serde_wasm_bindgen::from_value(json).unwrap();
+    items = items
+        .into_iter()
+        .map(|mut m| {
+            if let Some(Value::Object(mut metadata)) = m.remove("metadata") {
+                m.append(&mut metadata);
+            }
+            m
+        })
+        .collect();
+    let json = serde_json::to_string(&items).unwrap();
+    let cursor = std::io::Cursor::new(json);
+    let items = polars::prelude::JsonReader::new(cursor)
+        .finish()
+        .unwrap()
+        .lazy()
+        .inner_join(
+            df!("id" => &list.items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>())
+                .unwrap()
+                .lazy(),
+            col("id"),
+            col("id"),
+        )
+        .collect()
+        .unwrap();
+    Ok(items)
 }
 
 async fn query_items(id: &str) -> Result<ItemQuery, JsValue> {
