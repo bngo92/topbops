@@ -256,10 +256,18 @@ impl Component for ListItems {
                     .inner_join(df!("id" => ids).unwrap().lazy(), col("id"), col("id"))
                     .collect()
                     .unwrap();
-                let ratings = df["rating"].i64().unwrap();
+                // polars requires that at least one row is not null
+                let ratings = df.column("rating").map(|s| s.i64().unwrap());
                 let hidden = df["hidden"].bool().unwrap();
-                for i in 0..ratings.len() {
-                    self.state[i].rating_hidden = Some((ratings.get(i), hidden.get(i).unwrap()));
+                if let Ok(ratings) = ratings {
+                    for i in 0..df.height() {
+                        self.state[i].rating_hidden =
+                            Some((ratings.get(i), hidden.get(i).unwrap()));
+                    }
+                } else {
+                    for i in 0..df.height() {
+                        self.state[i].rating_hidden = Some((None, hidden.get(i).unwrap()));
+                    }
                 }
                 true
             }
