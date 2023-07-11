@@ -531,7 +531,7 @@ async fn create_list(
         iframe: None,
         items: Vec::new(),
         favorite: false,
-        query: String::from("SELECT name, user_score FROM tracks"),
+        query: String::from("SELECT name, user_score FROM c"),
     };
     create_list_doc(&state.client, list.clone(), false).await?;
     Ok((StatusCode::CREATED, Json(list)))
@@ -1013,7 +1013,7 @@ async fn main() {
                 iframe: None,
                 items: Vec::new(),
                 favorite: true,
-                query: String::from("SELECT artists, AVG(user_score) FROM tracks GROUP BY artists"),
+                query: String::from("SELECT artists, AVG(user_score) FROM c GROUP BY artists"),
             },
             true,
         )
@@ -1030,7 +1030,7 @@ async fn main() {
                 iframe: None,
                 items: Vec::new(),
                 favorite: true,
-                query: String::from("SELECT name, user_score FROM tracks WHERE user_score >= 1500"),
+                query: String::from("SELECT name, user_score FROM c WHERE user_score >= 1500"),
             },
             true,
         )
