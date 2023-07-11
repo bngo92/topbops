@@ -119,7 +119,7 @@ impl Component for SearchPane {
         html! {
             <div>
                 <form {onkeydown}>
-                    <Input input_ref={self.search_ref.clone()} default={default_search} onclick={search.clone()} error={self.error.clone()}/>
+                    <Input input_ref={self.search_ref.clone()} default={default_search} onclick={search.clone()} error={self.error.clone()} disabled={true}/>
                 </form>
                 if let Some(query) = &self.query {
                     if let Format::Table = self.format {

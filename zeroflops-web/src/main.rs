@@ -473,13 +473,9 @@ async fn get_list_items(
 ) -> Result<Json<Vec<Map<String, Value>>>, Response> {
     let user_id = get_user_or_demo_user(auth);
     let list = source::get_list(&state.client, &user_id, &id).await?;
-    if list.items.is_empty() {
-        Ok(Json(Vec::new()))
-    } else {
-        Ok(Json(
-            get_list_items_impl(&state.client, &user_id, list).await?,
-        ))
-    }
+    Ok(Json(
+        get_list_items_impl(&state.client, &user_id, list).await?,
+    ))
 }
 
 async fn get_list_items_impl(
@@ -487,7 +483,13 @@ async fn get_list_items_impl(
     user_id: &UserId,
     list: List,
 ) -> Result<Vec<Map<String, Value>>, Error> {
-    let query = String::from("SELECT c.id, c.name, c.rating, c.user_score, c.user_wins, c.user_losses, c.hidden, c.metadata FROM c WHERE c.user_id = @user_id AND ARRAY_CONTAINS(@ids, c.id)");
+    let query = if let ListMode::View = &list.mode {
+        query::rewrite_query(&list.query, &user_id)?.0.to_string()
+    } else if list.items.is_empty() {
+        return Ok(Vec::new());
+    } else {
+        String::from("SELECT c.id, c.name, c.rating, c.user_score, c.user_wins, c.user_losses, c.hidden, c.metadata FROM c WHERE c.user_id = @user_id AND ARRAY_CONTAINS(@ids, c.id)")
+    };
     client
         .query_documents(|db| {
             db.collection_client("items")

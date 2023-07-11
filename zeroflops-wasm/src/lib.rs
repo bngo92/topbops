@@ -598,7 +598,7 @@ impl Component for ListView {
                     </select>
                 </div>
                 // TODO: fix input clearing during errors
-                <Input input_ref={self.query_ref.clone()} onclick={query.clone()} error={self.error.clone()}/>
+                <Input input_ref={self.query_ref.clone()} onclick={query.clone()} error={self.error.clone()} disabled={matches!(ctx.props().list.mode, ListMode::View)}/>
                 <canvas id="canvas" width="640" height="426" class={if let DataView::Table = self.view { "d-none" } else { "" }}></canvas>
                 if let (DataView::Table, Some(df)) = (&self.view, &self.df) {
                     {crate::base::df_table_view(df)}
@@ -616,7 +616,11 @@ impl Component for ListView {
                         .collect()
                         .unwrap(),
                 );
-                update_list_view(self, ctx.props().list.query.clone());
+                if let ListMode::View = ctx.props().list.mode {
+                    self.df = self.data.clone();
+                } else {
+                    update_list_view(self, ctx.props().list.query.clone());
+                }
             }
             ListViewMsg::Select => {
                 let view = self.select_ref.cast::<HtmlSelectElement>().unwrap().value();
@@ -647,7 +651,7 @@ impl Component for ListView {
     }
 
     fn rendered(&mut self, ctx: &Context<Self>, first_render: bool) {
-        if first_render {
+        if first_render || matches!(ctx.props().list.mode, ListMode::View) {
             let query = self.query_ref.cast::<HtmlSelectElement>().unwrap();
             query.set_value(&ctx.props().list.query);
         }
@@ -996,19 +1000,20 @@ async fn get_items(list: &List) -> Result<DataFrame, JsValue> {
         .collect();
     let json = serde_json::to_string(&items).unwrap();
     let cursor = std::io::Cursor::new(json);
-    let items = polars::prelude::JsonReader::new(cursor)
-        .finish()
-        .unwrap()
-        .lazy()
-        .inner_join(
-            df!("id" => &list.items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>())
-                .unwrap()
-                .lazy(),
-            col("id"),
-            col("id"),
-        )
-        .collect()
-        .unwrap();
+    let mut items = polars::prelude::JsonReader::new(cursor).finish().unwrap();
+    if items.column("id").is_ok() {
+        items = items
+            .lazy()
+            .inner_join(
+                df!("id" => &list.items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>())
+                    .unwrap()
+                    .lazy(),
+                col("id"),
+                col("id"),
+            )
+            .collect()
+            .unwrap();
+    }
     Ok(items)
 }
 
