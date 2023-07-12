@@ -599,9 +599,8 @@ impl Component for ListView {
                 </div>
                 // TODO: fix input clearing during errors
                 <Input input_ref={self.query_ref.clone()} onclick={query.clone()} error={self.error.clone()} disabled={matches!(ctx.props().list.mode, ListMode::View)}/>
-                <canvas id="canvas" width="640" height="426" class={if let DataView::Table = self.view { "d-none" } else { "" }}></canvas>
-                if let (DataView::Table, Some(df)) = (&self.view, &self.df) {
-                    {crate::base::df_table_view(df)}
+                if let Some(df) = &self.df {
+                    {self.view.render(df)}
                 }
             </div>
         }
@@ -1056,7 +1055,7 @@ async fn import_list(source: &str, id: &str) -> Result<(), JsValue> {
     Ok(())
 }
 
-async fn find_items(search: &str) -> Result<ItemQuery, JsValue> {
+async fn find_items(search: &str) -> Result<DataFrame, JsValue> {
     let window = window();
     let request = query(&format!("/api/items?q=search&query={}", search), "GET")?;
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
@@ -1064,8 +1063,10 @@ async fn find_items(search: &str) -> Result<ItemQuery, JsValue> {
     if [400, 500].contains(&resp.status()) {
         return Err(JsFuture::from(resp.text()?).await?);
     }
-    let json = JsFuture::from(resp.json()?).await?;
-    Ok(serde_wasm_bindgen::from_value(json).unwrap())
+    let json = JsFuture::from(resp.text()?).await?;
+    let cursor = std::io::Cursor::new(json.as_string().unwrap());
+    let items = polars::prelude::JsonReader::new(cursor).finish().unwrap();
+    Ok(items)
 }
 
 async fn delete_items(ids: &[String]) -> Result<(), JsValue> {

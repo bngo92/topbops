@@ -5,6 +5,7 @@ use plotters::prelude::{
 use plotters_canvas::CanvasBackend;
 use polars::prelude::{DataFrame, DataType};
 use std::collections::HashMap;
+use yew::{html, Html};
 
 pub enum DataView {
     Table,
@@ -15,6 +16,17 @@ pub enum DataView {
 }
 
 impl DataView {
+    pub fn render(&self, df: &DataFrame) -> Html {
+        html! {
+            <div>
+                <canvas id="canvas" width="640" height="426" class={if let DataView::Table = self { "d-none" } else { "" }}></canvas>
+                if let DataView::Table = self {
+                    {df_table_view(df)}
+                }
+            </div>
+        }
+    }
+
     pub fn draw(&self, df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
         match self {
             DataView::Table => Ok(()),
@@ -23,6 +35,35 @@ impl DataView {
             DataView::ScatterPlot => draw_scatter_plot(df),
             DataView::CumLineGraph => draw_cum_line_graph(df),
         }
+    }
+}
+
+pub fn df_table_view(df: &DataFrame) -> Html {
+    html! {
+        <div class="table-responsive">
+            <table class="table table-striped mb-0">
+                <thead>
+                    <tr>
+                        <th>{"#"}</th>
+                        {for df.fields().iter().map(|f| html! {
+                            <th>{&f.name()}</th>
+                        })}
+                    </tr>
+                </thead>
+                <tbody>{for (0..df.height()).map(|i| df_item_view(df, i))}</tbody>
+            </table>
+        </div>
+    }
+}
+
+fn df_item_view(df: &DataFrame, i: usize) -> Html {
+    html! {
+        <tr>
+            <th>{i + 1}</th>
+            {for df.iter().map(|item| html! {
+                <td class="text-truncate max-width">{item.str_value(i).unwrap()}</td>
+            })}
+        </tr>
     }
 }
 

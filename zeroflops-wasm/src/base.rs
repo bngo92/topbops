@@ -1,4 +1,3 @@
-use polars::prelude::DataFrame;
 use std::borrow::Cow;
 use yew::{html, Callback, Component, Context, Html, MouseEvent, NodeRef, Properties};
 use zeroflops::ItemMetadata;
@@ -186,34 +185,5 @@ fn item_view(item: Option<(i32, Cow<[String]>)>, len: usize) -> Html {
                 <td></td>
             </tr>
         }
-    }
-}
-
-pub fn df_table_view(df: &DataFrame) -> Html {
-    html! {
-        <div class="table-responsive">
-            <table class="table table-striped mb-0">
-                <thead>
-                    <tr>
-                        <th>{"#"}</th>
-                        {for df.fields().iter().map(|f| html! {
-                            <th>{&f.name()}</th>
-                        })}
-                    </tr>
-                </thead>
-                <tbody>{for (0..df.height()).map(|i| df_item_view(df, i))}</tbody>
-            </table>
-        </div>
-    }
-}
-
-fn df_item_view(df: &DataFrame, i: usize) -> Html {
-    html! {
-        <tr>
-            <th>{i + 1}</th>
-            {for df.iter().map(|item| html! {
-                <td class="text-truncate max-width">{item.str_value(i).unwrap()}</td>
-            })}
-        </tr>
     }
 }

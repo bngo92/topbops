@@ -632,7 +632,7 @@ async fn find_items(
         return Err(Error::client_error("invalid finder").into());
     };
 
-    let (query, fields) = query::rewrite_query(query, &user_id)?;
+    let (query, _) = query::rewrite_query(query, &user_id)?;
     let values: Vec<Map<String, Value>> = state
         .client
         .query_documents(|db| {
@@ -644,16 +644,7 @@ async fn find_items(
             eprintln!("{}: {:?}", query, e);
             Error::from(e)
         })?;
-    Ok(Json(ItemQuery {
-        fields,
-        items: values
-            .iter()
-            .map(|r| zeroflops::Item {
-                values: r.values().map(format_value).collect(),
-                metadata: None,
-            })
-            .collect(),
-    }))
+    Ok(Json(values))
 }
 
 async fn handle_action(

@@ -1,9 +1,9 @@
-use crate::base::Input;
+use crate::{base::Input, plot::DataView};
+use polars::prelude::{CsvWriter, DataFrame, SerWriter};
 use std::collections::HashMap;
 use web_sys::{HtmlSelectElement, KeyboardEvent};
-use yew::{html, Component, Context, Html, NodeRef, Properties};
+use yew::{html, Component, Context, Html, NodeRef};
 use yew_router::scope_ext::RouterScopeExt;
-use zeroflops::ItemQuery;
 
 pub enum SearchMsg {
     Toggle,
@@ -66,15 +66,18 @@ impl Component for Search {
 
 pub enum Msg {
     Fetching,
-    Success(ItemQuery),
+    Success(DataFrame),
     Failed(String),
+    Select,
 }
 
 pub struct SearchPane {
     search_ref: NodeRef,
-    query: Option<ItemQuery>,
+    query: Option<DataFrame>,
     error: Option<String>,
     format: Format,
+    select_ref: NodeRef,
+    view: DataView,
 }
 
 enum Format {
@@ -102,11 +105,14 @@ impl Component for SearchPane {
             query: None,
             error: None,
             format,
+            select_ref: NodeRef::default(),
+            view: DataView::Table,
         }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         let default_search = Some("SELECT name, user_score FROM tracks");
+        let onchange = ctx.link().callback(|_| Msg::Select);
         let search = ctx.link().callback(|_| Msg::Fetching);
         let onkeydown = ctx.link().batch_callback(|event: KeyboardEvent| {
             if event.key_code() == 13 {
@@ -117,18 +123,28 @@ impl Component for SearchPane {
             }
         });
         html! {
-            <div>
+            <div class="row">
+                if let Format::Table = self.format {
+                    <div class="col-auto">
+                        <select ref={self.select_ref.clone()} class="form-select mb-3" {onchange}>
+                            <option selected=true>{"Table"}</option>
+                            <option>{"Column Graph"}</option>
+                            <option>{"Line Graph"}</option>
+                            <option>{"Scatter Plot"}</option>
+                            <option>{"Cumulative Line Graph"}</option>
+                        </select>
+                    </div>
+                }
                 <form {onkeydown}>
                     <Input input_ref={self.search_ref.clone()} default={default_search} onclick={search.clone()} error={self.error.clone()} disabled={false}/>
                 </form>
                 if let Some(query) = &self.query {
                     if let Format::Table = self.format {
-                        <Table query={query.clone()}/>
+                        {self.view.render(query)}
                     } else if let Format::Csv = self.format {
-                        <p>{query
-                            .items
-                                .iter()
-                                .map(|items| html! {items.values.join(",")})
+                        <p>{write_csv(query)
+                            .lines()
+                                .map(|items| html! {items})
                                 .intersperse(html! {<br/>})
                                 .collect::<Html>()}</p>
                     }
@@ -147,82 +163,42 @@ impl Component for SearchPane {
                         Err(error) => Msg::Failed(error.as_string().unwrap()),
                     }
                 });
-                false
+                return false;
             }
             Msg::Success(query) => {
                 self.query = Some(query);
                 self.error = None;
-                true
             }
             Msg::Failed(error) => {
                 self.error = Some(error);
-                true
+            }
+            Msg::Select => {
+                let view = self.select_ref.cast::<HtmlSelectElement>().unwrap().value();
+                self.view = match &*view {
+                    "Table" => DataView::Table,
+                    "Column Graph" => DataView::ColumnGraph,
+                    "Line Graph" => DataView::LineGraph,
+                    "Scatter Plot" => DataView::ScatterPlot,
+                    "Cumulative Line Graph" => DataView::CumLineGraph,
+                    _ => unreachable!(),
+                };
             }
         }
-    }
-}
-
-#[derive(PartialEq, Properties)]
-pub struct TableProps {
-    query: ItemQuery,
-}
-
-struct Table;
-
-impl Component for Table {
-    type Message = ();
-    type Properties = TableProps;
-
-    fn create(_: &Context<Self>) -> Self {
-        Table
-    }
-
-    fn view(&self, ctx: &Context<Self>) -> Html {
-        let query = &ctx.props().query;
-        html! {
-            <div class="table-responsive">
-                <table class="table table-striped">
-                    <thead>
-                        <tr>
-                            <th>{"#"}</th>
-                            {for query.fields.iter().map(|item| html! {
-                                <th>{item}</th>
-                            })}
-                        </tr>
-                    </thead>
-                    <tbody>{for query.items.iter().zip(1..).map(|(item, i)| html! {
-                        <Row i={i} values={item.values.clone()}/>
-                    })}</tbody>
-                </table>
-            </div>
+        if let Some(df) = &self.query {
+            if let Err(e) = self.view.draw(df) {
+                self.error = Some(e.to_string());
+            }
         }
+        true
     }
 }
 
-#[derive(Eq, PartialEq, Properties)]
-pub struct RowProps {
-    i: i32,
-    values: Vec<String>,
-}
-
-struct Row;
-
-impl Component for Row {
-    type Message = ();
-    type Properties = RowProps;
-
-    fn create(_: &Context<Self>) -> Self {
-        Row
-    }
-
-    fn view(&self, ctx: &Context<Self>) -> Html {
-        html! {
-          <tr>
-            <th>{ctx.props().i}</th>
-            {for ctx.props().values.iter().map(|item| html! {
-                <td>{item}</td>
-            })}
-          </tr>
-        }
-    }
+fn write_csv(df: &DataFrame) -> String {
+    let mut buffer = Vec::new();
+    let mut df = df.clone();
+    CsvWriter::new(&mut buffer)
+        .has_header(false)
+        .finish(&mut df)
+        .unwrap();
+    String::from_utf8(buffer).unwrap()
 }
