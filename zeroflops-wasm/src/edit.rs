@@ -22,8 +22,9 @@ pub struct EditProps {
 }
 
 pub struct Edit {
+    counter: i32,
     list: List,
-    sources: Vec<(NodeRef, NodeRef, Option<SourceType>)>,
+    sources: Vec<(i32, NodeRef, NodeRef, Option<SourceType>)>,
     name_ref: NodeRef,
     external_ref: NodeRef,
     query_ref: NodeRef,
@@ -36,12 +37,21 @@ impl Component for Edit {
 
     fn create(ctx: &Context<Self>) -> Self {
         let mut list = ctx.props().list.clone();
-        let sources = list
+        let sources: Vec<_> = list
             .sources
             .drain(..)
-            .map(|s| (NodeRef::default(), NodeRef::default(), Some(s.source_type)))
+            .enumerate()
+            .map(|(i, s)| {
+                (
+                    i as i32,
+                    NodeRef::default(),
+                    NodeRef::default(),
+                    Some(s.source_type),
+                )
+            })
             .collect();
         Edit {
+            counter: sources.len() as i32,
             list,
             sources,
             name_ref: NodeRef::default(),
@@ -56,36 +66,18 @@ impl Component for Edit {
         let source_html = self.sources
             .iter()
             .enumerate()
-            .map(|(i, (source_ref, id, source))| {
+            .map(|(i, (key, source_ref, id, source))| {
                 let mut selected = [false; 4];
-                let value = match source {
-                    None => {
-                        selected[1] = true;
-                        String::new()
-                    }
-                    Some(SourceType::Custom(value)) => {
-                        selected[0] = true;
-                        value.to_string()
-                    }
-                    Some(
-                        SourceType::Spotify(Spotify::Playlist(Id { raw_id, .. }))
-                        | SourceType::Spotify(Spotify::Album(Id { raw_id, .. })),
-                    ) => {
-                        selected[1] = true;
-                        raw_id.clone()
-                    }
-                    Some(SourceType::Setlist(Id { raw_id, .. })) => {
-                        selected[2] = true;
-                        raw_id.clone()
-                    }
-                    Some(SourceType::ListItems(id)) => {
-                        selected[3] = true;
-                        id.clone()
-                    }
+                match source {
+                    None => selected[1] = true,
+                    Some(SourceType::Custom(_)) => selected[0] = true,
+                    Some(SourceType::Spotify(_)) => selected[1] = true,
+                    Some(SourceType::Setlist(_)) => selected[2] = true,
+                    Some(SourceType::ListItems(_)) => selected[3] = true,
                 };
                 let onclick = ctx.link().callback(move |_| Msg::DeleteSource(i));
                 html! {
-                    <div class="row mb-1">
+                    <div class="row mb-1" key={*key}>
                         <div class="col-4 col-sm-3 col-md-2">
                             <select ref={source_ref} class="form-select">
                                 <option selected={selected[0]}>{"Custom"}</option>
@@ -94,7 +86,7 @@ impl Component for Edit {
                                 <option selected={selected[3]}>{"List Items"}</option>
                             </select>
                         </div>
-                        <input class="col-9 col-sm-7 col-md-8" {value} ref={id}/>
+                        <input class="col-9 col-sm-7 col-md-8" ref={id}/>
                         <div class="col-auto">
                             <button type="button" class="btn btn-danger" {onclick}>{"Delete"}</button>
                         </div>
@@ -106,7 +98,6 @@ impl Component for Edit {
             ListMode::External => "External",
             ListMode::View => "View",
         };
-        let checked = self.list.favorite;
         let add_source = ctx.link().callback(|_| Msg::AddSource);
         let save = ctx.link().callback(|_| Msg::Save);
         let delete = ctx.link().callback(|_| Msg::Delete);
@@ -119,7 +110,7 @@ impl Component for Edit {
                         if let ListMode::External = &self.list.mode {
                             <input type="text" readonly=true class="form-control-plaintext" id="name" value={self.list.name.clone()} placeholder=""/>
                         } else {
-                            <input type="text" class="form-control" id="name" value={self.list.name.clone()} ref={&self.name_ref} placeholder=""/>
+                            <input type="text" class="form-control" id="name" ref={&self.name_ref} placeholder=""/>
                         }
                         <label for="name">{"List name"}</label>
                     </div>
@@ -127,19 +118,19 @@ impl Component for Edit {
                         <input type="text" readonly=true class="form-control-plaintext" id="mode" value={mode} placeholder=""/>
                         <label for="mode">{"List mode"}</label>
                     </div>
-                    if let ListMode::User(external_id) = &self.list.mode {
+                    if let ListMode::User(_) = &self.list.mode {
                         <div class="form-floating mb-3 col-md-8">
-                            <input class="form-control" id="externalId" value={external_id.as_ref().map(|id| id.raw_id.clone())} ref={&self.external_ref} placeholder="External ID"/>
+                            <input class="form-control" id="externalId" ref={&self.external_ref} placeholder="External ID"/>
                             <label for="externalId">{"External ID"}</label>
                         </div>
                     }
                     <div class="form-floating mb-3 col-md-8">
-                        <input class="form-control" id="query" value={self.list.query.clone()} ref={&self.query_ref} placeholder="External ID"/>
+                        <input class="form-control" id="query" ref={&self.query_ref} placeholder="External ID"/>
                         <label for="query">{"Query"}</label>
                     </div>
                     <div class="form-check">
                         <label class="form-check-label" for="favorite">{"Favorite"}</label>
-                        <input ref={&self.favorite_ref} class="form-check-input" type="checkbox" id="favorite" {checked}/>
+                        <input ref={&self.favorite_ref} class="form-check-input" type="checkbox" id="favorite"/>
                     </div>
                 </form>
                 <hr/>
@@ -166,7 +157,8 @@ impl Component for Edit {
             Msg::None => false,
             Msg::AddSource => {
                 self.sources
-                    .push((NodeRef::default(), NodeRef::default(), None));
+                    .push((self.counter, NodeRef::default(), NodeRef::default(), None));
+                self.counter += 1;
                 true
             }
             Msg::DeleteSource(i) => {
@@ -196,7 +188,7 @@ impl Component for Edit {
                     .unwrap()
                     .checked();
                 self.list.sources.clear();
-                for (source, id, _) in &self.sources {
+                for (_, source, id, _) in &self.sources {
                     let source = source.cast::<HtmlSelectElement>().unwrap().value();
                     let id = id.cast::<HtmlInputElement>().unwrap().value();
                     match &*source {
@@ -279,6 +271,44 @@ impl Component for Edit {
                     });
                 }
                 false
+            }
+        }
+    }
+
+    fn rendered(&mut self, _ctx: &Context<Self>, first_render: bool) {
+        if first_render {
+            self.name_ref
+                .cast::<HtmlInputElement>()
+                .unwrap()
+                .set_value(&self.list.name);
+            if let ListMode::User(Some(external_id)) = &self.list.mode {
+                self.external_ref
+                    .cast::<HtmlInputElement>()
+                    .unwrap()
+                    .set_value(&external_id.raw_id);
+            }
+            self.query_ref
+                .cast::<HtmlInputElement>()
+                .unwrap()
+                .set_value(&self.list.query);
+            if self.list.favorite {
+                self.favorite_ref
+                    .cast::<HtmlInputElement>()
+                    .unwrap()
+                    .set_checked(true);
+            }
+            for (_, _, id, source) in self.sources.iter() {
+                let value = match source {
+                    None => String::new(),
+                    Some(SourceType::Custom(value)) => value.to_string(),
+                    Some(
+                        SourceType::Spotify(Spotify::Playlist(Id { raw_id, .. }))
+                        | SourceType::Spotify(Spotify::Album(Id { raw_id, .. })),
+                    ) => raw_id.clone(),
+                    Some(SourceType::Setlist(Id { raw_id, .. })) => raw_id.clone(),
+                    Some(SourceType::ListItems(id)) => id.clone(),
+                };
+                id.cast::<HtmlInputElement>().unwrap().set_value(&value);
             }
         }
     }
