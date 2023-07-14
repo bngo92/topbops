@@ -94,8 +94,8 @@ fn draw_column_graph(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
                 .configure_mesh()
                 .disable_x_mesh()
                 .bold_line_style(WHITE.mix(0.3))
-                .y_desc(&df.fields()[1].name)
-                .x_desc(&df.fields()[0].name)
+                .y_desc(&*df.fields()[1].name)
+                .x_desc(&*df.fields()[0].name)
                 .axis_desc_style(("sans-serif", 15))
                 .draw()?;
             chart.draw_series(
@@ -120,8 +120,8 @@ fn draw_column_graph(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
                 .configure_mesh()
                 .disable_x_mesh()
                 .bold_line_style(WHITE.mix(0.3))
-                .y_desc(&df.fields()[1].name)
-                .x_desc(&df.fields()[0].name)
+                .y_desc(&*df.fields()[1].name)
+                .x_desc(&*df.fields()[0].name)
                 .axis_desc_style(("sans-serif", 15))
                 .draw()?;
             chart.draw_series(

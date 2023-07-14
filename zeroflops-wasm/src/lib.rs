@@ -659,7 +659,7 @@ impl Component for ListView {
 
 fn update_list_view(list_view: &mut ListView, query: String) {
     let data = list_view.data.clone().unwrap().lazy();
-    let mut ctx = SQLContext::try_new().unwrap();
+    let mut ctx = SQLContext::new();
     ctx.register("c", data);
     let lf = match ctx.execute(&query) {
         Ok(lf) => lf,
