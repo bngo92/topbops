@@ -92,18 +92,6 @@ pub struct PlayHistory {
     track: Track,
 }
 
-pub async fn import(
-    user_id: &UserId,
-    source: &str,
-    id: String,
-) -> Result<(List, Vec<crate::Item>), Error> {
-    match source {
-        "playlist" => import_playlist(user_id, id).await,
-        "album" => import_album(user_id, id).await,
-        _ => todo!(),
-    }
-}
-
 pub async fn get_playlist(
     user_id: &UserId,
     playlist_id: Id,
@@ -298,6 +286,33 @@ pub async fn import_album(user_id: &UserId, id: String) -> Result<(List, Vec<cra
         query: String::from("SELECT name, user_score FROM c"),
     };
     Ok((list, items))
+}
+
+pub async fn get_track(user_id: &UserId, id: Id) -> Result<(Source, Vec<crate::Item>), Error> {
+    let token = get_token().await?;
+
+    let https = HttpsConnector::new();
+    let client = Client::builder().build::<_, hyper::Body>(https);
+    let uri: Uri = format!("https://api.spotify.com/v1/tracks/{}", id.id)
+        .parse()
+        .unwrap();
+    let resp = client
+        .request(
+            Request::builder()
+                .uri(uri)
+                .header("Authorization", format!("Bearer {}", token.access_token))
+                .body(Body::empty())?,
+        )
+        .await?;
+    let got = hyper::body::to_bytes(resp.into_body()).await?;
+    let track: Track = serde_json::from_slice(&got)?;
+    Ok((
+        Source {
+            source_type: SourceType::Spotify(Spotify::Track(id)),
+            name: track.name.clone(),
+        },
+        vec![new_spotify_item(track, user_id)],
+    ))
 }
 
 pub async fn create_playlist(

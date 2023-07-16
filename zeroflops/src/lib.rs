@@ -138,6 +138,7 @@ fn get_source_id(source: &Source) -> Option<&str> {
 pub enum Spotify {
     Playlist(Id),
     Album(Id),
+    Track(Id),
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

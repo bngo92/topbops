@@ -3,7 +3,7 @@ use crate::{
     base::Input,
     bootstrap::{Accordion, Collapse, Modal},
     edit::Edit,
-    integrations::spotify,
+    integrations::spotify::SpotifyIntegration,
     list::item::ListItems,
     plot::DataView,
     random::{RandomMatches, RandomRounds},
@@ -101,7 +101,7 @@ fn switch(
                 <Redirect<Route> to={Route::Home}/>
             }
         },
-        Route::Spotify => html! { <spotify::Spotify/> },
+        Route::Spotify => html! { <SpotifyIntegration/> },
     };
     html! {
         <div class="container-lg my-md-4">
@@ -393,6 +393,7 @@ impl Component for Home {
 fn parse_spotify_source(input: String) -> Option<Spotify> {
     let playlist_re = Regex::new(r"https://open.spotify.com/playlist/([[:alnum:]]*)").unwrap();
     let album_re = Regex::new(r"https://open.spotify.com/album/([[:alnum:]]*)").unwrap();
+    let track_re = Regex::new(r"https://open.spotify.com/track/([[:alnum:]]*)").unwrap();
     return if let Some(caps) = playlist_re.captures_iter(&input).next() {
         Some(Spotify::Playlist(Id {
             id: caps[1].to_owned(),
@@ -400,6 +401,11 @@ fn parse_spotify_source(input: String) -> Option<Spotify> {
         }))
     } else if let Some(caps) = album_re.captures_iter(&input).next() {
         Some(Spotify::Album(Id {
+            id: caps[1].to_owned(),
+            raw_id: input,
+        }))
+    } else if let Some(caps) = track_re.captures_iter(&input).next() {
+        Some(Spotify::Track(Id {
             id: caps[1].to_owned(),
             raw_id: input,
         }))

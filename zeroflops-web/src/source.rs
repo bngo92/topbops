@@ -19,6 +19,7 @@ pub async fn get_source_and_items(
         }
         SourceType::Spotify(Spotify::Playlist(id)) => spotify::get_playlist(user_id, id).await?,
         SourceType::Spotify(Spotify::Album(id)) => spotify::get_album(user_id, id).await?,
+        SourceType::Spotify(Spotify::Track(id)) => spotify::get_track(user_id, id).await?,
         SourceType::Setlist(id) => setlist::get_setlist(user_id, id).await?,
         SourceType::ListItems(ref id) => {
             let list = get_list(client, user_id, id).await?;

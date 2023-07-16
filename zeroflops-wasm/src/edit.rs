@@ -303,7 +303,8 @@ impl Component for Edit {
                     Some(SourceType::Custom(value)) => value.to_string(),
                     Some(
                         SourceType::Spotify(Spotify::Playlist(Id { raw_id, .. }))
-                        | SourceType::Spotify(Spotify::Album(Id { raw_id, .. })),
+                        | SourceType::Spotify(Spotify::Album(Id { raw_id, .. }))
+                        | SourceType::Spotify(Spotify::Track(Id { raw_id, .. })),
                     ) => raw_id.clone(),
                     Some(SourceType::Setlist(Id { raw_id, .. })) => raw_id.clone(),
                     Some(SourceType::ListItems(id)) => id.clone(),

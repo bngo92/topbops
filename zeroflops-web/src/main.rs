@@ -484,7 +484,7 @@ async fn get_list_items_impl(
     list: List,
 ) -> Result<Vec<Map<String, Value>>, Error> {
     let query = if let ListMode::View = &list.mode {
-        query::rewrite_query(&list.query, &user_id)?.0.to_string()
+        query::rewrite_query(&list.query, user_id)?.0.to_string()
     } else if list.items.is_empty() {
         return Ok(Vec::new());
     } else {
@@ -787,13 +787,51 @@ async fn import_list(
     id: String,
     favorite: bool,
 ) -> Result<StatusCode, Error> {
-    let (mut list, items) = match source.split_once(':') {
-        Some(("spotify", source)) => spotify::import(&user_id, source, id).await?,
+    match source.split_once(':') {
+        Some(("spotify", source)) => {
+            import_spotify(&state.client, &user_id, source, id, favorite).await?
+        }
         _ => todo!(),
     };
-    list.favorite = favorite;
-    create_external_list(&state.client, list, items, user_id.0 == DEMO_USER).await?;
     Ok(StatusCode::CREATED)
+}
+
+pub async fn import_spotify(
+    client: &SessionClient,
+    user_id: &UserId,
+    source: &str,
+    id: String,
+    favorite: bool,
+) -> Result<(), Error> {
+    let is_upsert = user_id.0 == DEMO_USER;
+    let items = match source {
+        "playlist" => {
+            let (mut list, items) = spotify::import_playlist(user_id, id).await?;
+            list.favorite = favorite;
+            create_list_doc(client, list, is_upsert).await?;
+            items
+        }
+        "album" => {
+            let (mut list, items) = spotify::import_album(user_id, id).await?;
+            list.favorite = favorite;
+            create_list_doc(client, list, is_upsert).await?;
+            items
+        }
+        "track" => {
+            let id = Id {
+                id: id.clone(),
+                raw_id: format!(
+                    "https://open.spotify.com/embed/album/{}?utm_source=generator",
+                    id
+                ),
+            };
+            let (_, items) = spotify::get_track(user_id, id).await?;
+            items
+        }
+        _ => todo!(),
+    };
+    source::create_items(client, items, is_upsert).await?;
+    Ok(())
 }
 
 async fn get_item_doc(client: &SessionClient, user_id: &UserId, id: &str) -> Result<Item, Error> {
@@ -835,18 +873,6 @@ async fn create_list_doc(client: &SessionClient, list: List, is_upsert: bool) ->
         })
         .await
         .map_err(Error::from)
-}
-
-// TODO: inline
-async fn create_external_list(
-    client: &SessionClient,
-    list: List,
-    items: Vec<Item>,
-    // Used to reset demo user data
-    is_upsert: bool,
-) -> Result<(), Error> {
-    create_list_doc(client, list, is_upsert).await?;
-    source::create_items(client, items, is_upsert).await
 }
 
 async fn update_items(
