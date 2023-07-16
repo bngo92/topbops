@@ -127,6 +127,7 @@ enum Msg {
     Dropdown,
     ResetDropdown,
     ListDropdown,
+    IntegrationsDropdown,
     //Logout,
     //Reload,
 }
@@ -137,6 +138,7 @@ struct App {
     login: bool,
     dropdown: bool,
     list_dropdown: bool,
+    integrations_dropdown: bool,
 }
 
 impl Component for App {
@@ -156,6 +158,7 @@ impl Component for App {
             login: false,
             dropdown: false,
             list_dropdown: false,
+            integrations_dropdown: false,
         }
     }
 
@@ -169,15 +172,16 @@ impl Component for App {
         } else */{
             "nav-link"
         };
-        let (toggle_class, menu_class) = if self.dropdown {
-            ("nav-link dropdown-toggle show", "dropdown-menu show")
-        } else {
-            ("nav-link dropdown-toggle", "dropdown-menu")
-        };
+        let (toggle_class, menu_class) = dropdown_class(self.dropdown);
+        let (int_toggle_class, int_menu_class) = dropdown_class(self.integrations_dropdown);
         let dropdown = ctx.link().callback(|e: MouseEvent| {
             // Prevent reset_dropdown from triggering
             e.stop_propagation();
             Msg::Dropdown
+        });
+        let int_dropdown = ctx.link().callback(|e: MouseEvent| {
+            e.stop_propagation();
+            Msg::IntegrationsDropdown
         });
         let login = ctx.link().callback(|_| Msg::Login);
         let hide = ctx.link().callback(|_| Msg::HideLogin);
@@ -210,6 +214,12 @@ impl Component for App {
                                 </li>
                                 <li class="nav-item">
                                     <Link<Route> classes={search} to={Route::Search}>{"Search"}</Link<Route>>
+                                </li>
+                                <li class="nav-item dropdown">
+                                    <a class={int_toggle_class} href="#" onclick={int_dropdown}>{"Integrations"}</a>
+                                    <ul class={int_menu_class}>
+                                        <li><Link<Route> classes="dropdown-item" to={Route::Spotify}>{"Spotify"}</Link<Route>></li>
+                                    </ul>
                                 </li>
                             </ul>
                             if self.user_loaded {
@@ -262,8 +272,10 @@ impl Component for App {
             Msg::ResetDropdown => {
                 self.dropdown = false;
                 self.list_dropdown = false;
+                self.integrations_dropdown = false;
             }
             Msg::ListDropdown => self.list_dropdown = !self.list_dropdown,
+            Msg::IntegrationsDropdown => self.integrations_dropdown = !self.integrations_dropdown,
             /*Msg::Logout => {
                 ctx.link().clone().send_future(async move {
                     let window = web_sys::window().expect("no global `window` exists");
@@ -278,6 +290,14 @@ impl Component for App {
             Msg::Reload => true,*/
         }
         true
+    }
+}
+
+fn dropdown_class(dropdown: bool) -> (&'static str, &'static str) {
+    if dropdown {
+        ("nav-link dropdown-toggle show", "dropdown-menu show")
+    } else {
+        ("nav-link dropdown-toggle", "dropdown-menu")
     }
 }
 
