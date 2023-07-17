@@ -30,6 +30,7 @@ use zeroflops::{Id, ItemQuery, List, ListMode, Lists, Spotify, User};
 
 mod base;
 mod bootstrap;
+mod docs;
 mod edit;
 mod integrations;
 mod list;
@@ -44,6 +45,8 @@ type RouteQuery = &'static [(&'static str, &'static str)];
 enum Route {
     #[at("/")]
     Home,
+    #[at("/docs")]
+    Docs,
     #[at("/lists")]
     ListsRoot,
     #[at("/lists/*")]
@@ -89,6 +92,7 @@ fn switch(
     let logged_in = user.is_some();
     let content = match routes {
         Route::Home => html! { <Home {logged_in}/> },
+        Route::Docs => docs::docs(),
         Route::ListsRoot => html! { <crate::list::Lists {logged_in}/> },
         Route::Lists => {
             html! { <Switch<ListsRoute> render={move |r| switch_lists(r, Rc::clone(&user), list_dropdown, Rc::clone(&show_list_dropdown))}/> }
@@ -213,13 +217,16 @@ impl Component for App {
                                     <Link<Route> classes={search} to={Route::ListsRoot}>{"Lists"}</Link<Route>>
                                 </li>
                                 <li class="nav-item">
-                                    <Link<Route> classes={search} to={Route::Search}>{"Search"}</Link<Route>>
+                                    <Link<Route> classes={search} to={Route::Search}>{"Query"}</Link<Route>>
                                 </li>
                                 <li class="nav-item dropdown">
                                     <a class={int_toggle_class} href="#" onclick={int_dropdown}>{"Integrations"}</a>
                                     <ul class={int_menu_class}>
                                         <li><Link<Route> classes="dropdown-item" to={Route::Spotify}>{"Spotify"}</Link<Route>></li>
                                     </ul>
+                                </li>
+                                <li class="nav-item">
+                                    <Link<Route> classes={search} to={Route::Docs}>{"Docs"}</Link<Route>>
                                 </li>
                             </ul>
                             if self.user_loaded {

@@ -32,7 +32,7 @@ impl Component for Search {
             <div>
                 <div class="container-lg">
                     <div class="row align-items-end mb-3">
-                        <h1 class="col-10 m-0">{"Search"}</h1>
+                        <h1 class="col-10 m-0">{"Query"}</h1>
                         <div class="col-2">
                             <button type="button" class="btn btn-info w-100" {onclick}>{button_text}</button>
                         </div>
