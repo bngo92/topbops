@@ -97,7 +97,7 @@ fn switch(
         Route::Lists => {
             html! { <Switch<ListsRoute> render={move |r| switch_lists(r, Rc::clone(&user), list_dropdown, Rc::clone(&show_list_dropdown))}/> }
         }
-        Route::Search => return html! { <Search/> },
+        Route::Search => return html! { <Search {logged_in}/> },
         Route::Settings => html! {
             if let Some(user) = (*user).clone() {
                 <Settings {user}/>

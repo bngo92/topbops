@@ -1,24 +1,31 @@
-use crate::{base::Input, plot::DataView};
+use crate::{bootstrap::{Collapse}, base::{Input}, plot::DataView};
 use polars::prelude::{CsvWriter, DataFrame, SerWriter};
 use std::collections::HashMap;
 use web_sys::{HtmlSelectElement, KeyboardEvent};
-use yew::{html, Component, Context, Html, NodeRef};
+use yew::{html, Component, Context, Html, NodeRef, Properties};
 use yew_router::scope_ext::RouterScopeExt;
 
 pub enum SearchMsg {
+    ToggleHelp,
     Toggle,
 }
 
+#[derive(PartialEq, Properties)]
+pub struct SearchProps {
+    pub logged_in: bool,
+}
+
 pub struct Search {
+    help_collapsed: bool,
     split_view: bool,
 }
 
 impl Component for Search {
     type Message = SearchMsg;
-    type Properties = ();
+    type Properties = SearchProps;
 
-    fn create(_: &Context<Self>) -> Self {
-        Search { split_view: false }
+    fn create(ctx: &Context<Self>) -> Self {
+        Search { help_collapsed: ctx.props().logged_in, split_view: false }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
@@ -32,11 +39,28 @@ impl Component for Search {
             <div>
                 <div class="container-lg">
                     <div class="row align-items-end mb-3">
-                        <h1 class="col-10 m-0">{"Query"}</h1>
+                        <h1 class="col m-0">{"Query"}</h1>
                         <div class="col-2">
                             <button type="button" class="btn btn-info w-100" {onclick}>{button_text}</button>
                         </div>
+                        <div class="col-auto">
+                            <button class="btn btn-info" onclick={ctx.link().callback(|_| SearchMsg::ToggleHelp)}>{"Help"}</button>
+                        </div>
                     </div>
+                    <Collapse collapsed={self.help_collapsed}>
+                        <p>{"Run SQL queries to transform your data into insights.
+                            All queries should run against the \"c\" table."}</p>
+                        <p>{"Get names of songs that have more wins than losses:"}</p>
+                        <code>{"SELECT name, user_wins, user_losses FROM c WHERE type='track' AND user_wins > user_losses"}</code>
+                        <p>{"Get names of songs ordered by your scores:"}</p>
+                        <code>{"SELECT name, user_score FROM c WHERE type='track' ORDER BY user_score DESC"}</code>
+                        <p>{"Count how many songs were performed by each distinct group of artists:"}</p>
+                        <code>{"SELECT artists, COUNT(1) FROM c WHERE type='track' GROUP BY artists"}</code>
+                        <p>{"Get songs performed by Troy:"}</p>
+                        <code>{"SELECT name FROM c WHERE type='track' AND ARRAY_CONTAINS(artists, 'Troy')"}</code>
+                        <p>{"Get your average score for each group of artists:"}</p>
+                        <code>{"SELECT artists, AVG(user_score) FROM c WHERE type='track' GROUP BY artists"}</code>
+                    </Collapse>
                 </div>
                 if self.split_view {
                     <div class="container-fluid">
@@ -58,8 +82,11 @@ impl Component for Search {
         }
     }
 
-    fn update(&mut self, _: &Context<Self>, _: Self::Message) -> bool {
-        self.split_view = !self.split_view;
+    fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
+        match msg {
+            SearchMsg::ToggleHelp => self.help_collapsed = !self.help_collapsed,
+            SearchMsg::Toggle => self.split_view = !self.split_view,
+        }
         true
     }
 }

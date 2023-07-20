@@ -488,7 +488,7 @@ async fn get_list_items_impl(
     } else if list.items.is_empty() {
         return Ok(Vec::new());
     } else {
-        String::from("SELECT c.id, c.name, c.rating, c.user_score, c.user_wins, c.user_losses, c.hidden, c.metadata FROM c WHERE c.user_id = @user_id AND ARRAY_CONTAINS(@ids, c.id)")
+        String::from("SELECT c.id, c.type, c.name, c.rating, c.user_score, c.user_wins, c.user_losses, c.hidden, c.metadata FROM c WHERE c.user_id = @user_id AND ARRAY_CONTAINS(@ids, c.id)")
     };
     client
         .query_documents(|db| {
