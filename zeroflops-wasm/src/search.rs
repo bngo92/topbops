@@ -1,4 +1,4 @@
-use crate::{bootstrap::{Collapse}, base::{Input}, plot::DataView};
+use crate::{base::Input, bootstrap::Collapse, plot::DataView};
 use polars::prelude::{CsvWriter, DataFrame, SerWriter};
 use std::collections::HashMap;
 use web_sys::{HtmlSelectElement, KeyboardEvent};
@@ -25,7 +25,10 @@ impl Component for Search {
     type Properties = SearchProps;
 
     fn create(ctx: &Context<Self>) -> Self {
-        Search { help_collapsed: ctx.props().logged_in, split_view: false }
+        Search {
+            help_collapsed: ctx.props().logged_in,
+            split_view: false,
+        }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
