@@ -1096,8 +1096,9 @@ async fn find_items(search: &str) -> Result<DataFrame, JsValue> {
     if [400, 500].contains(&resp.status()) {
         return Err(JsFuture::from(resp.text()?).await?);
     }
-    let json = JsFuture::from(resp.text()?).await?;
-    Ok(serialize_into_df(&json.as_string().unwrap()))
+    let json = JsFuture::from(resp.json()?).await?;
+    let items: Value = serde_wasm_bindgen::from_value(json).unwrap();
+    Ok(serialize_into_df(&items))
 }
 
 fn serialize_into_df(items: &(impl Serialize + ?Sized)) -> DataFrame {

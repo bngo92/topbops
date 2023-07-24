@@ -46,7 +46,7 @@ pub struct ListItems {
 
 struct ListItem {
     item: ItemMetadata,
-    rating_hidden: Option<(Option<i64>, bool)>,
+    rating_hidden: Option<(Option<u64>, bool)>,
     rating_ref: NodeRef,
     hidden_ref: NodeRef,
 }
@@ -257,7 +257,7 @@ impl Component for ListItems {
                     .collect()
                     .unwrap();
                 // polars requires that at least one row is not null
-                let ratings = df.column("rating").map(|s| s.i64().unwrap());
+                let ratings = df.column("rating").map(|s| s.u64().unwrap());
                 let hidden = df["hidden"].bool().unwrap();
                 if let Ok(ratings) = ratings {
                     for i in 0..df.height() {
@@ -290,7 +290,7 @@ impl Component for ListItems {
                         .cast::<HtmlSelectElement>()
                         .unwrap()
                         .value()
-                        .parse::<i64>()
+                        .parse::<u64>()
                         .ok();
                     if value != *rating {
                         updates.insert(String::from("rating"), value.into());
@@ -365,7 +365,7 @@ impl Component for ListItems {
                             .unwrap();
                         match k.as_str() {
                             "rating" => {
-                                *rating = v.as_i64();
+                                *rating = v.as_u64();
                             }
                             "hidden" => {
                                 *hidden = v.as_bool().unwrap();
