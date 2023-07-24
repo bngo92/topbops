@@ -11,10 +11,12 @@ use crate::{
     tournament::{RandomTournamentLoader, TournamentLoader},
 };
 use polars::{
-    prelude::{col, df, DataFrame, IntoLazy, NamedFrom, SerReader},
+    prelude::{col, df, DataFrame, IntoLazy, NamedFrom, Series},
     sql::SQLContext,
 };
 use regex::Regex;
+use serde::Serialize;
+use serde_arrow::{arrow2, schema::TracingOptions};
 use serde_json::{Map, Value};
 use std::{borrow::Cow, collections::HashMap, rc::Rc};
 use wasm_bindgen::{prelude::*, JsCast};
@@ -1030,9 +1032,7 @@ async fn get_items(list: &List) -> Result<DataFrame, JsValue> {
             m
         })
         .collect();
-    let json = serde_json::to_string(&items).unwrap();
-    let cursor = std::io::Cursor::new(json);
-    let mut items = polars::prelude::JsonReader::new(cursor).finish().unwrap();
+    let mut items = serialize_into_df(&items);
     if items.column("id").is_ok() {
         items = items
             .lazy()
@@ -1097,9 +1097,20 @@ async fn find_items(search: &str) -> Result<DataFrame, JsValue> {
         return Err(JsFuture::from(resp.text()?).await?);
     }
     let json = JsFuture::from(resp.text()?).await?;
-    let cursor = std::io::Cursor::new(json.as_string().unwrap());
-    let items = polars::prelude::JsonReader::new(cursor).finish().unwrap();
-    Ok(items)
+    Ok(serialize_into_df(&json.as_string().unwrap()))
+}
+
+fn serialize_into_df(items: &(impl Serialize + ?Sized)) -> DataFrame {
+    let fields = arrow2::serialize_into_fields(items, TracingOptions::default()).unwrap();
+    let arrays = arrow2::serialize_into_arrays(&fields, items).unwrap();
+    DataFrame::new(
+        fields
+            .into_iter()
+            .zip(arrays.into_iter())
+            .map(|(f, a)| Series::try_from((f.name.as_str(), a)).unwrap())
+            .collect(),
+    )
+    .unwrap()
 }
 
 async fn delete_items(ids: &[String]) -> Result<(), JsValue> {
