@@ -37,6 +37,7 @@ struct AlbumItems {
     pub items: Vec<AlbumTrack>,
 }
 
+// TODO: include album and artist metadata
 #[derive(Debug, Deserialize, Serialize)]
 struct Track {
     pub id: String,

@@ -632,7 +632,6 @@ impl Component for ListView {
                         <option>{"Cumulative Line Graph"}</option>
                     </select>
                 </div>
-                // TODO: fix input clearing during errors
                 <Input input_ref={self.query_ref.clone()} onclick={query.clone()} error={self.error.clone()} disabled={matches!(ctx.props().list.mode, ListMode::View)}/>
                 if let Some(df) = &self.df {
                     {self.view.render(df)}
