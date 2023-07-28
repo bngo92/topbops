@@ -207,6 +207,7 @@ pub enum InternalError {
     #[cfg(feature = "hyper")]
     RequestError(hyper::http::Error),
     JSONError(serde_json::Error),
+    #[cfg(feature = "hyper")]
     CosmosError(azure_core::error::Error),
     IOError(std::io::Error),
     Error(String),
@@ -232,6 +233,7 @@ impl From<serde_json::Error> for Error {
     }
 }
 
+#[cfg(feature = "hyper")]
 impl From<azure_core::error::Error> for Error {
     fn from(e: azure_core::error::Error) -> Error {
         Error::InternalError(InternalError::CosmosError(e))

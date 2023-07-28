@@ -7,12 +7,12 @@ edition = "2021"
 
 [dependencies]
 axum = { version = "0.6.18", optional = true }
-azure_core = "0.4.0"
+azure_core = { version = "0.4.0", optional = true }
 azure_data_cosmos = { version = "0.5.0", optional = true }
 hyper = { version = "0.14", features = ["full"], optional = true }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-sqlparser = { version = "0", features = ["serde"] }
+serde.workspace = true
+serde_json.workspace = true
+sqlparser.workspace = true
 
 [features]
-hyper = ["dep:axum", "dep:azure_data_cosmos", "dep:hyper"]
+hyper = ["dep:axum", "dep:azure_core", "dep:azure_data_cosmos", "dep:hyper"]
