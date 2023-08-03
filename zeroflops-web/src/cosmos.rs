@@ -1,36 +1,91 @@
 use async_trait::async_trait;
 use azure_data_cosmos::{
     prelude::{
-        ConsistencyLevel, CreateDocumentBuilder, DatabaseClient, DeleteDocumentBuilder,
-        GetDocumentBuilder, GetDocumentResponse, QueryDocumentsBuilder, ReplaceDocumentBuilder,
+        self as cosmos, ConsistencyLevel, CreateDocumentBuilder, DatabaseClient,
+        DeleteDocumentBuilder, GetDocumentResponse, QueryDocumentsBuilder, ReplaceDocumentBuilder,
     },
     CosmosEntity,
 };
 use futures::TryStreamExt;
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::{Arc, RwLock};
+use zeroflops::Error;
 
-pub struct SessionClient {
+pub struct GetDocumentBuilder<'a> {
+    collection_name: &'static str,
+    document_name: &'a str,
+    partition_key: &'a str,
+}
+
+impl GetDocumentBuilder<'_> {
+    pub fn new<'a>(
+        collection_name: &'static str,
+        document_name: &'a str,
+        partition_key: &'a str,
+    ) -> GetDocumentBuilder<'a> {
+        GetDocumentBuilder {
+            collection_name,
+            document_name,
+            partition_key,
+        }
+    }
+
+    fn into_cosmos<T: DeserializeOwned + Send + Sync>(
+        self,
+        db: &DatabaseClient,
+    ) -> Result<cosmos::GetDocumentBuilder<T>, Error> {
+        Ok(db
+            .collection_client(self.collection_name)
+            .document_client(self.document_name, &self.partition_key)?
+            .get_document())
+    }
+}
+
+#[async_trait]
+pub trait SessionClient {
+    /// Use the existing session token if it exists
+    async fn get_document<'a, T>(
+        &self,
+        builder: GetDocumentBuilder<'a>,
+    ) -> Result<Option<T>, Error>
+    where
+        T: DeserializeOwned + Send + Sync;
+
+    async fn query_documents<F, T>(&self, f: F) -> Result<Vec<T>, azure_core::error::Error>
+    where
+        F: FnOnce(&DatabaseClient) -> QueryDocumentsBuilder + Send,
+        T: DeserializeOwned + Send + Sync;
+
+    /// CosmosDB creates new session tokens after writes
+    async fn write_document<F, T>(&self, f: F) -> Result<(), azure_core::error::Error>
+    where
+        F: FnOnce(&DatabaseClient) -> Result<T, azure_core::error::Error> + Send,
+        T: IntoSessionToken + Send;
+}
+
+pub struct CosmosSessionClient {
     db: DatabaseClient,
     session: Arc<RwLock<Option<ConsistencyLevel>>>,
 }
 
-impl SessionClient {
+impl CosmosSessionClient {
     pub fn new(db: DatabaseClient, session: Arc<RwLock<Option<ConsistencyLevel>>>) -> Self {
         Self { db, session }
     }
+}
 
+#[async_trait]
+impl SessionClient for CosmosSessionClient {
     /// Use the existing session token if it exists
-    pub async fn get_document<F, T>(&self, f: F) -> Result<Option<T>, azure_core::error::Error>
+    async fn get_document<'a, T>(&self, builder: GetDocumentBuilder<'a>) -> Result<Option<T>, Error>
     where
-        F: FnOnce(&DatabaseClient) -> Result<GetDocumentBuilder<T>, azure_core::error::Error>,
         T: DeserializeOwned + Send + Sync,
     {
         let session = self.session.read().unwrap().clone();
         let f = if let Some(session) = session {
-            f(&self.db)?.consistency_level(session)
+            builder.into_cosmos(&self.db)?.consistency_level(session)
         } else {
-            f(&self.db)?
+            builder.into_cosmos(&self.db)?
         };
         let (t, session_token) = match f.into_future().await? {
             GetDocumentResponse::Found(resp) => (Some(resp.document.document), resp.session_token),
@@ -40,9 +95,9 @@ impl SessionClient {
         Ok(t)
     }
 
-    pub async fn query_documents<F, T>(&self, f: F) -> Result<Vec<T>, azure_core::error::Error>
+    async fn query_documents<F, T>(&self, f: F) -> Result<Vec<T>, azure_core::error::Error>
     where
-        F: FnOnce(&DatabaseClient) -> QueryDocumentsBuilder,
+        F: FnOnce(&DatabaseClient) -> QueryDocumentsBuilder + Send,
         T: DeserializeOwned + Send + Sync,
     {
         let session = self.session.read().unwrap().clone();
@@ -76,10 +131,10 @@ impl SessionClient {
     }
 
     /// CosmosDB creates new session tokens after writes
-    pub async fn write_document<F, T>(&self, f: F) -> Result<(), azure_core::error::Error>
+    async fn write_document<F, T>(&self, f: F) -> Result<(), azure_core::error::Error>
     where
-        F: FnOnce(&DatabaseClient) -> Result<T, azure_core::error::Error>,
-        T: IntoSessionToken,
+        F: FnOnce(&DatabaseClient) -> Result<T, azure_core::error::Error> + Send,
+        T: IntoSessionToken + Send,
     {
         let builder = if let Some(session) = self.session.read().unwrap().clone() {
             println!("{:?}", session);

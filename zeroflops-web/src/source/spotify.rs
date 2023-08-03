@@ -1,4 +1,7 @@
-use crate::{cosmos::SessionClient, UserId};
+use crate::{
+    cosmos::{CosmosSessionClient, SessionClient},
+    UserId,
+};
 use azure_data_cosmos::prelude::{Param, Query};
 use futures::{StreamExt, TryStreamExt};
 use hyper::{Body, Client, Method, Request, Uri};
@@ -467,7 +470,7 @@ pub async fn get_token() -> Result<crate::Token, Error> {
 }
 
 pub async fn get_access_token<'a>(
-    _client: &'_ SessionClient,
+    _client: &'_ CosmosSessionClient,
     user: &'a mut crate::user::User,
 ) -> Result<&'a str, Error> {
     let Some(credentials) = &mut user.spotify_credentials else {
@@ -606,7 +609,7 @@ pub async fn search_song(
 }
 
 pub async fn get_recent_tracks(
-    cosmos_client: &SessionClient,
+    cosmos_client: &CosmosSessionClient,
     user_id: &UserId,
     access_token: &str,
 ) -> Result<zeroflops::spotify::RecentTracks, Error> {

@@ -27,7 +27,7 @@ use zeroflops::{
     Error, Id, ItemQuery, List, ListMode, Lists,
 };
 use zeroflops_web::{
-    cosmos::SessionClient,
+    cosmos::{CosmosSessionClient, GetDocumentBuilder, SessionClient},
     query, source,
     source::spotify,
     user::{CosmosStore, GoogleCredentials, GoogleUser, SpotifyCredentials, User},
@@ -187,12 +187,7 @@ async fn login(
         let id = &map["id"];
         let mut user: User = state
             .client
-            .get_document(|db| {
-                Ok(db
-                    .collection_client("users")
-                    .document_client(id.clone(), &id)?
-                    .get_document())
-            })
+            .get_document(GetDocumentBuilder::new("users", id, id))
             .await?
             .ok_or(Error::internal_error(format!(
                 "User doesn't exist for {id}"
@@ -328,12 +323,7 @@ async fn google_login(
         let id = &map["id"];
         state
             .client
-            .get_document(|db| {
-                Ok(db
-                    .collection_client("users")
-                    .document_client(id.clone(), &id)?
-                    .get_document())
-            })
+            .get_document(GetDocumentBuilder::new("users", id, id))
             .await?
             .ok_or(Error::internal_error(format!(
                 "User doesn't exist for {id}"
@@ -416,7 +406,7 @@ async fn get_list_query(
 }
 
 async fn get_list_query_impl(
-    client: &SessionClient,
+    client: &CosmosSessionClient,
     user_id: &UserId,
     list: List,
 ) -> Result<ItemQuery, Error> {
@@ -479,7 +469,7 @@ async fn get_list_items(
 }
 
 async fn get_list_items_impl(
-    client: &SessionClient,
+    client: &CosmosSessionClient,
     user_id: &UserId,
     list: List,
 ) -> Result<Vec<Map<String, Value>>, Error> {
@@ -585,7 +575,7 @@ async fn update_list(
 }
 
 async fn update_list_doc(
-    client: &SessionClient,
+    client: &CosmosSessionClient,
     user_id: &UserId,
     list: List,
 ) -> Result<(), Error> {
@@ -797,7 +787,7 @@ async fn import_list(
 }
 
 pub async fn import_spotify(
-    client: &SessionClient,
+    client: &CosmosSessionClient,
     user_id: &UserId,
     source: &str,
     id: String,
@@ -834,14 +824,13 @@ pub async fn import_spotify(
     Ok(())
 }
 
-async fn get_item_doc(client: &SessionClient, user_id: &UserId, id: &str) -> Result<Item, Error> {
+async fn get_item_doc(
+    client: &CosmosSessionClient,
+    user_id: &UserId,
+    id: &str,
+) -> Result<Item, Error> {
     if let Some(item) = client
-        .get_document(|db| {
-            Ok(db
-                .collection_client("items")
-                .document_client(id, &user_id.0)?
-                .get_document())
-        })
+        .get_document(GetDocumentBuilder::new("items", id, &user_id.0))
         .await?
     {
         Ok(item)
@@ -863,7 +852,11 @@ fn update_stats(
     *lose_losses += 1;
 }
 
-async fn create_list_doc(client: &SessionClient, list: List, is_upsert: bool) -> Result<(), Error> {
+async fn create_list_doc(
+    client: &CosmosSessionClient,
+    list: List,
+    is_upsert: bool,
+) -> Result<(), Error> {
     client
         .write_document(|db| {
             Ok(db
@@ -986,7 +979,7 @@ async fn get_spotify_playlists(
 }
 
 struct AppState {
-    client: SessionClient,
+    client: CosmosSessionClient,
 }
 
 #[tokio::main]
@@ -1005,7 +998,7 @@ async fn main() {
         AuthorizationToken::primary_from_base64(&master_key).expect("cosmos config");
     let db = CosmosClient::new(account, authorization_token).database_client("topbops");
     let shared_state = Arc::new(AppState {
-        client: SessionClient::new(db.clone(), Arc::new(RwLock::new(None))),
+        client: CosmosSessionClient::new(db.clone(), Arc::new(RwLock::new(None))),
     });
 
     // Reset demo user data during startup in production

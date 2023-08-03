@@ -1,4 +1,7 @@
-use crate::{cosmos::SessionClient, UserId};
+use crate::{
+    cosmos::{CosmosSessionClient, GetDocumentBuilder, SessionClient},
+    UserId,
+};
 use futures::{StreamExt, TryStreamExt};
 use serde_json::{Map, Value};
 use zeroflops::{Error, ItemMetadata, List, Source, SourceType, Spotify};
@@ -7,7 +10,7 @@ pub mod setlist;
 pub mod spotify;
 
 pub async fn get_source_and_items(
-    client: &SessionClient,
+    client: &CosmosSessionClient,
     user_id: &UserId,
     mut source: Source,
 ) -> Result<(Source, Vec<ItemMetadata>), Error> {
@@ -77,14 +80,13 @@ fn new_custom_item(
     }
 }
 
-pub async fn get_list(client: &SessionClient, user_id: &UserId, id: &str) -> Result<List, Error> {
+pub async fn get_list(
+    client: &CosmosSessionClient,
+    user_id: &UserId,
+    id: &str,
+) -> Result<List, Error> {
     if let Some(list) = client
-        .get_document(|db| {
-            Ok(db
-                .collection_client("lists")
-                .document_client(id, &user_id.0)?
-                .get_document())
-        })
+        .get_document(GetDocumentBuilder::new("lists", id, &user_id.0))
         .await?
     {
         Ok(list)
@@ -94,7 +96,7 @@ pub async fn get_list(client: &SessionClient, user_id: &UserId, id: &str) -> Res
 }
 
 pub async fn create_items(
-    client: &SessionClient,
+    client: &CosmosSessionClient,
     items: Vec<super::Item>,
     is_upsert: bool,
 ) -> Result<(), Error> {
