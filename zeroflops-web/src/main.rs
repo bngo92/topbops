@@ -1,3 +1,4 @@
+use ::spotify::{Spotify, SpotifyClient};
 use axum::{
     body::Bytes,
     extract::{Host, OriginalUri, Path, Query, State},
@@ -31,7 +32,7 @@ use zeroflops_web::{
     query, source,
     source::spotify,
     user::{CosmosStore, GoogleCredentials, GoogleUser, SpotifyCredentials, User},
-    Item, Token, UserId,
+    Item, UserId,
 };
 
 type AuthContext = axum_login::extractors::AuthContext<String, User, CosmosStore>;
@@ -70,7 +71,14 @@ async fn login_handler(
     {
         origin = format!("https://{}{}", host, original_uri.path());
     }
-    let user = login(&state, &auth, &params["code"], &origin).await?;
+    let user = login(
+        &state.client,
+        SpotifyClient,
+        &auth.current_user,
+        &params["code"],
+        &origin,
+    )
+    .await?;
     auth.login(&user).await.unwrap();
     Ok(Redirect::to("/"))
 }
@@ -99,49 +107,14 @@ async fn logout_handler(
 }
 
 async fn login(
-    state: &Arc<AppState>,
-    auth: &AuthContext,
+    client: &impl SessionClient,
+    spotify: impl Spotify,
+    current_user: &Option<User>,
     code: &str,
     origin: &str,
 ) -> Result<User, Error> {
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = "https://accounts.spotify.com/api/token".parse().unwrap();
-    let resp = client
-        .request(
-            Request::builder()
-                .method(Method::POST)
-                .uri(uri)
-                .header(
-                    "Authorization",
-                    &format!(
-                        "Basic {}",
-                        std::env::var("SPOTIFY_TOKEN").expect("SPOTIFY_TOKEN is missing")
-                    ),
-                )
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .body(Body::from(format!(
-                    "grant_type=authorization_code&code={}&redirect_uri={}",
-                    code, origin
-                )))?,
-        )
-        .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let token: Token = serde_json::from_slice(&got)?;
-
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = "https://api.spotify.com/v1/me".parse().unwrap();
-    let resp = client
-        .request(
-            Request::builder()
-                .uri(uri)
-                .header("Authorization", format!("Bearer {}", token.access_token))
-                .body(Body::empty())?,
-        )
-        .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let spotify_user: spotify::User = serde_json::from_slice(&got)?;
+    let token = spotify.get_token(code, origin).await?;
+    let spotify_user = spotify.get_current_user(&token).await?;
     let spotify_credentials = Some(SpotifyCredentials {
         user_id: spotify_user.id.clone(),
         url: spotify_user.external_urls["spotify"].clone(),
@@ -152,11 +125,10 @@ async fn login(
     });
 
     // Add Spotify identity to user if a session already exists
-    if let Some(user) = &auth.current_user {
+    if let Some(user) = &current_user {
         let mut user = user.clone();
         user.spotify_credentials = spotify_credentials;
-        state
-            .client
+        client
             .write_document(|db| {
                 Ok(db
                     .collection_client("users")
@@ -174,8 +146,7 @@ async fn login(
             spotify_user.id.clone(),
         )],
     );
-    let mut results: Vec<HashMap<String, String>> = state
-        .client
+    let mut results: Vec<HashMap<String, String>> = client
         .query_documents(move |db| {
             db.collection_client("users")
                 .query_documents(query)
@@ -185,16 +156,14 @@ async fn login(
         .await?;
     let user = if let Some(map) = results.pop() {
         let id = &map["id"];
-        let mut user: User = state
-            .client
+        let mut user: User = client
             .get_document(GetDocumentBuilder::new("users", id, id))
             .await?
             .ok_or(Error::internal_error(format!(
                 "User doesn't exist for {id}"
             )))?;
         user.spotify_credentials = spotify_credentials;
-        state
-            .client
+        client
             .write_document(|db| {
                 Ok(db
                     .collection_client("users")
@@ -212,8 +181,7 @@ async fn login(
             spotify_credentials,
         }
     };
-    state
-        .client
+    client
         .write_document(|db| {
             Ok(db
                 .collection_client("users")
@@ -1110,6 +1078,16 @@ async fn main() {
 
 #[cfg(test)]
 mod test {
+    use async_trait::async_trait;
+    use azure_data_cosmos::prelude::{DatabaseClient, QueryDocumentsBuilder};
+    use serde::de::DeserializeOwned;
+    use spotify::{Spotify, Token, User};
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+    };
+    use zeroflops::Error;
+    use zeroflops_web::cosmos::{GetDocumentBuilder, IntoSessionToken, SessionClient};
 
     #[test]
     fn test_update_stats() {
@@ -1172,5 +1150,172 @@ mod test {
             ),
             (1512, 2, 1, 1488, 1, 2)
         );
+    }
+
+    struct TestSessionClient<'a> {
+        get_mock: Mock<GetDocumentBuilder<'a>, &'static str>,
+    }
+
+    #[async_trait]
+    impl SessionClient for TestSessionClient<'_> {
+        async fn get_document<'a, T>(
+            &self,
+            builder: GetDocumentBuilder<'a>,
+        ) -> Result<Option<T>, Error>
+        where
+            T: DeserializeOwned + Send + Sync,
+        {
+            let value = self.get_mock.call(builder);
+            //serde_json::de::from_str(r#"{"id":"","user_id":"","secret":""}"#).unwrap()
+            Ok(serde_json::de::from_str(value).unwrap())
+        }
+
+        async fn query_documents<F, T>(&self, _: F) -> Result<Vec<T>, azure_core::error::Error>
+        where
+            F: FnOnce(&DatabaseClient) -> QueryDocumentsBuilder + Send,
+            T: DeserializeOwned + Send + Sync,
+        {
+            Ok(vec![serde_json::de::from_str(r#"{"id":""}"#).unwrap()])
+        }
+
+        /// CosmosDB creates new session tokens after writes
+        async fn write_document<F, T>(&self, _: F) -> Result<(), azure_core::error::Error>
+        where
+            F: FnOnce(&DatabaseClient) -> Result<T, azure_core::error::Error> + Send,
+            T: IntoSessionToken + Send,
+        {
+            Ok(())
+        }
+    }
+
+    struct Mock<T, U> {
+        call_count: Arc<Mutex<usize>>,
+        call_args: Vec<T>,
+        side_effect: Vec<U>,
+    }
+
+    impl<T, U> Mock<T, U> {
+        fn new(call_args: Vec<T>, side_effect: Vec<U>) -> Mock<T, U> {
+            Mock {
+                call_count: Arc::new(Mutex::new(0)),
+                call_args,
+                side_effect,
+            }
+        }
+
+        fn default() -> Mock<T, U> {
+            Mock {
+                call_count: Arc::new(Mutex::new(0)),
+                call_args: Vec::new(),
+                side_effect: Vec::new(),
+            }
+        }
+    }
+
+    impl<T: std::fmt::Debug + PartialEq, U: Clone> Mock<T, U> {
+        fn call(&self, arg: T) -> U {
+            let call_count = *self.call_count.lock().unwrap();
+            assert_eq!(self.call_args[call_count], arg);
+            *self.call_count.lock().unwrap() = call_count + 1;
+            self.side_effect[call_count].clone()
+        }
+    }
+
+    struct TestSpotify {
+        code: String,
+    }
+
+    #[async_trait]
+    impl Spotify for TestSpotify {
+        async fn get_token(&self, code: &str, _: &str) -> Result<Token, Error> {
+            assert_eq!(self.code, code);
+            Ok(Token {
+                access_token: code.to_owned(),
+                refresh_token: Some(String::new()),
+            })
+        }
+
+        async fn get_current_user(&self, token: &Token) -> Result<User, Error> {
+            assert_eq!(self.code, token.access_token);
+            Ok(User {
+                id: String::new(),
+                external_urls: HashMap::from([("spotify".to_owned(), String::new())]),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_login_new_user() {
+        let client = TestSessionClient {
+            get_mock: Mock::new(
+                vec![GetDocumentBuilder {
+                    collection_name: "users",
+                    document_name: "",
+                    partition_key: "",
+                }],
+                vec![r#"{"id":"","user_id":"","secret":""}"#],
+            ),
+        };
+        crate::login(
+            &client,
+            TestSpotify {
+                code: "test".to_owned(),
+            },
+            &None,
+            "test",
+            "http://localhost:3000/api/login",
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_login_existing_user() {
+        let client = TestSessionClient {
+            get_mock: Mock::new(
+                vec![GetDocumentBuilder {
+                    collection_name: "users",
+                    document_name: "",
+                    partition_key: "",
+                }],
+                vec![r#"{"id":"","user_id":"","secret":""}"#],
+            ),
+        };
+        crate::login(
+            &client,
+            TestSpotify {
+                code: "test".to_owned(),
+            },
+            &None,
+            "test",
+            "http://localhost:3000/api/login",
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_login_add_spotify_credentials() {
+        let client = TestSessionClient {
+            get_mock: Mock::default(),
+        };
+        crate::login(
+            &client,
+            TestSpotify {
+                code: "test".to_owned(),
+            },
+            &Some(zeroflops_web::user::User {
+                user_id: String::new(),
+                id: String::new(),
+                secret: String::new(),
+                spotify_credentials: None,
+                google_email: None,
+            }),
+            "test",
+            "http://localhost:3000/api/login",
+        )
+        .await
+        .unwrap();
+        assert_eq!(*client.get_mock.call_count.lock().unwrap(), 0);
     }
 }

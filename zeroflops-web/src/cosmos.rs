@@ -11,10 +11,11 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::sync::{Arc, RwLock};
 use zeroflops::Error;
 
+#[derive(Debug, PartialEq)]
 pub struct GetDocumentBuilder<'a> {
-    collection_name: &'static str,
-    document_name: &'a str,
-    partition_key: &'a str,
+    pub collection_name: &'static str,
+    pub document_name: &'a str,
+    pub partition_key: &'a str,
 }
 
 impl GetDocumentBuilder<'_> {
