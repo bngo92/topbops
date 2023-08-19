@@ -1,8 +1,7 @@
 use crate::{
-    cosmos::{CosmosSessionClient, SessionClient},
+    cosmos::{CosmosParam, CosmosQuery, CosmosSessionClient, QueryDocumentsBuilder, SessionClient},
     UserId,
 };
-use azure_data_cosmos::prelude::{Param, Query};
 use futures::{StreamExt, TryStreamExt};
 use hyper::{Body, Client, Method, Request, Uri};
 use hyper_tls::HttpsConnector;
@@ -635,16 +634,16 @@ pub async fn get_recent_tracks(
         .collect();
     let query = "SELECT c.id, c.rating, c.user_score FROM c WHERE c.user_id = @user_id AND ARRAY_CONTAINS(@ids, c.id)".to_owned();
     let items = cosmos_client
-        .query_documents(|db| {
-            db.collection_client("items")
-                .query_documents(Query::with_params(
-                    query,
-                    [
-                        Param::new(String::from("@user_id"), user_id.0.clone()),
-                        Param::new(String::from("@ids"), ids.clone()),
-                    ],
-                ))
-        })
+        .query_documents(QueryDocumentsBuilder::new(
+            "items",
+            CosmosQuery::with_params(
+                query,
+                [
+                    CosmosParam::new(String::from("@user_id"), user_id.0.clone()),
+                    CosmosParam::new(String::from("@ids"), ids.clone()),
+                ],
+            ),
+        ))
         .await
         .map_err(Error::from)?;
     let map: HashMap<_, _> = items

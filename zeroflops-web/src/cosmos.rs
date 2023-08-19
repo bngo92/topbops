@@ -2,14 +2,62 @@ use async_trait::async_trait;
 use azure_data_cosmos::{
     prelude::{
         self as cosmos, ConsistencyLevel, CreateDocumentBuilder, DatabaseClient,
-        DeleteDocumentBuilder, GetDocumentResponse, QueryDocumentsBuilder, ReplaceDocumentBuilder,
+        DeleteDocumentBuilder, GetDocumentResponse, Param, Query, ReplaceDocumentBuilder,
     },
     CosmosEntity,
 };
 use futures::TryStreamExt;
 use serde::{de::DeserializeOwned, Serialize};
+use serde_json::Value;
 use std::sync::{Arc, RwLock};
 use zeroflops::Error;
+
+#[derive(Debug, PartialEq)]
+pub struct CosmosQuery {
+    query: String,
+    parameters: Vec<CosmosParam>,
+}
+
+impl CosmosQuery {
+    pub fn new(query: String) -> CosmosQuery {
+        CosmosQuery {
+            query,
+            parameters: Vec::new(),
+        }
+    }
+
+    pub fn with_params<T: Into<Vec<CosmosParam>>>(query: String, parameters: T) -> CosmosQuery {
+        CosmosQuery {
+            query,
+            parameters: parameters.into(),
+        }
+    }
+
+    fn into_query(self) -> Query {
+        Query::with_params(
+            self.query,
+            self.parameters
+                .into_iter()
+                .map(|param| Param::new(param.name, param.value))
+                .collect::<Vec<_>>(),
+        )
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct CosmosParam {
+    name: String,
+    value: Value,
+}
+
+impl CosmosParam {
+    pub fn new<T: Into<Value>>(name: String, value: T) -> CosmosParam {
+        CosmosParam {
+            name,
+            value: value.into(),
+        }
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub struct GetDocumentBuilder {
@@ -42,6 +90,38 @@ impl GetDocumentBuilder {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub struct QueryDocumentsBuilder {
+    pub collection_name: &'static str,
+    pub query: CosmosQuery,
+    pub query_cross_partition: bool,
+    pub parallelize_cross_partition_query: bool,
+}
+
+impl QueryDocumentsBuilder {
+    pub fn new(collection_name: &'static str, query: CosmosQuery) -> QueryDocumentsBuilder {
+        QueryDocumentsBuilder {
+            collection_name,
+            query,
+            query_cross_partition: false,
+            parallelize_cross_partition_query: false,
+        }
+    }
+
+    fn into_cosmos(self, db: &DatabaseClient) -> Result<cosmos::QueryDocumentsBuilder, Error> {
+        let mut builder = db
+            .collection_client(self.collection_name)
+            .query_documents(self.query.into_query());
+        if self.query_cross_partition {
+            builder = builder.query_cross_partition(true)
+        }
+        if self.parallelize_cross_partition_query {
+            builder = builder.parallelize_cross_partition_query(true)
+        }
+        Ok(builder)
+    }
+}
+
 #[async_trait]
 pub trait SessionClient {
     /// Use the existing session token if it exists
@@ -49,9 +129,8 @@ pub trait SessionClient {
     where
         T: DeserializeOwned + Send + Sync;
 
-    async fn query_documents<F, T>(&self, f: F) -> Result<Vec<T>, azure_core::error::Error>
+    async fn query_documents<T>(&self, builder: QueryDocumentsBuilder) -> Result<Vec<T>, Error>
     where
-        F: FnOnce(&DatabaseClient) -> QueryDocumentsBuilder + Send,
         T: DeserializeOwned + Send + Sync;
 
     /// CosmosDB creates new session tokens after writes
@@ -93,19 +172,21 @@ impl SessionClient for CosmosSessionClient {
         Ok(t)
     }
 
-    async fn query_documents<F, T>(&self, f: F) -> Result<Vec<T>, azure_core::error::Error>
+    async fn query_documents<T>(&self, builder: QueryDocumentsBuilder) -> Result<Vec<T>, Error>
     where
-        F: FnOnce(&DatabaseClient) -> QueryDocumentsBuilder + Send,
         T: DeserializeOwned + Send + Sync,
     {
         let session = self.session.read().unwrap().clone();
         let (stream, results) = if let Some(session) = session {
             println!("{:?}", session);
-            let mut stream = f(&self.db).consistency_level(session).into_stream();
+            let mut stream = builder
+                .into_cosmos(&self.db)?
+                .consistency_level(session)
+                .into_stream();
             let resp = stream.try_next().await?.map(|r| r.results);
             (stream, resp)
         } else {
-            let mut stream = f(&self.db).into_stream();
+            let mut stream = builder.into_cosmos(&self.db)?.into_stream();
             let resp = if let Some(r) = stream.try_next().await? {
                 *self.session.write().unwrap() = Some(ConsistencyLevel::Session(r.session_token));
                 Some(r.results)

@@ -7,7 +7,7 @@ use axum::{
     Router,
 };
 use axum_login::{axum_sessions::SessionLayer, AuthLayer};
-use azure_data_cosmos::prelude::{AuthorizationToken, CosmosClient, Param, Query as CosmosQuery};
+use azure_data_cosmos::prelude::{AuthorizationToken, CosmosClient};
 use base64::prelude::{Engine, BASE64_STANDARD};
 use futures::{StreamExt, TryStreamExt};
 use hyper::{Body, Client, Method, Request, StatusCode, Uri};
@@ -28,7 +28,10 @@ use zeroflops::{
     Error, Id, ItemQuery, List, ListMode, Lists,
 };
 use zeroflops_web::{
-    cosmos::{CosmosSessionClient, GetDocumentBuilder, SessionClient},
+    cosmos::{
+        CosmosParam, CosmosQuery, CosmosSessionClient, GetDocumentBuilder, QueryDocumentsBuilder,
+        SessionClient,
+    },
     query, source,
     source::spotify,
     user::{CosmosStore, GoogleCredentials, GoogleUser, SpotifyCredentials, User},
@@ -141,17 +144,17 @@ async fn login(
 
     let query = CosmosQuery::with_params(
         String::from("SELECT c.id, c.secret FROM c WHERE c.spotify_credentials.user_id = @user_id"),
-        [Param::new(
+        [CosmosParam::new(
             String::from("@user_id"),
             spotify_user.id.clone(),
         )],
     );
     let mut results: Vec<HashMap<String, String>> = client
-        .query_documents(move |db| {
-            db.collection_client("users")
-                .query_documents(query)
-                .query_cross_partition(true)
-                .parallelize_cross_partition_query(true)
+        .query_documents({
+            let mut builder = QueryDocumentsBuilder::new("users", query);
+            builder.query_cross_partition = true;
+            builder.parallelize_cross_partition_query = true;
+            builder
         })
         .await?;
     let user = if let Some(map) = results.pop() {
@@ -273,18 +276,18 @@ async fn google_login(
 
     let query = CosmosQuery::with_params(
         String::from("SELECT c.id FROM c WHERE c.google_email = @google_email"),
-        [Param::new(
+        [CosmosParam::new(
             String::from("@google_email"),
             google_user.email.clone(),
         )],
     );
     let mut results: Vec<HashMap<String, String>> = state
         .client
-        .query_documents(move |db| {
-            db.collection_client("users")
-                .query_documents(query)
-                .query_cross_partition(true)
-                .parallelize_cross_partition_query(true)
+        .query_documents({
+            let mut builder = QueryDocumentsBuilder::new("users", query);
+            builder.query_cross_partition = true;
+            builder.parallelize_cross_partition_query = true;
+            builder
         })
         .await?;
     let user = if let Some(map) = results.pop() {
@@ -339,13 +342,13 @@ async fn get_lists(
     Ok(Json(Lists {
         lists: state
             .client
-            .query_documents(|db| {
-                db.collection_client("lists")
-                    .query_documents(CosmosQuery::with_params(
-                        String::from(query),
-                        [Param::new(String::from("@user_id"), user_id.0)],
-                    ))
-            })
+            .query_documents(QueryDocumentsBuilder::new(
+                "lists",
+                CosmosQuery::with_params(
+                    String::from(query),
+                    [CosmosParam::new(String::from("@user_id"), user_id.0)],
+                ),
+            ))
             .await
             .map_err(Error::from)?,
     }))
@@ -386,10 +389,10 @@ async fn get_list_query_impl(
     } else {
         let (query, fields, map, ids) = query::rewrite_list_query(&list, user_id)?;
         let mut items: Vec<_> = client
-            .query_documents(|db| {
-                db.collection_client("items")
-                    .query_documents(CosmosQuery::new(query.to_string()))
-            })
+            .query_documents(QueryDocumentsBuilder::new(
+                "items",
+                CosmosQuery::new(query.to_string()),
+            ))
             .await
             .map_err(Error::from)?;
         // Use list item order if an ordering wasn't provided
@@ -449,19 +452,19 @@ async fn get_list_items_impl(
         String::from("SELECT c.id, c.type, c.name, c.rating, c.user_score, c.user_wins, c.user_losses, c.hidden, c.metadata FROM c WHERE c.user_id = @user_id AND ARRAY_CONTAINS(@ids, c.id)")
     };
     client
-        .query_documents(|db| {
-            db.collection_client("items")
-                .query_documents(CosmosQuery::with_params(
-                    query,
-                    [
-                        Param::new(String::from("@user_id"), user_id.0.clone()),
-                        Param::new(
-                            String::from("@ids"),
-                            list.items.iter().map(|i| i.id.clone()).collect::<Vec<_>>(),
-                        ),
-                    ],
-                ))
-        })
+        .query_documents(QueryDocumentsBuilder::new(
+            "items",
+            CosmosQuery::with_params(
+                query,
+                [
+                    CosmosParam::new(String::from("@user_id"), user_id.0.clone()),
+                    CosmosParam::new(
+                        String::from("@ids"),
+                        list.items.iter().map(|i| i.id.clone()).collect::<Vec<_>>(),
+                    ),
+                ],
+            ),
+        ))
         .await
         .map_err(Error::from)
 }
@@ -593,14 +596,14 @@ async fn find_items(
     let (query, _) = query::rewrite_query(query, &user_id)?;
     let values: Vec<Map<String, Value>> = state
         .client
-        .query_documents(|db| {
-            db.collection_client("items")
-                .query_documents(CosmosQuery::new(query.to_string()))
-        })
+        .query_documents(QueryDocumentsBuilder::new(
+            "items",
+            CosmosQuery::new(query.to_string()),
+        ))
         .await
         .map_err(|e| {
             eprintln!("{}: {:?}", query, e);
-            Error::from(e)
+            e
         })?;
     Ok(Json(values))
 }
@@ -1083,7 +1086,7 @@ async fn main() {
 #[cfg(test)]
 mod test {
     use async_trait::async_trait;
-    use azure_data_cosmos::prelude::{DatabaseClient, QueryDocumentsBuilder};
+    use azure_data_cosmos::prelude::DatabaseClient;
     use serde::de::DeserializeOwned;
     use spotify::{Spotify, Token, User};
     use std::{
@@ -1091,7 +1094,10 @@ mod test {
         sync::{Arc, Mutex},
     };
     use zeroflops::Error;
-    use zeroflops_web::cosmos::{GetDocumentBuilder, IntoSessionToken, SessionClient};
+    use zeroflops_web::cosmos::{
+        CosmosParam, CosmosQuery, GetDocumentBuilder, IntoSessionToken, QueryDocumentsBuilder,
+        SessionClient,
+    };
 
     #[test]
     fn test_update_stats() {
@@ -1158,6 +1164,7 @@ mod test {
 
     struct TestSessionClient {
         get_mock: Mock<GetDocumentBuilder, &'static str>,
+        query_mock: Mock<QueryDocumentsBuilder, &'static str>,
     }
 
     #[async_trait]
@@ -1170,12 +1177,12 @@ mod test {
             Ok(serde_json::de::from_str(value).unwrap())
         }
 
-        async fn query_documents<F, T>(&self, _: F) -> Result<Vec<T>, azure_core::error::Error>
+        async fn query_documents<T>(&self, builder: QueryDocumentsBuilder) -> Result<Vec<T>, Error>
         where
-            F: FnOnce(&DatabaseClient) -> QueryDocumentsBuilder + Send,
             T: DeserializeOwned + Send + Sync,
         {
-            Ok(vec![serde_json::de::from_str(r#"{"id":""}"#).unwrap()])
+            let value = self.query_mock.call(builder);
+            Ok(serde_json::de::from_str(value).unwrap())
         }
 
         /// CosmosDB creates new session tokens after writes
@@ -1235,7 +1242,7 @@ mod test {
         async fn get_current_user(&self, token: &Token) -> Result<User, Error> {
             assert_eq!(self.code, token.access_token);
             Ok(User {
-                id: String::new(),
+                id: "user".to_owned(),
                 external_urls: HashMap::from([("spotify".to_owned(), String::new())]),
             })
         }
@@ -1245,6 +1252,7 @@ mod test {
     async fn test_login_new_user() {
         let client = TestSessionClient {
             get_mock: Mock::new(vec![r#"{"id":"","user_id":"","secret":""}"#]),
+            query_mock: Mock::new(vec!["[]"]),
         };
         crate::login(
             &client,
@@ -1257,12 +1265,18 @@ mod test {
         )
         .await
         .unwrap();
+        assert_eq!(*client.get_mock.call_args.lock().unwrap(), []);
         assert_eq!(
-            *client.get_mock.call_args.lock().unwrap(),
-            [GetDocumentBuilder {
+            *client.query_mock.call_args.lock().unwrap(),
+            [QueryDocumentsBuilder {
                 collection_name: "users",
-                document_name: String::new(),
-                partition_key: String::new(),
+                query: CosmosQuery::with_params(
+                    "SELECT c.id, c.secret FROM c WHERE c.spotify_credentials.user_id = @user_id"
+                        .to_owned(),
+                    vec![CosmosParam::new("@user_id".to_owned(), "user".to_owned())],
+                ),
+                query_cross_partition: true,
+                parallelize_cross_partition_query: true,
             }]
         );
     }
@@ -1271,6 +1285,7 @@ mod test {
     async fn test_login_existing_user() {
         let client = TestSessionClient {
             get_mock: Mock::new(vec![r#"{"id":"","user_id":"","secret":""}"#]),
+            query_mock: Mock::new(vec![r#"[{"id":"user"}]"#]),
         };
         crate::login(
             &client,
@@ -1287,9 +1302,22 @@ mod test {
             *client.get_mock.call_args.lock().unwrap(),
             [GetDocumentBuilder {
                 collection_name: "users",
-                document_name: String::new(),
-                partition_key: String::new(),
+                document_name: "user".to_owned(),
+                partition_key: "user".to_owned(),
             }],
+        );
+        assert_eq!(
+            *client.query_mock.call_args.lock().unwrap(),
+            [QueryDocumentsBuilder {
+                collection_name: "users",
+                query: CosmosQuery::with_params(
+                    "SELECT c.id, c.secret FROM c WHERE c.spotify_credentials.user_id = @user_id"
+                        .to_owned(),
+                    vec![CosmosParam::new("@user_id".to_owned(), "user".to_owned())],
+                ),
+                query_cross_partition: true,
+                parallelize_cross_partition_query: true,
+            }]
         );
     }
 
@@ -1297,6 +1325,7 @@ mod test {
     async fn test_login_add_spotify_credentials() {
         let client = TestSessionClient {
             get_mock: Mock::empty(),
+            query_mock: Mock::empty(),
         };
         crate::login(
             &client,
