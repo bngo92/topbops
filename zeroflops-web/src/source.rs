@@ -86,7 +86,11 @@ pub async fn get_list(
     id: &str,
 ) -> Result<List, Error> {
     if let Some(list) = client
-        .get_document(GetDocumentBuilder::new("lists", id, &user_id.0))
+        .get_document(GetDocumentBuilder::new(
+            "lists",
+            id.to_owned(),
+            user_id.0.clone(),
+        ))
         .await?
     {
         Ok(list)

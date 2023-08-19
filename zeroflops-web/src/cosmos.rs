@@ -12,18 +12,18 @@ use std::sync::{Arc, RwLock};
 use zeroflops::Error;
 
 #[derive(Debug, PartialEq)]
-pub struct GetDocumentBuilder<'a> {
+pub struct GetDocumentBuilder {
     pub collection_name: &'static str,
-    pub document_name: &'a str,
-    pub partition_key: &'a str,
+    pub document_name: String,
+    pub partition_key: String,
 }
 
-impl GetDocumentBuilder<'_> {
-    pub fn new<'a>(
+impl GetDocumentBuilder {
+    pub fn new(
         collection_name: &'static str,
-        document_name: &'a str,
-        partition_key: &'a str,
-    ) -> GetDocumentBuilder<'a> {
+        document_name: String,
+        partition_key: String,
+    ) -> GetDocumentBuilder {
         GetDocumentBuilder {
             collection_name,
             document_name,
@@ -45,10 +45,7 @@ impl GetDocumentBuilder<'_> {
 #[async_trait]
 pub trait SessionClient {
     /// Use the existing session token if it exists
-    async fn get_document<'a, T>(
-        &self,
-        builder: GetDocumentBuilder<'a>,
-    ) -> Result<Option<T>, Error>
+    async fn get_document<T>(&self, builder: GetDocumentBuilder) -> Result<Option<T>, Error>
     where
         T: DeserializeOwned + Send + Sync;
 
@@ -78,7 +75,7 @@ impl CosmosSessionClient {
 #[async_trait]
 impl SessionClient for CosmosSessionClient {
     /// Use the existing session token if it exists
-    async fn get_document<'a, T>(&self, builder: GetDocumentBuilder<'a>) -> Result<Option<T>, Error>
+    async fn get_document<T>(&self, builder: GetDocumentBuilder) -> Result<Option<T>, Error>
     where
         T: DeserializeOwned + Send + Sync,
     {

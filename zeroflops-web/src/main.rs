@@ -157,7 +157,7 @@ async fn login(
     let user = if let Some(map) = results.pop() {
         let id = &map["id"];
         let mut user: User = client
-            .get_document(GetDocumentBuilder::new("users", id, id))
+            .get_document(GetDocumentBuilder::new("users", id.clone(), id.clone()))
             .await?
             .ok_or(Error::internal_error(format!(
                 "User doesn't exist for {id}"
@@ -291,7 +291,7 @@ async fn google_login(
         let id = &map["id"];
         state
             .client
-            .get_document(GetDocumentBuilder::new("users", id, id))
+            .get_document(GetDocumentBuilder::new("users", id.clone(), id.clone()))
             .await?
             .ok_or(Error::internal_error(format!(
                 "User doesn't exist for {id}"
@@ -798,7 +798,11 @@ async fn get_item_doc(
     id: &str,
 ) -> Result<Item, Error> {
     if let Some(item) = client
-        .get_document(GetDocumentBuilder::new("items", id, &user_id.0))
+        .get_document(GetDocumentBuilder::new(
+            "items",
+            id.to_owned(),
+            user_id.0.clone(),
+        ))
         .await?
     {
         Ok(item)
@@ -1152,21 +1156,17 @@ mod test {
         );
     }
 
-    struct TestSessionClient<'a> {
-        get_mock: Mock<GetDocumentBuilder<'a>, &'static str>,
+    struct TestSessionClient {
+        get_mock: Mock<GetDocumentBuilder, &'static str>,
     }
 
     #[async_trait]
-    impl SessionClient for TestSessionClient<'_> {
-        async fn get_document<'a, T>(
-            &self,
-            builder: GetDocumentBuilder<'a>,
-        ) -> Result<Option<T>, Error>
+    impl SessionClient for TestSessionClient {
+        async fn get_document<T>(&self, builder: GetDocumentBuilder) -> Result<Option<T>, Error>
         where
             T: DeserializeOwned + Send + Sync,
         {
             let value = self.get_mock.call(builder);
-            //serde_json::de::from_str(r#"{"id":"","user_id":"","secret":""}"#).unwrap()
             Ok(serde_json::de::from_str(value).unwrap())
         }
 
@@ -1189,35 +1189,32 @@ mod test {
     }
 
     struct Mock<T, U> {
-        call_count: Arc<Mutex<usize>>,
-        call_args: Vec<T>,
+        call_args: Arc<Mutex<Vec<T>>>,
         side_effect: Vec<U>,
     }
 
     impl<T, U> Mock<T, U> {
-        fn new(call_args: Vec<T>, side_effect: Vec<U>) -> Mock<T, U> {
+        fn new(side_effect: Vec<U>) -> Mock<T, U> {
             Mock {
-                call_count: Arc::new(Mutex::new(0)),
-                call_args,
+                call_args: Arc::new(Mutex::new(Vec::new())),
                 side_effect,
             }
         }
 
-        fn default() -> Mock<T, U> {
+        fn empty() -> Mock<T, U> {
             Mock {
-                call_count: Arc::new(Mutex::new(0)),
-                call_args: Vec::new(),
+                call_args: Arc::new(Mutex::new(Vec::new())),
                 side_effect: Vec::new(),
             }
         }
     }
 
-    impl<T: std::fmt::Debug + PartialEq, U: Clone> Mock<T, U> {
+    impl<T, U: Clone> Mock<T, U> {
         fn call(&self, arg: T) -> U {
-            let call_count = *self.call_count.lock().unwrap();
-            assert_eq!(self.call_args[call_count], arg);
-            *self.call_count.lock().unwrap() = call_count + 1;
-            self.side_effect[call_count].clone()
+            let mut call_args = self.call_args.lock().unwrap();
+            let value = self.side_effect[call_args.len()].clone();
+            call_args.push(arg);
+            value
         }
     }
 
@@ -1247,14 +1244,7 @@ mod test {
     #[tokio::test]
     async fn test_login_new_user() {
         let client = TestSessionClient {
-            get_mock: Mock::new(
-                vec![GetDocumentBuilder {
-                    collection_name: "users",
-                    document_name: "",
-                    partition_key: "",
-                }],
-                vec![r#"{"id":"","user_id":"","secret":""}"#],
-            ),
+            get_mock: Mock::new(vec![r#"{"id":"","user_id":"","secret":""}"#]),
         };
         crate::login(
             &client,
@@ -1267,19 +1257,20 @@ mod test {
         )
         .await
         .unwrap();
+        assert_eq!(
+            *client.get_mock.call_args.lock().unwrap(),
+            [GetDocumentBuilder {
+                collection_name: "users",
+                document_name: String::new(),
+                partition_key: String::new(),
+            }]
+        );
     }
 
     #[tokio::test]
     async fn test_login_existing_user() {
         let client = TestSessionClient {
-            get_mock: Mock::new(
-                vec![GetDocumentBuilder {
-                    collection_name: "users",
-                    document_name: "",
-                    partition_key: "",
-                }],
-                vec![r#"{"id":"","user_id":"","secret":""}"#],
-            ),
+            get_mock: Mock::new(vec![r#"{"id":"","user_id":"","secret":""}"#]),
         };
         crate::login(
             &client,
@@ -1292,12 +1283,20 @@ mod test {
         )
         .await
         .unwrap();
+        assert_eq!(
+            *client.get_mock.call_args.lock().unwrap(),
+            [GetDocumentBuilder {
+                collection_name: "users",
+                document_name: String::new(),
+                partition_key: String::new(),
+            }],
+        );
     }
 
     #[tokio::test]
     async fn test_login_add_spotify_credentials() {
         let client = TestSessionClient {
-            get_mock: Mock::default(),
+            get_mock: Mock::empty(),
         };
         crate::login(
             &client,
@@ -1316,6 +1315,5 @@ mod test {
         )
         .await
         .unwrap();
-        assert_eq!(*client.get_mock.call_count.lock().unwrap(), 0);
     }
 }
