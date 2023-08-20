@@ -29,8 +29,9 @@ use zeroflops::{
 };
 use zeroflops_web::{
     cosmos::{
-        CosmosParam, CosmosQuery, CosmosSessionClient, GetDocumentBuilder, QueryDocumentsBuilder,
-        SessionClient,
+        CosmosParam, CosmosQuery, CosmosSessionClient, CreateDocumentBuilder,
+        DeleteDocumentBuilder, DocumentWriter, GetDocumentBuilder, QueryDocumentsBuilder,
+        ReplaceDocumentBuilder, SessionClient,
     },
     query, source,
     source::spotify,
@@ -96,12 +97,11 @@ async fn logout_handler(
         user.secret = zeroflops_web::user::generate_secret();
         state
             .client
-            .write_document(|db| {
-                Ok(db
-                    .collection_client("users")
-                    .create_document(user.clone())
-                    .is_upsert(true))
-            })
+            .write_document(DocumentWriter::Create(CreateDocumentBuilder {
+                collection_name: "users",
+                document: user.clone(),
+                is_upsert: true,
+            }))
             .await
             .expect("Couldn't reset password");
         auth.logout().await;
@@ -132,12 +132,12 @@ async fn login(
         let mut user = user.clone();
         user.spotify_credentials = spotify_credentials;
         client
-            .write_document(|db| {
-                Ok(db
-                    .collection_client("users")
-                    .document_client(user.id.clone(), &user.id)?
-                    .replace_document(user.clone()))
-            })
+            .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
+                collection_name: "users",
+                document_name: user.id.clone(),
+                partition_key: user.id.clone(),
+                document: user.clone(),
+            }))
             .await?;
         return Ok(user);
     }
@@ -167,12 +167,12 @@ async fn login(
             )))?;
         user.spotify_credentials = spotify_credentials;
         client
-            .write_document(|db| {
-                Ok(db
-                    .collection_client("users")
-                    .document_client(user.id.clone(), &user.id)?
-                    .replace_document(user.clone()))
-            })
+            .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
+                collection_name: "users",
+                document_name: user.id.clone(),
+                partition_key: user.id.clone(),
+                document: user.clone(),
+            }))
             .await?;
         user
     } else {
@@ -185,12 +185,11 @@ async fn login(
         }
     };
     client
-        .write_document(|db| {
-            Ok(db
-                .collection_client("users")
-                .create_document(user.clone())
-                .is_upsert(true))
-        })
+        .write_document(DocumentWriter::Create(CreateDocumentBuilder {
+            collection_name: "users",
+            document: user.clone(),
+            is_upsert: true,
+        }))
         .await?;
     Ok(user)
 }
@@ -264,12 +263,12 @@ async fn google_login(
         user.google_email = Some(google_user.email);
         state
             .client
-            .write_document(|db| {
-                Ok(db
-                    .collection_client("users")
-                    .document_client(user.id.clone(), &user.id)?
-                    .replace_document(user.clone()))
-            })
+            .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
+                collection_name: "users",
+                document_name: user.id.clone(),
+                partition_key: user.id.clone(),
+                document: user.clone(),
+            }))
             .await?;
         return Ok(user);
     }
@@ -318,12 +317,11 @@ async fn google_login(
     };
     state
         .client
-        .write_document(|db| {
-            Ok(db
-                .collection_client("users")
-                .create_document(user.clone())
-                .is_upsert(true))
-        })
+        .write_document(DocumentWriter::Create(CreateDocumentBuilder {
+            collection_name: "users",
+            document: user.clone(),
+            is_upsert: true,
+        }))
         .await?;
     Ok(user)
 }
@@ -551,12 +549,12 @@ async fn update_list_doc(
     list: List,
 ) -> Result<(), Error> {
     client
-        .write_document(|db| {
-            Ok(db
-                .collection_client("lists")
-                .document_client(list.id.clone(), &user_id.0)?
-                .replace_document(list))
-        })
+        .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
+            collection_name: "lists",
+            document_name: list.id.clone(),
+            partition_key: user_id.0.clone(),
+            document: list,
+        }))
         .await
         .map_err(Error::from)?;
     Ok(())
@@ -572,12 +570,11 @@ async fn delete_list(
     let user_id = UserId(user.user_id);
     state
         .client
-        .write_document(|db| {
-            Ok(db
-                .collection_client("lists")
-                .document_client(id, &user_id.0)?
-                .delete_document())
-        })
+        .write_document(DocumentWriter::<List>::Delete(DeleteDocumentBuilder {
+            collection_name: "lists",
+            document_name: id,
+            partition_key: user_id.0,
+        }))
         .await
         .map_err(Error::from)?;
     Ok(StatusCode::NO_CONTENT)
@@ -689,24 +686,24 @@ async fn handle_stats_update(
     );
 
     futures::future::try_join3(
-        client.write_document(|db| {
-            Ok(db
-                .collection_client("lists")
-                .document_client(id, &user_id.0)?
-                .replace_document(list))
-        }),
-        client.write_document(|db| {
-            Ok(db
-                .collection_client("items")
-                .document_client(&win_item.id, &user_id.0)?
-                .replace_document(win_item))
-        }),
-        client.write_document(|db| {
-            Ok(db
-                .collection_client("items")
-                .document_client(&lose_item.id, &user_id.0)?
-                .replace_document(lose_item))
-        }),
+        client.write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
+            collection_name: "lists",
+            document_name: id.to_owned(),
+            partition_key: user_id.0.clone(),
+            document: list,
+        })),
+        client.write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
+            collection_name: "items",
+            document_name: win_item.id.clone(),
+            partition_key: user_id.0.clone(),
+            document: win_item,
+        })),
+        client.write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
+            collection_name: "items",
+            document_name: lose_item.id.clone(),
+            partition_key: user_id.0.clone(),
+            document: lose_item,
+        })),
     )
     .await?;
     Ok(StatusCode::OK)
@@ -833,12 +830,11 @@ async fn create_list_doc(
     is_upsert: bool,
 ) -> Result<(), Error> {
     client
-        .write_document(|db| {
-            Ok(db
-                .collection_client("lists")
-                .create_document(list)
-                .is_upsert(is_upsert))
-        })
+        .write_document(DocumentWriter::Create(CreateDocumentBuilder {
+            collection_name: "lists",
+            document: list,
+            is_upsert,
+        }))
         .await
         .map_err(Error::from)
 }
@@ -865,12 +861,12 @@ async fn update_items(
         }
         state
             .client
-            .write_document(move |db| {
-                Ok(db
-                    .collection_client("items")
-                    .document_client(id, &user_id.0)?
-                    .replace_document(item))
-            })
+            .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
+                collection_name: "items",
+                document_name: id,
+                partition_key: user_id.0.clone(),
+                document: item,
+            }))
             .await
             .map_err(Error::from)
     }))
@@ -888,16 +884,16 @@ async fn delete_items(
     let user = require_user(auth)?;
     let user_id = UserId(user.user_id);
     let ids: Vec<_> = params["ids"].split(',').map(ToOwned::to_owned).collect();
+    let state = &state;
     let user_id = &user_id;
-    futures::stream::iter(ids.into_iter().map(|id| async {
+    futures::stream::iter(ids.into_iter().map(|id| async move {
         match state
             .client
-            .write_document(move |db| {
-                Ok(db
-                    .collection_client("items")
-                    .document_client(id, &user_id.0)?
-                    .delete_document())
-            })
+            .write_document(DocumentWriter::<Item>::Delete(DeleteDocumentBuilder {
+                collection_name: "items",
+                document_name: id.clone(),
+                partition_key: user_id.0.clone(),
+            }))
             .await
         {
             Ok(_) => Ok(()),
@@ -1086,17 +1082,20 @@ async fn main() {
 #[cfg(test)]
 mod test {
     use async_trait::async_trait;
-    use azure_data_cosmos::prelude::DatabaseClient;
-    use serde::de::DeserializeOwned;
-    use spotify::{Spotify, Token, User};
+    use azure_data_cosmos::prelude::CosmosEntity;
+    use serde::{de::DeserializeOwned, Serialize};
+    use spotify::{Spotify, Token};
     use std::{
         collections::HashMap,
         sync::{Arc, Mutex},
     };
     use zeroflops::Error;
-    use zeroflops_web::cosmos::{
-        CosmosParam, CosmosQuery, GetDocumentBuilder, IntoSessionToken, QueryDocumentsBuilder,
-        SessionClient,
+    use zeroflops_web::{
+        cosmos::{
+            CosmosParam, CosmosQuery, CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter,
+            GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
+        },
+        user::User,
     };
 
     #[test]
@@ -1165,6 +1164,7 @@ mod test {
     struct TestSessionClient {
         get_mock: Mock<GetDocumentBuilder, &'static str>,
         query_mock: Mock<QueryDocumentsBuilder, &'static str>,
+        write_mock: Mock<DocumentWriter<String>, ()>,
     }
 
     #[async_trait]
@@ -1186,11 +1186,34 @@ mod test {
         }
 
         /// CosmosDB creates new session tokens after writes
-        async fn write_document<F, T>(&self, _: F) -> Result<(), azure_core::error::Error>
+        async fn write_document<T>(
+            &self,
+            builder: DocumentWriter<T>,
+        ) -> Result<(), azure_core::error::Error>
         where
-            F: FnOnce(&DatabaseClient) -> Result<T, azure_core::error::Error> + Send,
-            T: IntoSessionToken + Send,
+            T: Serialize + CosmosEntity + Send + 'static,
         {
+            let builder = match builder {
+                DocumentWriter::Create(builder) => DocumentWriter::Create(CreateDocumentBuilder {
+                    collection_name: builder.collection_name,
+                    document: serde_json::to_string(&builder.document).unwrap(),
+                    is_upsert: builder.is_upsert,
+                }),
+                DocumentWriter::Replace(builder) => {
+                    DocumentWriter::Replace(ReplaceDocumentBuilder {
+                        collection_name: builder.collection_name,
+                        document_name: builder.document_name,
+                        partition_key: builder.partition_key,
+                        document: serde_json::to_string(&builder.document).unwrap(),
+                    })
+                }
+                DocumentWriter::Delete(builder) => DocumentWriter::Delete(DeleteDocumentBuilder {
+                    collection_name: builder.collection_name,
+                    document_name: builder.document_name,
+                    partition_key: builder.partition_key,
+                }),
+            };
+            self.write_mock.call(builder);
             Ok(())
         }
     }
@@ -1239,9 +1262,9 @@ mod test {
             })
         }
 
-        async fn get_current_user(&self, token: &Token) -> Result<User, Error> {
+        async fn get_current_user(&self, token: &Token) -> Result<spotify::User, Error> {
             assert_eq!(self.code, token.access_token);
-            Ok(User {
+            Ok(spotify::User {
                 id: "user".to_owned(),
                 external_urls: HashMap::from([("spotify".to_owned(), String::new())]),
             })
@@ -1253,6 +1276,7 @@ mod test {
         let client = TestSessionClient {
             get_mock: Mock::new(vec![r#"{"id":"","user_id":"","secret":""}"#]),
             query_mock: Mock::new(vec!["[]"]),
+            write_mock: Mock::new(vec![()]),
         };
         crate::login(
             &client,
@@ -1279,6 +1303,20 @@ mod test {
                 parallelize_cross_partition_query: true,
             }]
         );
+        let write_mock =
+            Mutex::into_inner(Arc::into_inner(client.write_mock.call_args).unwrap()).unwrap();
+        let DocumentWriter::Create(builder) = &write_mock[0] else { unreachable!() };
+        let User { id, secret, .. } = serde_json::de::from_str(&builder.document).unwrap();
+        assert_eq!(
+            write_mock,
+            [DocumentWriter::Create(CreateDocumentBuilder {
+                collection_name: "users",
+                document: format!(
+                    r#"{{"id":"{id}","user_id":"user","secret":"{secret}","spotify_credentials":{{"user_id":"user","url":"","access_token":"test","refresh_token":""}},"google_email":null}}"#
+                ),
+                is_upsert: true,
+            })]
+        );
     }
 
     #[tokio::test]
@@ -1286,6 +1324,7 @@ mod test {
         let client = TestSessionClient {
             get_mock: Mock::new(vec![r#"{"id":"","user_id":"","secret":""}"#]),
             query_mock: Mock::new(vec![r#"[{"id":"user"}]"#]),
+            write_mock: Mock::new(vec![(), ()]),
         };
         crate::login(
             &client,
@@ -1319,6 +1358,20 @@ mod test {
                 parallelize_cross_partition_query: true,
             }]
         );
+        assert_eq!(
+            *client.write_mock.call_args.lock().unwrap(),
+            [DocumentWriter::Replace(ReplaceDocumentBuilder {
+                collection_name: "users",
+                document_name: "".to_owned(),
+                partition_key: "".to_owned(),
+                document: r#"{"id":"","user_id":"","secret":"","spotify_credentials":{"user_id":"user","url":"","access_token":"test","refresh_token":""},"google_email":null}"#.to_owned(),
+            }),
+            DocumentWriter::Create(CreateDocumentBuilder {
+                collection_name: "users",
+                document: r#"{"id":"","user_id":"","secret":"","spotify_credentials":{"user_id":"user","url":"","access_token":"test","refresh_token":""},"google_email":null}"#.to_owned(),
+                is_upsert: true,
+            })]
+        );
     }
 
     #[tokio::test]
@@ -1326,6 +1379,7 @@ mod test {
         let client = TestSessionClient {
             get_mock: Mock::empty(),
             query_mock: Mock::empty(),
+            write_mock: Mock::new(vec![()]),
         };
         crate::login(
             &client,
@@ -1344,5 +1398,14 @@ mod test {
         )
         .await
         .unwrap();
+        assert_eq!(
+            *client.write_mock.call_args.lock().unwrap(),
+            [DocumentWriter::Replace(ReplaceDocumentBuilder {
+                collection_name: "users",
+                document_name: "".to_owned(),
+                partition_key: "".to_owned(),
+                document: r#"{"id":"","user_id":"","secret":"","spotify_credentials":{"user_id":"user","url":"","access_token":"test","refresh_token":""},"google_email":null}"#.to_owned(),
+            })]
+        );
     }
 }

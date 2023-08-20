@@ -1,5 +1,8 @@
 use crate::{
-    cosmos::{CosmosSessionClient, GetDocumentBuilder, SessionClient},
+    cosmos::{
+        CosmosSessionClient, CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder,
+        SessionClient,
+    },
     UserId,
 };
 use futures::{StreamExt, TryStreamExt};
@@ -106,12 +109,11 @@ pub async fn create_items(
 ) -> Result<(), Error> {
     futures::stream::iter(items.into_iter().map(|item| async move {
         match client
-            .write_document(|db| {
-                Ok(db
-                    .collection_client("items")
-                    .create_document(item)
-                    .is_upsert(is_upsert))
-            })
+            .write_document(DocumentWriter::Create(CreateDocumentBuilder {
+                collection_name: "items",
+                document: item,
+                is_upsert,
+            }))
             .await
         {
             Ok(_) => Ok(()),

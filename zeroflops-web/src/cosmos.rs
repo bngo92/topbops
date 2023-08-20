@@ -1,8 +1,7 @@
 use async_trait::async_trait;
 use azure_data_cosmos::{
     prelude::{
-        self as cosmos, ConsistencyLevel, CreateDocumentBuilder, DatabaseClient,
-        DeleteDocumentBuilder, GetDocumentResponse, Param, Query, ReplaceDocumentBuilder,
+        self as cosmos, ConsistencyLevel, DatabaseClient, GetDocumentResponse, Param, Query,
     },
     CosmosEntity,
 };
@@ -134,10 +133,12 @@ pub trait SessionClient {
         T: DeserializeOwned + Send + Sync;
 
     /// CosmosDB creates new session tokens after writes
-    async fn write_document<F, T>(&self, f: F) -> Result<(), azure_core::error::Error>
+    async fn write_document<T>(
+        &self,
+        builder: DocumentWriter<T>,
+    ) -> Result<(), azure_core::error::Error>
     where
-        F: FnOnce(&DatabaseClient) -> Result<T, azure_core::error::Error> + Send,
-        T: IntoSessionToken + Send;
+        T: Serialize + CosmosEntity + Send + 'static;
 }
 
 pub struct CosmosSessionClient {
@@ -210,58 +211,125 @@ impl SessionClient for CosmosSessionClient {
     }
 
     /// CosmosDB creates new session tokens after writes
-    async fn write_document<F, T>(&self, f: F) -> Result<(), azure_core::error::Error>
+    async fn write_document<T>(
+        &self,
+        builder: DocumentWriter<T>,
+    ) -> Result<(), azure_core::error::Error>
     where
-        F: FnOnce(&DatabaseClient) -> Result<T, azure_core::error::Error> + Send,
-        T: IntoSessionToken + Send,
+        T: Serialize + CosmosEntity + Send + 'static,
     {
-        let builder = if let Some(session) = self.session.read().unwrap().clone() {
+        let session = self.session.read().unwrap().clone();
+        let session_token = if let Some(session) = session {
+            let session: ConsistencyLevel = session;
             println!("{:?}", session);
-            f(&self.db)?.consistency_level(session)
+            match builder {
+                DocumentWriter::Create(builder) => builder
+                    .into_cosmos(&self.db)?
+                    .consistency_level(session)
+                    .into_future()
+                    .await
+                    .map(|r| r.session_token)?,
+                DocumentWriter::Replace(builder) => builder
+                    .into_cosmos(&self.db)?
+                    .consistency_level(session)
+                    .into_future()
+                    .await
+                    .map(|r| r.session_token)?,
+                DocumentWriter::Delete(builder) => builder
+                    .into_cosmos(&self.db)?
+                    .consistency_level(session)
+                    .into_future()
+                    .await
+                    .map(|r| r.session_token)?,
+            }
         } else {
-            f(&self.db)?
+            match builder {
+                DocumentWriter::Create(builder) => builder
+                    .into_cosmos(&self.db)?
+                    .into_future()
+                    .await
+                    .map(|r| r.session_token)?,
+                DocumentWriter::Replace(builder) => builder
+                    .into_cosmos(&self.db)?
+                    .into_future()
+                    .await
+                    .map(|r| r.session_token)?,
+                DocumentWriter::Delete(builder) => builder
+                    .into_cosmos(&self.db)?
+                    .into_future()
+                    .await
+                    .map(|r| r.session_token)?,
+            }
         };
-        let session_token = builder.into_session_token().await?;
         *self.session.write().unwrap() = Some(ConsistencyLevel::Session(session_token));
         Ok(())
     }
 }
 
-#[async_trait]
-pub trait IntoSessionToken {
-    fn consistency_level(self, consistency_level: ConsistencyLevel) -> Self;
-    async fn into_session_token(self) -> Result<String, azure_core::error::Error>;
+#[derive(Debug, PartialEq)]
+pub enum DocumentWriter<T> {
+    Create(CreateDocumentBuilder<T>),
+    Replace(ReplaceDocumentBuilder<T>),
+    Delete(DeleteDocumentBuilder),
 }
 
-#[async_trait]
-impl<T: Serialize + CosmosEntity + Send + 'static> IntoSessionToken for CreateDocumentBuilder<T> {
-    fn consistency_level(self, consistency_level: ConsistencyLevel) -> Self {
-        self.consistency_level(consistency_level)
-    }
+#[derive(Debug, PartialEq)]
+pub struct CreateDocumentBuilder<T> {
+    pub collection_name: &'static str,
+    pub document: T,
+    pub is_upsert: bool,
+}
 
-    async fn into_session_token(self) -> Result<String, azure_core::error::Error> {
-        self.into_future().await.map(|r| r.session_token)
+impl<T: Serialize + CosmosEntity + Send + 'static> CreateDocumentBuilder<T> {
+    fn into_cosmos(
+        self,
+        db: &DatabaseClient,
+    ) -> Result<cosmos::CreateDocumentBuilder<T>, azure_core::error::Error> {
+        let mut builder = db
+            .collection_client(self.collection_name)
+            .create_document(self.document);
+        if self.is_upsert {
+            builder = builder.is_upsert(true)
+        }
+        Ok(builder)
     }
 }
 
-#[async_trait]
-impl<T: Serialize + CosmosEntity + Send + 'static> IntoSessionToken for ReplaceDocumentBuilder<T> {
-    fn consistency_level(self, consistency_level: ConsistencyLevel) -> Self {
-        self.consistency_level(consistency_level)
-    }
+#[derive(Debug, PartialEq)]
+pub struct ReplaceDocumentBuilder<T> {
+    pub collection_name: &'static str,
+    pub document_name: String,
+    pub partition_key: String,
+    pub document: T,
+}
 
-    async fn into_session_token(self) -> Result<String, azure_core::error::Error> {
-        self.into_future().await.map(|r| r.session_token)
+impl<T: Serialize + CosmosEntity + Send + 'static> ReplaceDocumentBuilder<T> {
+    fn into_cosmos(
+        self,
+        db: &DatabaseClient,
+    ) -> Result<cosmos::ReplaceDocumentBuilder<T>, azure_core::error::Error> {
+        Ok(db
+            .collection_client(self.collection_name)
+            .document_client(&self.document_name, &self.partition_key)?
+            .replace_document(self.document))
     }
 }
 
-#[async_trait]
-impl IntoSessionToken for DeleteDocumentBuilder {
-    fn consistency_level(self, consistency_level: ConsistencyLevel) -> Self {
-        self.consistency_level(consistency_level)
-    }
+#[derive(Debug, PartialEq)]
+pub struct DeleteDocumentBuilder {
+    pub collection_name: &'static str,
+    pub document_name: String,
+    pub partition_key: String,
+}
 
-    async fn into_session_token(self) -> Result<String, azure_core::error::Error> {
-        self.into_future().await.map(|r| r.session_token)
+impl DeleteDocumentBuilder {
+    fn into_cosmos(
+        self,
+        db: &DatabaseClient,
+    ) -> Result<cosmos::DeleteDocumentBuilder, azure_core::error::Error> {
+        Ok(db
+            .collection_client(self.collection_name)
+            .document_client(&self.document_name, &self.partition_key)?
+            .delete_document())
     }
 }
