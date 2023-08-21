@@ -35,7 +35,7 @@ use zeroflops_web::{
     query, source,
     source::spotify,
     user,
-    user::{CosmosStore, User},
+    user::{CosmosStore, GoogleClient, User},
     Item, UserId,
 };
 
@@ -75,7 +75,7 @@ async fn login_handler(
     {
         origin = format!("https://{}{}", host, original_uri.path());
     }
-    let user = user::login(
+    let user = user::spotify_login(
         &state.client,
         SpotifyClient,
         &auth.current_user,
@@ -125,8 +125,14 @@ async fn google_login_handler(
     {
         origin = format!("https://{}{}", host, original_uri.path());
     }
-    let user =
-        user::google_login(&state.client, &auth.current_user, &params["code"], &origin).await?;
+    let user = user::google_login(
+        &state.client,
+        GoogleClient,
+        &auth.current_user,
+        &params["code"],
+        &origin,
+    )
+    .await?;
     auth.login(&user).await.unwrap();
     Ok(Redirect::to("/"))
 }

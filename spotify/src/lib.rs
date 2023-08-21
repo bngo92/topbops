@@ -26,15 +26,18 @@ pub struct SpotifyCredentials {
 }
 
 #[async_trait]
-pub trait Spotify {
-    async fn get_credentials(&self, code: &str, origin: &str) -> Result<SpotifyCredentials, Error>;
+pub trait AuthClient {
+    type Credentials;
+    async fn get_credentials(&self, code: &str, origin: &str) -> Result<Self::Credentials, Error>;
 }
 
 pub struct SpotifyClient;
 
 #[async_trait]
-impl Spotify for SpotifyClient {
-    async fn get_credentials(&self, code: &str, origin: &str) -> Result<SpotifyCredentials, Error> {
+impl AuthClient for SpotifyClient {
+    type Credentials = SpotifyCredentials;
+
+    async fn get_credentials(&self, code: &str, origin: &str) -> Result<Self::Credentials, Error> {
         let https = HttpsConnector::new();
         let client = Client::builder().build::<_, hyper::Body>(https);
         let uri: Uri = "https://accounts.spotify.com/api/token".parse().unwrap();

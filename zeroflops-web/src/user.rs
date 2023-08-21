@@ -1,8 +1,8 @@
 use crate::cosmos::{
-    CosmosParam, CosmosQuery, CosmosSessionClient, CreateDocumentBuilder, DocumentWriter,
+    CosmosParam, CosmosQuery, CreateDocumentBuilder, DocumentWriter,
     GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
 };
-use ::spotify::{Spotify, SpotifyCredentials};
+use ::spotify::{AuthClient, SpotifyCredentials};
 use async_trait::async_trait;
 use axum_login::{
     axum_sessions::async_session::{Session, SessionStore},
@@ -49,9 +49,9 @@ impl CosmosEntity for User {
     }
 }
 
-pub async fn login(
+pub async fn spotify_login(
     session_client: &impl SessionClient,
-    spotify: impl Spotify,
+    spotify: impl AuthClient<Credentials = SpotifyCredentials>,
     current_user: &Option<User>,
     code: &str,
     origin: &str,
@@ -96,6 +96,7 @@ pub async fn login(
             .ok_or(Error::internal_error(format!(
                 "User doesn't exist for {id}"
             )))?;
+        // Refresh tokens
         user.spotify_credentials = Some(spotify_credentials);
         session_client
             .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
@@ -107,65 +108,33 @@ pub async fn login(
             .await?;
         user
     } else {
-        User {
+        let user = User {
             id: Uuid::new_v4().to_hyphenated().to_string(),
             user_id: spotify_credentials.user_id.clone(),
             secret: generate_secret(),
             google_email: None,
             spotify_credentials: Some(spotify_credentials),
-        }
+        };
+        session_client
+            .write_document(DocumentWriter::Create(CreateDocumentBuilder {
+                collection_name: "users",
+                document: user.clone(),
+                is_upsert: true,
+            }))
+            .await?;
+        user
     };
-    session_client
-        .write_document(DocumentWriter::Create(CreateDocumentBuilder {
-            collection_name: "users",
-            document: user.clone(),
-            is_upsert: true,
-        }))
-        .await?;
     Ok(user)
 }
 
 pub async fn google_login(
-    session_client: &CosmosSessionClient,
+    session_client: &impl SessionClient,
+    auth_client: impl AuthClient<Credentials = GoogleUser>,
     current_user: &Option<User>,
     code: &str,
     origin: &str,
 ) -> Result<User, Error> {
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = "https://oauth2.googleapis.com/token".parse().unwrap();
-    let resp = client
-        .request(
-            Request::builder()
-                .method(Method::POST)
-                .uri(uri)
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .body(Body::from(format!(
-                    "code={}&client_id=1038220726403-n55jha2cvprd8kdb4akdfvo0uiok4p5u.apps.googleusercontent.com&client_secret={}&redirect_uri={}&grant_type=authorization_code",
-                    code,
-                    std::env::var("GOOGLE_SECRET").expect("GOOGLE_SECRET is missing"),
-                    origin
-                )))?,
-        )
-        .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let token: GoogleCredentials = serde_json::from_slice(&got)?;
-
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = "https://openidconnect.googleapis.com/v1/userinfo"
-        .parse()
-        .unwrap();
-    let resp = client
-        .request(
-            Request::builder()
-                .uri(uri)
-                .header("Authorization", format!("Bearer {}", token.access_token))
-                .body(Body::empty())?,
-        )
-        .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let google_user: GoogleUser = serde_json::from_slice(&got)?;
+    let google_user = auth_client.get_credentials(code, origin).await?;
 
     // Add Google identity to user if a session already exists
     if let Some(user) = &current_user {
@@ -206,7 +175,7 @@ pub async fn google_login(
                 "User doesn't exist for {id}"
             )))?
     } else {
-        User {
+        let user = User {
             id: Uuid::new_v4().to_hyphenated().to_string(),
             user_id: google_user
                 .email
@@ -220,16 +189,62 @@ pub async fn google_login(
             secret: generate_secret(),
             google_email: Some(google_user.email),
             spotify_credentials: None,
-        }
+        };
+        session_client
+            .write_document(DocumentWriter::Create(CreateDocumentBuilder {
+                collection_name: "users",
+                document: user.clone(),
+                is_upsert: true,
+            }))
+            .await?;
+        user
     };
-    session_client
-        .write_document(DocumentWriter::Create(CreateDocumentBuilder {
-            collection_name: "users",
-            document: user.clone(),
-            is_upsert: true,
-        }))
-        .await?;
     Ok(user)
+}
+
+pub struct GoogleClient;
+
+#[async_trait]
+impl AuthClient for GoogleClient {
+    type Credentials = GoogleUser;
+
+    async fn get_credentials(&self, code: &str, origin: &str) -> Result<Self::Credentials, Error> {
+        let https = HttpsConnector::new();
+        let client = Client::builder().build::<_, hyper::Body>(https);
+        let uri: Uri = "https://oauth2.googleapis.com/token".parse().unwrap();
+        let resp = client
+        .request(
+            Request::builder()
+                .method(Method::POST)
+                .uri(uri)
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .body(Body::from(format!(
+                    "code={}&client_id=1038220726403-n55jha2cvprd8kdb4akdfvo0uiok4p5u.apps.googleusercontent.com&client_secret={}&redirect_uri={}&grant_type=authorization_code",
+                    code,
+                    std::env::var("GOOGLE_SECRET").expect("GOOGLE_SECRET is missing"),
+                    origin
+                )))?,
+        )
+        .await?;
+        let got = hyper::body::to_bytes(resp.into_body()).await?;
+        let token: GoogleCredentials = serde_json::from_slice(&got)?;
+
+        let https = HttpsConnector::new();
+        let client = Client::builder().build::<_, hyper::Body>(https);
+        let uri: Uri = "https://openidconnect.googleapis.com/v1/userinfo"
+            .parse()
+            .unwrap();
+        let resp = client
+            .request(
+                Request::builder()
+                    .uri(uri)
+                    .header("Authorization", format!("Bearer {}", token.access_token))
+                    .body(Body::empty())?,
+            )
+            .await?;
+        let got = hyper::body::to_bytes(resp.into_body()).await?;
+        Ok(serde_json::from_slice(&got)?)
+    }
 }
 
 impl AuthUser<String> for User {
@@ -327,6 +342,7 @@ pub fn generate_secret() -> String {
 
 #[cfg(test)]
 mod test {
+    use super::GoogleUser;
     use crate::{
         cosmos::{
             CosmosParam, CosmosQuery, CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter,
@@ -337,7 +353,7 @@ mod test {
     use async_trait::async_trait;
     use azure_data_cosmos::prelude::CosmosEntity;
     use serde::{de::DeserializeOwned, Serialize};
-    use spotify::{Spotify, SpotifyCredentials};
+    use spotify::{AuthClient, SpotifyCredentials};
     use std::sync::{Arc, Mutex};
     use zeroflops::Error;
 
@@ -433,7 +449,9 @@ mod test {
     }
 
     #[async_trait]
-    impl Spotify for TestSpotify {
+    impl AuthClient for TestSpotify {
+        type Credentials = SpotifyCredentials;
+
         async fn get_credentials(&self, code: &str, _: &str) -> Result<SpotifyCredentials, Error> {
             assert_eq!(self.code, code);
             Ok(SpotifyCredentials {
@@ -446,13 +464,13 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_login_new_user() {
+    async fn test_spotify_login_new_user() {
         let client = TestSessionClient {
             get_mock: Mock::new(vec![r#"{"id":"","user_id":"","secret":""}"#]),
             query_mock: Mock::new(vec!["[]"]),
             write_mock: Mock::new(vec![()]),
         };
-        super::login(
+        super::spotify_login(
             &client,
             TestSpotify {
                 code: "test".to_owned(),
@@ -494,13 +512,13 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_login_existing_user() {
+    async fn test_spotify_login_existing_user() {
         let client = TestSessionClient {
             get_mock: Mock::new(vec![r#"{"id":"","user_id":"","secret":""}"#]),
             query_mock: Mock::new(vec![r#"[{"id":"user"}]"#]),
             write_mock: Mock::new(vec![(), ()]),
         };
-        super::login(
+        super::spotify_login(
             &client,
             TestSpotify {
                 code: "test".to_owned(),
@@ -539,11 +557,6 @@ mod test {
                 document_name: "".to_owned(),
                 partition_key: "".to_owned(),
                 document: r#"{"id":"","user_id":"","secret":"","spotify_credentials":{"user_id":"user","url":"","access_token":"test","refresh_token":""},"google_email":null}"#.to_owned(),
-            }),
-            DocumentWriter::Create(CreateDocumentBuilder {
-                collection_name: "users",
-                document: r#"{"id":"","user_id":"","secret":"","spotify_credentials":{"user_id":"user","url":"","access_token":"test","refresh_token":""},"google_email":null}"#.to_owned(),
-                is_upsert: true,
             })]
         );
     }
@@ -555,7 +568,7 @@ mod test {
             query_mock: Mock::empty(),
             write_mock: Mock::new(vec![()]),
         };
-        super::login(
+        super::spotify_login(
             &client,
             TestSpotify {
                 code: "test".to_owned(),
@@ -579,6 +592,150 @@ mod test {
                 document_name: "".to_owned(),
                 partition_key: "".to_owned(),
                 document: r#"{"id":"","user_id":"","secret":"","spotify_credentials":{"user_id":"user","url":"","access_token":"test","refresh_token":""},"google_email":null}"#.to_owned(),
+            })]
+        );
+    }
+
+    struct TestGoogle {
+        code: String,
+    }
+
+    #[async_trait]
+    impl AuthClient for TestGoogle {
+        type Credentials = GoogleUser;
+
+        async fn get_credentials(&self, code: &str, _: &str) -> Result<GoogleUser, Error> {
+            assert_eq!(self.code, code);
+            Ok(GoogleUser {
+                email: "user@gmail.com".to_owned(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_google_login_new_user() {
+        let client = TestSessionClient {
+            get_mock: Mock::new(vec![r#"{"id":"","user_id":"","secret":""}"#]),
+            query_mock: Mock::new(vec!["[]"]),
+            write_mock: Mock::new(vec![()]),
+        };
+        super::google_login(
+            &client,
+            TestGoogle {
+                code: "test".to_owned(),
+            },
+            &None,
+            "test",
+            "http://localhost:3000/api/login",
+        )
+        .await
+        .unwrap();
+        assert_eq!(*client.get_mock.call_args.lock().unwrap(), []);
+        assert_eq!(
+            *client.query_mock.call_args.lock().unwrap(),
+            [QueryDocumentsBuilder {
+                collection_name: "users",
+                query: CosmosQuery::with_params(
+                    "SELECT c.id FROM c WHERE c.google_email = @google_email".to_owned(),
+                    vec![CosmosParam::new(
+                        "@google_email".to_owned(),
+                        "user@gmail.com".to_owned()
+                    )],
+                ),
+                query_cross_partition: true,
+                parallelize_cross_partition_query: true,
+            }]
+        );
+        let write_mock =
+            Mutex::into_inner(Arc::into_inner(client.write_mock.call_args).unwrap()).unwrap();
+        let DocumentWriter::Create(builder) = &write_mock[0] else { unreachable!() };
+        let User { id, secret, .. } = serde_json::de::from_str(&builder.document).unwrap();
+        assert_eq!(
+            write_mock,
+            [DocumentWriter::Create(CreateDocumentBuilder {
+                collection_name: "users",
+                document: format!(
+                    r#"{{"id":"{id}","user_id":"user","secret":"{secret}","spotify_credentials":null,"google_email":"user@gmail.com"}}"#
+                ),
+                is_upsert: true,
+            })]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_google_login_existing_user() {
+        let client = TestSessionClient {
+            get_mock: Mock::new(vec![r#"{"id":"","user_id":"","secret":""}"#]),
+            query_mock: Mock::new(vec![r#"[{"id":"user"}]"#]),
+            write_mock: Mock::empty(),
+        };
+        super::google_login(
+            &client,
+            TestGoogle {
+                code: "test".to_owned(),
+            },
+            &None,
+            "test",
+            "http://localhost:3000/api/login",
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            *client.get_mock.call_args.lock().unwrap(),
+            [GetDocumentBuilder {
+                collection_name: "users",
+                document_name: "user".to_owned(),
+                partition_key: "user".to_owned(),
+            }],
+        );
+        assert_eq!(
+            *client.query_mock.call_args.lock().unwrap(),
+            [QueryDocumentsBuilder {
+                collection_name: "users",
+                query: CosmosQuery::with_params(
+                    "SELECT c.id FROM c WHERE c.google_email = @google_email".to_owned(),
+                    vec![CosmosParam::new(
+                        "@google_email".to_owned(),
+                        "user@gmail.com".to_owned()
+                    )],
+                ),
+                query_cross_partition: true,
+                parallelize_cross_partition_query: true,
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_login_add_google_credentials() {
+        let client = TestSessionClient {
+            get_mock: Mock::empty(),
+            query_mock: Mock::empty(),
+            write_mock: Mock::new(vec![()]),
+        };
+        super::google_login(
+            &client,
+            TestGoogle {
+                code: "test".to_owned(),
+            },
+            &Some(User {
+                user_id: String::new(),
+                id: String::new(),
+                secret: String::new(),
+                spotify_credentials: None,
+                google_email: None,
+            }),
+            "test",
+            "http://localhost:3000/api/login",
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            *client.write_mock.call_args.lock().unwrap(),
+            [DocumentWriter::Replace(ReplaceDocumentBuilder {
+                collection_name: "users",
+                document_name: "".to_owned(),
+                partition_key: "".to_owned(),
+                document: r#"{"id":"","user_id":"","secret":"","spotify_credentials":null,"google_email":"user@gmail.com"}"#.to_owned(),
             })]
         );
     }
