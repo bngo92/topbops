@@ -1,6 +1,6 @@
 use crate::cosmos::{
-    CosmosParam, CosmosQuery, CreateDocumentBuilder, DocumentWriter,
-    GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
+    CosmosParam, CosmosQuery, CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder,
+    QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
 };
 use ::spotify::{AuthClient, SpotifyCredentials};
 use async_trait::async_trait;
@@ -213,19 +213,19 @@ impl AuthClient for GoogleClient {
         let client = Client::builder().build::<_, hyper::Body>(https);
         let uri: Uri = "https://oauth2.googleapis.com/token".parse().unwrap();
         let resp = client
-        .request(
-            Request::builder()
-                .method(Method::POST)
-                .uri(uri)
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .body(Body::from(format!(
-                    "code={}&client_id=1038220726403-n55jha2cvprd8kdb4akdfvo0uiok4p5u.apps.googleusercontent.com&client_secret={}&redirect_uri={}&grant_type=authorization_code",
-                    code,
-                    std::env::var("GOOGLE_SECRET").expect("GOOGLE_SECRET is missing"),
-                    origin
-                )))?,
-        )
-        .await?;
+            .request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(uri)
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .body(Body::from(format!(
+                        "code={}&client_id=1038220726403-n55jha2cvprd8kdb4akdfvo0uiok4p5u.apps.googleusercontent.com&client_secret={}&redirect_uri={}&grant_type=authorization_code",
+                        code,
+                        std::env::var("GOOGLE_SECRET").expect("GOOGLE_SECRET is missing"),
+                        origin
+                    )))?,
+            )
+            .await?;
         let got = hyper::body::to_bytes(resp.into_body()).await?;
         let token: GoogleCredentials = serde_json::from_slice(&got)?;
 
