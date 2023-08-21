@@ -119,7 +119,7 @@ pub async fn spotify_login(
             .write_document(DocumentWriter::Create(CreateDocumentBuilder {
                 collection_name: "users",
                 document: user.clone(),
-                is_upsert: true,
+                is_upsert: false,
             }))
             .await?;
         user
@@ -194,7 +194,7 @@ pub async fn google_login(
             .write_document(DocumentWriter::Create(CreateDocumentBuilder {
                 collection_name: "users",
                 document: user.clone(),
-                is_upsert: true,
+                is_upsert: false,
             }))
             .await?;
         user
@@ -466,7 +466,7 @@ mod test {
     #[tokio::test]
     async fn test_spotify_login_new_user() {
         let client = TestSessionClient {
-            get_mock: Mock::new(vec![r#"{"id":"","user_id":"","secret":""}"#]),
+            get_mock: Mock::empty(),
             query_mock: Mock::new(vec!["[]"]),
             write_mock: Mock::new(vec![()]),
         };
@@ -481,7 +481,6 @@ mod test {
         )
         .await
         .unwrap();
-        assert_eq!(*client.get_mock.call_args.lock().unwrap(), []);
         assert_eq!(
             *client.query_mock.call_args.lock().unwrap(),
             [QueryDocumentsBuilder {
@@ -506,7 +505,7 @@ mod test {
                 document: format!(
                     r#"{{"id":"{id}","user_id":"user","secret":"{secret}","spotify_credentials":{{"user_id":"user","url":"","access_token":"test","refresh_token":""}},"google_email":null}}"#
                 ),
-                is_upsert: true,
+                is_upsert: false,
             })]
         );
     }
@@ -516,7 +515,7 @@ mod test {
         let client = TestSessionClient {
             get_mock: Mock::new(vec![r#"{"id":"","user_id":"","secret":""}"#]),
             query_mock: Mock::new(vec![r#"[{"id":"user"}]"#]),
-            write_mock: Mock::new(vec![(), ()]),
+            write_mock: Mock::new(vec![()]),
         };
         super::spotify_login(
             &client,
@@ -615,7 +614,7 @@ mod test {
     #[tokio::test]
     async fn test_google_login_new_user() {
         let client = TestSessionClient {
-            get_mock: Mock::new(vec![r#"{"id":"","user_id":"","secret":""}"#]),
+            get_mock: Mock::empty(),
             query_mock: Mock::new(vec!["[]"]),
             write_mock: Mock::new(vec![()]),
         };
@@ -630,7 +629,6 @@ mod test {
         )
         .await
         .unwrap();
-        assert_eq!(*client.get_mock.call_args.lock().unwrap(), []);
         assert_eq!(
             *client.query_mock.call_args.lock().unwrap(),
             [QueryDocumentsBuilder {
@@ -657,7 +655,7 @@ mod test {
                 document: format!(
                     r#"{{"id":"{id}","user_id":"user","secret":"{secret}","spotify_credentials":null,"google_email":"user@gmail.com"}}"#
                 ),
-                is_upsert: true,
+                is_upsert: false,
             })]
         );
     }
