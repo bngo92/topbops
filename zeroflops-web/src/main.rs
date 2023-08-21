@@ -125,7 +125,8 @@ async fn google_login_handler(
     {
         origin = format!("https://{}{}", host, original_uri.path());
     }
-    let user = user::google_login(&state.client, &auth.current_user, &params["code"], &origin).await?;
+    let user =
+        user::google_login(&state.client, &auth.current_user, &params["code"], &origin).await?;
     auth.login(&user).await.unwrap();
     Ok(Redirect::to("/"))
 }

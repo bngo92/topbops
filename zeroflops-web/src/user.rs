@@ -2,7 +2,7 @@ use crate::cosmos::{
     CosmosParam, CosmosQuery, CosmosSessionClient, CreateDocumentBuilder, DocumentWriter,
     GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
 };
-use ::spotify::Spotify;
+use ::spotify::{Spotify, SpotifyCredentials};
 use async_trait::async_trait;
 use axum_login::{
     axum_sessions::async_session::{Session, SessionStore},
@@ -31,14 +31,6 @@ pub struct User {
     pub google_email: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct SpotifyCredentials {
-    pub user_id: String,
-    pub url: String,
-    pub access_token: String,
-    pub refresh_token: String,
-}
-
 #[derive(Debug, Deserialize, Serialize)]
 pub struct GoogleCredentials {
     pub access_token: String,
@@ -64,21 +56,12 @@ pub async fn login(
     code: &str,
     origin: &str,
 ) -> Result<User, Error> {
-    let token = spotify.get_token(code, origin).await?;
-    let spotify_user = spotify.get_current_user(&token).await?;
-    let spotify_credentials = Some(SpotifyCredentials {
-        user_id: spotify_user.id.clone(),
-        url: spotify_user.external_urls["spotify"].clone(),
-        access_token: token.access_token,
-        refresh_token: token.refresh_token.ok_or(Error::internal_error(
-            "Spotify did not return refresh_token",
-        ))?,
-    });
+    let spotify_credentials = spotify.get_credentials(code, origin).await?;
 
     // Add Spotify identity to user if a session already exists
     if let Some(user) = &current_user {
         let mut user = user.clone();
-        user.spotify_credentials = spotify_credentials;
+        user.spotify_credentials = Some(spotify_credentials);
         session_client
             .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
                 collection_name: "users",
@@ -94,7 +77,7 @@ pub async fn login(
         String::from("SELECT c.id, c.secret FROM c WHERE c.spotify_credentials.user_id = @user_id"),
         [CosmosParam::new(
             String::from("@user_id"),
-            spotify_user.id.clone(),
+            spotify_credentials.user_id.clone(),
         )],
     );
     let mut results: Vec<HashMap<String, String>> = session_client
@@ -113,7 +96,7 @@ pub async fn login(
             .ok_or(Error::internal_error(format!(
                 "User doesn't exist for {id}"
             )))?;
-        user.spotify_credentials = spotify_credentials;
+        user.spotify_credentials = Some(spotify_credentials);
         session_client
             .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
                 collection_name: "users",
@@ -126,10 +109,10 @@ pub async fn login(
     } else {
         User {
             id: Uuid::new_v4().to_hyphenated().to_string(),
-            user_id: spotify_user.id,
+            user_id: spotify_credentials.user_id.clone(),
             secret: generate_secret(),
             google_email: None,
-            spotify_credentials,
+            spotify_credentials: Some(spotify_credentials),
         }
     };
     session_client
@@ -354,11 +337,8 @@ mod test {
     use async_trait::async_trait;
     use azure_data_cosmos::prelude::CosmosEntity;
     use serde::{de::DeserializeOwned, Serialize};
-    use spotify::{Spotify, Token};
-    use std::{
-        collections::HashMap,
-        sync::{Arc, Mutex},
-    };
+    use spotify::{Spotify, SpotifyCredentials};
+    use std::sync::{Arc, Mutex};
     use zeroflops::Error;
 
     struct TestSessionClient {
@@ -454,19 +434,13 @@ mod test {
 
     #[async_trait]
     impl Spotify for TestSpotify {
-        async fn get_token(&self, code: &str, _: &str) -> Result<Token, Error> {
+        async fn get_credentials(&self, code: &str, _: &str) -> Result<SpotifyCredentials, Error> {
             assert_eq!(self.code, code);
-            Ok(Token {
+            Ok(SpotifyCredentials {
+                user_id: "user".to_owned(),
+                url: String::new(),
                 access_token: code.to_owned(),
-                refresh_token: Some(String::new()),
-            })
-        }
-
-        async fn get_current_user(&self, token: &Token) -> Result<spotify::User, Error> {
-            assert_eq!(self.code, token.access_token);
-            Ok(spotify::User {
-                id: "user".to_owned(),
-                external_urls: HashMap::from([("spotify".to_owned(), String::new())]),
+                refresh_token: String::new(),
             })
         }
     }

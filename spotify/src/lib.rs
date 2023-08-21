@@ -17,17 +17,24 @@ pub struct User {
     pub external_urls: HashMap<String, String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SpotifyCredentials {
+    pub user_id: String,
+    pub url: String,
+    pub access_token: String,
+    pub refresh_token: String,
+}
+
 #[async_trait]
 pub trait Spotify {
-    async fn get_token(&self, code: &str, origin: &str) -> Result<Token, Error>;
-    async fn get_current_user(&self, token: &Token) -> Result<User, Error>;
+    async fn get_credentials(&self, code: &str, origin: &str) -> Result<SpotifyCredentials, Error>;
 }
 
 pub struct SpotifyClient;
 
 #[async_trait]
 impl Spotify for SpotifyClient {
-    async fn get_token(&self, code: &str, origin: &str) -> Result<Token, Error> {
+    async fn get_credentials(&self, code: &str, origin: &str) -> Result<SpotifyCredentials, Error> {
         let https = HttpsConnector::new();
         let client = Client::builder().build::<_, hyper::Body>(https);
         let uri: Uri = "https://accounts.spotify.com/api/token".parse().unwrap();
@@ -51,10 +58,8 @@ impl Spotify for SpotifyClient {
             )
             .await?;
         let got = hyper::body::to_bytes(resp.into_body()).await?;
-        Ok(serde_json::from_slice(&got)?)
-    }
+        let token: Token = serde_json::from_slice(&got)?;
 
-    async fn get_current_user(&self, token: &Token) -> Result<User, Error> {
         let https = HttpsConnector::new();
         let client = Client::builder().build::<_, hyper::Body>(https);
         let uri: Uri = "https://api.spotify.com/v1/me".parse().unwrap();
@@ -67,6 +72,14 @@ impl Spotify for SpotifyClient {
             )
             .await?;
         let got = hyper::body::to_bytes(resp.into_body()).await?;
-        Ok(serde_json::from_slice(&got)?)
+        let spotify_user: User = serde_json::from_slice(&got)?;
+        Ok(SpotifyCredentials {
+            user_id: spotify_user.id.clone(),
+            url: spotify_user.external_urls["spotify"].clone(),
+            access_token: token.access_token,
+            refresh_token: token.refresh_token.ok_or(Error::internal_error(
+                "Spotify did not return refresh_token",
+            ))?,
+        })
     }
 }
