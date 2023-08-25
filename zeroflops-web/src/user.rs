@@ -22,7 +22,14 @@ use std::collections::HashMap;
 use uuid::Uuid;
 use zeroflops::Error;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[async_trait]
+pub trait Auth {
+    fn current_user(&self) -> &Option<User>;
+    async fn login(&mut self, user: &User) -> Result<(), Error>;
+    async fn logout(&mut self);
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct User {
     pub id: String,
     pub user_id: String,
@@ -52,14 +59,14 @@ impl CosmosEntity for User {
 pub async fn spotify_login(
     session_client: &impl SessionClient,
     spotify: impl AuthClient<Credentials = SpotifyCredentials>,
-    current_user: &Option<User>,
+    auth: &mut impl Auth,
     code: &str,
     origin: &str,
-) -> Result<User, Error> {
+) -> Result<(), Error> {
     let spotify_credentials = spotify.get_credentials(code, origin).await?;
 
     // Add Spotify identity to user if a session already exists
-    if let Some(user) = &current_user {
+    if let Some(user) = &auth.current_user() {
         let mut user = user.clone();
         user.spotify_credentials = Some(spotify_credentials);
         session_client
@@ -70,7 +77,7 @@ pub async fn spotify_login(
                 document: user.clone(),
             }))
             .await?;
-        return Ok(user);
+        return Ok(());
     }
 
     let query = CosmosQuery::with_params(
@@ -124,20 +131,21 @@ pub async fn spotify_login(
             .await?;
         user
     };
-    Ok(user)
+    auth.login(&user).await.unwrap();
+    Ok(())
 }
 
 pub async fn google_login(
     session_client: &impl SessionClient,
     auth_client: impl AuthClient<Credentials = GoogleUser>,
-    current_user: &Option<User>,
+    auth: &mut impl Auth,
     code: &str,
     origin: &str,
-) -> Result<User, Error> {
+) -> Result<(), Error> {
     let google_user = auth_client.get_credentials(code, origin).await?;
 
     // Add Google identity to user if a session already exists
-    if let Some(user) = &current_user {
+    if let Some(user) = &auth.current_user() {
         let mut user = user.clone();
         user.google_email = Some(google_user.email);
         session_client
@@ -148,7 +156,7 @@ pub async fn google_login(
                 document: user.clone(),
             }))
             .await?;
-        return Ok(user);
+        return Ok(());
     }
 
     let query = CosmosQuery::with_params(
@@ -199,7 +207,8 @@ pub async fn google_login(
             .await?;
         user
     };
-    Ok(user)
+    auth.login(&user).await.unwrap();
+    Ok(())
 }
 
 pub struct GoogleClient;
@@ -342,13 +351,10 @@ pub fn generate_secret() -> String {
 
 #[cfg(test)]
 mod test {
-    use super::GoogleUser;
-    use crate::{
-        cosmos::{
-            CosmosParam, CosmosQuery, CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter,
-            GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
-        },
-        user::User,
+    use super::{Auth, GoogleUser, User};
+    use crate::cosmos::{
+        CosmosParam, CosmosQuery, CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter,
+        GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
     };
     use async_trait::async_trait;
     use azure_data_cosmos::prelude::CosmosEntity;
@@ -356,6 +362,46 @@ mod test {
     use spotify::{AuthClient, SpotifyCredentials};
     use std::sync::{Arc, Mutex};
     use zeroflops::Error;
+
+    struct TestAuth {
+        current_user: Option<User>,
+        expected_user: Option<User>,
+    }
+
+    impl TestAuth {
+        fn new(current_user: Option<User>) -> TestAuth {
+            TestAuth {
+                current_user,
+                expected_user: None,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Auth for TestAuth {
+        fn current_user(&self) -> &Option<User> {
+            &self.current_user
+        }
+
+        async fn login(&mut self, user: &User) -> Result<(), Error> {
+            self.expected_user = Some(user.clone());
+            Ok(())
+        }
+
+        async fn logout(&mut self) {}
+    }
+
+    impl User {
+        fn default() -> User {
+            User {
+                id: String::new(),
+                user_id: String::new(),
+                secret: String::new(),
+                spotify_credentials: None,
+                google_email: None,
+            }
+        }
+    }
 
     struct TestSessionClient {
         get_mock: Mock<GetDocumentBuilder, &'static str>,
@@ -470,12 +516,13 @@ mod test {
             query_mock: Mock::new(vec!["[]"]),
             write_mock: Mock::new(vec![()]),
         };
+        let mut auth = TestAuth::new(None);
         super::spotify_login(
             &client,
             TestSpotify {
                 code: "test".to_owned(),
             },
-            &None,
+            &mut auth,
             "test",
             "http://localhost:3000/api/login",
         )
@@ -508,6 +555,20 @@ mod test {
                 is_upsert: false,
             })]
         );
+        assert_eq!(
+            auth.expected_user,
+            Some(User {
+                user_id: "user".to_owned(),
+                spotify_credentials: Some(SpotifyCredentials {
+                    user_id: "user".to_owned(),
+                    url: String::new(),
+                    access_token: "test".to_owned(),
+                    refresh_token: String::new(),
+                }),
+                google_email: None,
+                ..auth.expected_user.clone().unwrap()
+            }),
+        );
     }
 
     #[tokio::test]
@@ -517,12 +578,13 @@ mod test {
             query_mock: Mock::new(vec![r#"[{"id":"user"}]"#]),
             write_mock: Mock::new(vec![()]),
         };
+        let mut auth = TestAuth::new(None);
         super::spotify_login(
             &client,
             TestSpotify {
                 code: "test".to_owned(),
             },
-            &None,
+            &mut auth,
             "test",
             "http://localhost:3000/api/login",
         )
@@ -558,6 +620,21 @@ mod test {
                 document: r#"{"id":"","user_id":"","secret":"","spotify_credentials":{"user_id":"user","url":"","access_token":"test","refresh_token":""},"google_email":null}"#.to_owned(),
             })]
         );
+        assert_eq!(
+            auth.expected_user,
+            Some(User {
+                id: String::new(),
+                user_id: String::new(),
+                secret: String::new(),
+                spotify_credentials: Some(SpotifyCredentials {
+                    user_id: "user".to_owned(),
+                    url: String::new(),
+                    access_token: "test".to_owned(),
+                    refresh_token: String::new(),
+                }),
+                google_email: None,
+            }),
+        );
     }
 
     #[tokio::test]
@@ -567,18 +644,16 @@ mod test {
             query_mock: Mock::empty(),
             write_mock: Mock::new(vec![()]),
         };
+        let mut auth = TestAuth {
+            current_user: Some(User::default()),
+            expected_user: None,
+        };
         super::spotify_login(
             &client,
             TestSpotify {
                 code: "test".to_owned(),
             },
-            &Some(User {
-                user_id: String::new(),
-                id: String::new(),
-                secret: String::new(),
-                spotify_credentials: None,
-                google_email: None,
-            }),
+            &mut auth,
             "test",
             "http://localhost:3000/api/login",
         )
@@ -593,6 +668,7 @@ mod test {
                 document: r#"{"id":"","user_id":"","secret":"","spotify_credentials":{"user_id":"user","url":"","access_token":"test","refresh_token":""},"google_email":null}"#.to_owned(),
             })]
         );
+        assert!(auth.expected_user.is_none());
     }
 
     struct TestGoogle {
@@ -618,12 +694,16 @@ mod test {
             query_mock: Mock::new(vec!["[]"]),
             write_mock: Mock::new(vec![()]),
         };
+        let mut auth = TestAuth {
+            current_user: None,
+            expected_user: Some(User::default()),
+        };
         super::google_login(
             &client,
             TestGoogle {
                 code: "test".to_owned(),
             },
-            &None,
+            &mut auth,
             "test",
             "http://localhost:3000/api/login",
         )
@@ -658,6 +738,15 @@ mod test {
                 is_upsert: false,
             })]
         );
+        assert_eq!(
+            auth.expected_user,
+            Some(User {
+                user_id: "user".to_owned(),
+                spotify_credentials: None,
+                google_email: Some("user@gmail.com".to_owned()),
+                ..auth.expected_user.clone().unwrap()
+            }),
+        );
     }
 
     #[tokio::test]
@@ -667,12 +756,16 @@ mod test {
             query_mock: Mock::new(vec![r#"[{"id":"user"}]"#]),
             write_mock: Mock::empty(),
         };
+        let mut auth = TestAuth {
+            current_user: None,
+            expected_user: Some(User::default()),
+        };
         super::google_login(
             &client,
             TestGoogle {
                 code: "test".to_owned(),
             },
-            &None,
+            &mut auth,
             "test",
             "http://localhost:3000/api/login",
         )
@@ -701,6 +794,7 @@ mod test {
                 parallelize_cross_partition_query: true,
             }]
         );
+        assert_eq!(auth.expected_user, Some(User::default()));
     }
 
     #[tokio::test]
@@ -710,18 +804,22 @@ mod test {
             query_mock: Mock::empty(),
             write_mock: Mock::new(vec![()]),
         };
-        super::google_login(
-            &client,
-            TestGoogle {
-                code: "test".to_owned(),
-            },
-            &Some(User {
+        let mut auth = TestAuth {
+            current_user: Some(User {
                 user_id: String::new(),
                 id: String::new(),
                 secret: String::new(),
                 spotify_credentials: None,
                 google_email: None,
             }),
+            expected_user: None,
+        };
+        super::google_login(
+            &client,
+            TestGoogle {
+                code: "test".to_owned(),
+            },
+            &mut auth,
             "test",
             "http://localhost:3000/api/login",
         )
@@ -736,5 +834,6 @@ mod test {
                 document: r#"{"id":"","user_id":"","secret":"","spotify_credentials":null,"google_email":"user@gmail.com"}"#.to_owned(),
             })]
         );
+        assert!(auth.expected_user.is_none());
     }
 }

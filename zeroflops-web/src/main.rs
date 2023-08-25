@@ -1,4 +1,5 @@
 use ::spotify::SpotifyClient;
+use async_trait::async_trait;
 use axum::{
     body::Bytes,
     extract::{Host, OriginalUri, Path, Query, State},
@@ -35,11 +36,12 @@ use zeroflops_web::{
     query, source,
     source::spotify,
     user,
-    user::{CosmosStore, GoogleClient, User},
+    user::{Auth, CosmosStore, GoogleClient, User},
     Item, UserId,
 };
 
 type AuthContext = axum_login::extractors::AuthContext<String, User, CosmosStore>;
+struct AuthWrapper(AuthContext);
 
 fn get_user_or_demo_user(auth: AuthContext) -> UserId {
     if let Some(user) = auth.current_user {
@@ -63,7 +65,7 @@ async fn login_handler(
     OriginalUri(original_uri): OriginalUri,
     State(state): State<Arc<AppState>>,
     Query(params): Query<HashMap<String, String>>,
-    mut auth: AuthContext,
+    auth: AuthContext,
     Host(host): Host,
 ) -> Result<impl IntoResponse, Response> {
     let origin;
@@ -75,15 +77,14 @@ async fn login_handler(
     {
         origin = format!("https://{}{}", host, original_uri.path());
     }
-    let user = user::spotify_login(
+    user::spotify_login(
         &state.client,
         SpotifyClient,
-        &auth.current_user,
+        &mut AuthWrapper(auth),
         &params["code"],
         &origin,
     )
     .await?;
-    auth.login(&user).await.unwrap();
     Ok(Redirect::to("/"))
 }
 
@@ -113,7 +114,7 @@ async fn google_login_handler(
     OriginalUri(original_uri): OriginalUri,
     State(state): State<Arc<AppState>>,
     Query(params): Query<HashMap<String, String>>,
-    mut auth: AuthContext,
+    auth: AuthContext,
     Host(host): Host,
 ) -> Result<impl IntoResponse, Response> {
     let origin;
@@ -125,16 +126,31 @@ async fn google_login_handler(
     {
         origin = format!("https://{}{}", host, original_uri.path());
     }
-    let user = user::google_login(
+    user::google_login(
         &state.client,
         GoogleClient,
-        &auth.current_user,
+        &mut AuthWrapper(auth),
         &params["code"],
         &origin,
     )
     .await?;
-    auth.login(&user).await.unwrap();
     Ok(Redirect::to("/"))
+}
+
+#[async_trait]
+impl Auth for AuthWrapper {
+    fn current_user(&self) -> &Option<User> {
+        &self.0.current_user
+    }
+
+    async fn login(&mut self, user: &User) -> Result<(), Error> {
+        self.0.login(user).await.unwrap();
+        Ok(())
+    }
+
+    async fn logout(&mut self) {
+        self.0.logout().await
+    }
 }
 
 async fn get_lists(

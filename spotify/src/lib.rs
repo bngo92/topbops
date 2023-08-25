@@ -17,7 +17,7 @@ pub struct User {
     pub external_urls: HashMap<String, String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SpotifyCredentials {
     pub user_id: String,
     pub url: String,
