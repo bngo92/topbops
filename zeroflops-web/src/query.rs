@@ -1,4 +1,8 @@
-use crate::{UserId, ITEM_FIELDS};
+use crate::{
+    cosmos::{CosmosParam, CosmosQuery, CosmosSessionClient, QueryDocumentsBuilder, SessionClient},
+    UserId, ITEM_FIELDS,
+};
+use serde_json::{Map, Value};
 use sqlparser::{
     ast::{
         BinaryOperator, Expr, FunctionArg, FunctionArgExpr, Ident, Query, SelectItem, SetExpr,
@@ -8,9 +12,101 @@ use sqlparser::{
     parser::Parser,
 };
 use std::collections::{HashMap, VecDeque};
-use zeroflops::{Error, ItemMetadata, List, ListMode};
+use zeroflops::{Error, ItemMetadata, ItemQuery, List, ListMode};
 
-pub fn rewrite_list_query<'a>(
+pub async fn get_list_query(
+    client: &impl SessionClient,
+    user_id: &UserId,
+    list: List,
+) -> Result<ItemQuery, Error> {
+    if list.items.is_empty() {
+        Ok(ItemQuery {
+            fields: Vec::new(),
+            items: Vec::new(),
+        })
+    } else {
+        let (query, fields, map, ids) = rewrite_list_query(&list, user_id)?;
+        let mut items: Vec<_> = client
+            .query_documents(QueryDocumentsBuilder::new(
+                "items",
+                CosmosQuery::new(query.to_string()),
+            ))
+            .await
+            .map_err(Error::from)?;
+        // Use list item order if an ordering wasn't provided
+        if query.order_by.is_empty() {
+            let mut item_metadata: HashMap<_, _> = items
+                .into_iter()
+                .map(|r: Map<String, Value>| (r["id"].to_string(), r))
+                .collect();
+            items = ids
+                .into_iter()
+                .filter_map(|id| item_metadata.remove(&id))
+                .collect();
+        };
+        Ok(ItemQuery {
+            fields,
+            items: items
+                .into_iter()
+                .map(|r| {
+                    let mut iter = r.values();
+                    let metadata = if map.is_empty() {
+                        None
+                    } else {
+                        Some(map[iter.next_back().unwrap().as_str().unwrap()].clone())
+                    };
+                    zeroflops::Item {
+                        values: iter.map(format_value).collect(),
+                        metadata,
+                    }
+                })
+                .collect(),
+        })
+    }
+}
+
+fn format_value(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.to_owned(),
+        Value::Number(n) => n.to_string(),
+        Value::Null => Value::Null.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Array(a) => a.iter().map(format_value).collect::<Vec<_>>().join(", "),
+        _ => todo!(),
+    }
+}
+
+pub async fn get_list_items(
+    client: &CosmosSessionClient,
+    user_id: &UserId,
+    list: List,
+) -> Result<Vec<Map<String, Value>>, Error> {
+    let query = if let ListMode::View = &list.mode {
+        rewrite_query(&list.query, user_id)?.0.to_string()
+    } else if list.items.is_empty() {
+        return Ok(Vec::new());
+    } else {
+        String::from("SELECT c.id, c.type, c.name, c.rating, c.user_score, c.user_wins, c.user_losses, c.hidden, c.metadata FROM c WHERE c.user_id = @user_id AND ARRAY_CONTAINS(@ids, c.id)")
+    };
+    client
+        .query_documents(QueryDocumentsBuilder::new(
+            "items",
+            CosmosQuery::with_params(
+                query,
+                [
+                    CosmosParam::new(String::from("@user_id"), user_id.0.clone()),
+                    CosmosParam::new(
+                        String::from("@ids"),
+                        list.items.iter().map(|i| i.id.clone()).collect::<Vec<_>>(),
+                    ),
+                ],
+            ),
+        ))
+        .await
+        .map_err(Error::from)
+}
+
+fn rewrite_list_query<'a>(
     list: &'a List,
     user_id: &UserId,
 ) -> Result<
@@ -196,10 +292,207 @@ fn rewrite_identifier(id: Ident) -> Expr {
 }
 
 #[cfg(test)]
-mod test {
-    use crate::UserId;
+pub mod test {
+    use crate::{
+        cosmos::{
+            CosmosQuery, DocumentWriter, GetDocumentBuilder, QueryDocumentsBuilder, SessionClient,
+        },
+        UserId,
+    };
+    use async_trait::async_trait;
+    use azure_data_cosmos::CosmosEntity;
+    use serde::{de::DeserializeOwned, Serialize};
     use sqlparser::ast::Query;
-    use zeroflops::Error;
+    use std::sync::{Arc, Mutex};
+    use zeroflops::{Error, Item, ItemMetadata, ItemQuery, List, ListMode};
+
+    pub struct Mock<T, U> {
+        pub call_args: Arc<Mutex<Vec<T>>>,
+        side_effect: Vec<U>,
+    }
+
+    impl<T, U> Mock<T, U> {
+        pub fn new(side_effect: Vec<U>) -> Mock<T, U> {
+            Mock {
+                call_args: Arc::new(Mutex::new(Vec::new())),
+                side_effect,
+            }
+        }
+
+        pub fn empty() -> Mock<T, U> {
+            Mock {
+                call_args: Arc::new(Mutex::new(Vec::new())),
+                side_effect: Vec::new(),
+            }
+        }
+    }
+
+    impl<T, U: Clone> Mock<T, U> {
+        pub fn call(&self, arg: T) -> U {
+            let mut call_args = self.call_args.lock().unwrap();
+            let value = self.side_effect[call_args.len()].clone();
+            call_args.push(arg);
+            value
+        }
+    }
+
+    struct TestSessionClient {
+        query_mock: Mock<QueryDocumentsBuilder, &'static str>,
+    }
+
+    #[async_trait]
+    impl SessionClient for TestSessionClient {
+        async fn get_document<T>(&self, _: GetDocumentBuilder) -> Result<Option<T>, Error>
+        where
+            T: DeserializeOwned + Send + Sync,
+        {
+            unimplemented!()
+        }
+
+        async fn query_documents<T>(&self, builder: QueryDocumentsBuilder) -> Result<Vec<T>, Error>
+        where
+            T: DeserializeOwned + Send + Sync,
+        {
+            let value = self.query_mock.call(builder);
+            Ok(serde_json::de::from_str(value).unwrap())
+        }
+
+        /// CosmosDB creates new session tokens after writes
+        async fn write_document<T>(
+            &self,
+            _: DocumentWriter<T>,
+        ) -> Result<(), azure_core::error::Error>
+        where
+            T: Serialize + CosmosEntity + Send + 'static,
+        {
+            unimplemented!()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_empty_list_query() {
+        let list = List {
+            id: String::new(),
+            user_id: String::new(),
+            mode: ListMode::User(None),
+            name: String::new(),
+            sources: Vec::new(),
+            iframe: None,
+            items: Vec::new(),
+            favorite: false,
+            query: String::from("SELECT name, user_score FROM c"),
+        };
+        assert_eq!(
+            super::get_list_query(
+                &TestSessionClient {
+                    query_mock: Mock::empty(),
+                },
+                &UserId(String::new()),
+                list,
+            )
+            .await
+            .unwrap(),
+            ItemQuery {
+                fields: Vec::new(),
+                items: Vec::new()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_list_empty_query() {
+        let list = List {
+            id: String::new(),
+            user_id: String::new(),
+            mode: ListMode::User(None),
+            name: String::new(),
+            sources: Vec::new(),
+            iframe: None,
+            items: vec![ItemMetadata {
+                id: "id".to_owned(),
+                name: String::new(),
+                iframe: None,
+                score: 0,
+                wins: 0,
+                losses: 0,
+                rank: None,
+            }],
+            favorite: false,
+            query: String::from("SELECT name, user_score FROM c"),
+        };
+        let client = TestSessionClient {
+            query_mock: Mock::new(vec![r#"[{"name":"test","user_score":0,"id":"id"}]"#]),
+        };
+        assert_eq!(
+            super::get_list_query(&client, &UserId(String::new()), list)
+                .await
+                .unwrap(),
+            ItemQuery {
+                fields: vec!["name".to_owned(), "user_score".to_owned()],
+                items: vec![Item {
+                    values: vec!["test".to_owned(), "0".to_owned()],
+                    metadata: Some(ItemMetadata {
+                        id: "id".to_owned(),
+                        name: "".to_owned(),
+                        iframe: None,
+                        score: 0,
+                        wins: 0,
+                        losses: 0,
+                        rank: None
+                    })
+                }]
+            }
+        );
+        assert_eq!(
+            *client.query_mock.call_args.lock().unwrap(),
+            [QueryDocumentsBuilder::new(
+                "items",
+                CosmosQuery::new("SELECT c.name, c.user_score, c.id FROM c WHERE c.user_id = \"\" AND c.id IN (\"\")".to_owned())
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_list_query() {
+        let list = List {
+            id: String::new(),
+            user_id: String::new(),
+            mode: ListMode::User(None),
+            name: String::new(),
+            sources: Vec::new(),
+            iframe: None,
+            items: vec![ItemMetadata {
+                id: String::new(),
+                name: String::new(),
+                iframe: None,
+                score: 0,
+                wins: 0,
+                losses: 0,
+                rank: None,
+            }],
+            favorite: false,
+            query: String::from("SELECT name, user_score FROM c"),
+        };
+        let client = TestSessionClient {
+            query_mock: Mock::new(vec!["[]"]),
+        };
+        assert_eq!(
+            super::get_list_query(&client, &UserId(String::new()), list,)
+                .await
+                .unwrap(),
+            ItemQuery {
+                fields: vec!["name".to_owned(), "user_score".to_owned()],
+                items: Vec::new()
+            }
+        );
+        assert_eq!(
+            *client.query_mock.call_args.lock().unwrap(),
+            [QueryDocumentsBuilder::new(
+                "items",
+                CosmosQuery::new("SELECT c.name, c.user_score, c.id FROM c WHERE c.user_id = \"\" AND c.id IN (\"\")".to_owned())
+            )]
+        );
+    }
 
     fn rewrite_query(query: &str) -> Result<(Query, Vec<String>), Error> {
         super::rewrite_query(query, &UserId(String::from("demo")))

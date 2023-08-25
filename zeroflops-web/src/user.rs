@@ -352,9 +352,12 @@ pub fn generate_secret() -> String {
 #[cfg(test)]
 mod test {
     use super::{Auth, GoogleUser, User};
-    use crate::cosmos::{
-        CosmosParam, CosmosQuery, CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter,
-        GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
+    use crate::{
+        cosmos::{
+            CosmosParam, CosmosQuery, CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter,
+            GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
+        },
+        query::test::Mock,
     };
     use async_trait::async_trait;
     use azure_data_cosmos::prelude::CosmosEntity;
@@ -457,36 +460,6 @@ mod test {
             };
             self.write_mock.call(builder);
             Ok(())
-        }
-    }
-
-    struct Mock<T, U> {
-        call_args: Arc<Mutex<Vec<T>>>,
-        side_effect: Vec<U>,
-    }
-
-    impl<T, U> Mock<T, U> {
-        fn new(side_effect: Vec<U>) -> Mock<T, U> {
-            Mock {
-                call_args: Arc::new(Mutex::new(Vec::new())),
-                side_effect,
-            }
-        }
-
-        fn empty() -> Mock<T, U> {
-            Mock {
-                call_args: Arc::new(Mutex::new(Vec::new())),
-                side_effect: Vec::new(),
-            }
-        }
-    }
-
-    impl<T, U: Clone> Mock<T, U> {
-        fn call(&self, arg: T) -> U {
-            let mut call_args = self.call_args.lock().unwrap();
-            let value = self.side_effect[call_args.len()].clone();
-            call_args.push(arg);
-            value
         }
     }
 

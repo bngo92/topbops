@@ -197,59 +197,8 @@ async fn get_list_query(
     let user_id = get_user_or_demo_user(auth);
     let list = source::get_list(&state.client, &user_id, &id).await?;
     Ok(Json(
-        get_list_query_impl(&state.client, &user_id, list).await?,
+        query::get_list_query(&state.client, &user_id, list).await?,
     ))
-}
-
-async fn get_list_query_impl(
-    client: &CosmosSessionClient,
-    user_id: &UserId,
-    list: List,
-) -> Result<ItemQuery, Error> {
-    if list.items.is_empty() {
-        Ok(ItemQuery {
-            fields: Vec::new(),
-            items: Vec::new(),
-        })
-    } else {
-        let (query, fields, map, ids) = query::rewrite_list_query(&list, user_id)?;
-        let mut items: Vec<_> = client
-            .query_documents(QueryDocumentsBuilder::new(
-                "items",
-                CosmosQuery::new(query.to_string()),
-            ))
-            .await
-            .map_err(Error::from)?;
-        // Use list item order if an ordering wasn't provided
-        if query.order_by.is_empty() {
-            let mut item_metadata: HashMap<_, _> = items
-                .into_iter()
-                .map(|r: Map<String, Value>| (r["id"].to_string(), r))
-                .collect();
-            items = ids
-                .into_iter()
-                .filter_map(|id| item_metadata.remove(&id))
-                .collect();
-        };
-        Ok(ItemQuery {
-            fields,
-            items: items
-                .into_iter()
-                .map(|r| {
-                    let mut iter = r.values();
-                    let metadata = if map.is_empty() {
-                        None
-                    } else {
-                        Some(map[iter.next_back().unwrap().as_str().unwrap()].clone())
-                    };
-                    zeroflops::Item {
-                        values: iter.map(format_value).collect(),
-                        metadata,
-                    }
-                })
-                .collect(),
-        })
-    }
 }
 
 async fn get_list_items(
@@ -260,49 +209,8 @@ async fn get_list_items(
     let user_id = get_user_or_demo_user(auth);
     let list = source::get_list(&state.client, &user_id, &id).await?;
     Ok(Json(
-        get_list_items_impl(&state.client, &user_id, list).await?,
+        query::get_list_items(&state.client, &user_id, list).await?,
     ))
-}
-
-async fn get_list_items_impl(
-    client: &CosmosSessionClient,
-    user_id: &UserId,
-    list: List,
-) -> Result<Vec<Map<String, Value>>, Error> {
-    let query = if let ListMode::View = &list.mode {
-        query::rewrite_query(&list.query, user_id)?.0.to_string()
-    } else if list.items.is_empty() {
-        return Ok(Vec::new());
-    } else {
-        String::from("SELECT c.id, c.type, c.name, c.rating, c.user_score, c.user_wins, c.user_losses, c.hidden, c.metadata FROM c WHERE c.user_id = @user_id AND ARRAY_CONTAINS(@ids, c.id)")
-    };
-    client
-        .query_documents(QueryDocumentsBuilder::new(
-            "items",
-            CosmosQuery::with_params(
-                query,
-                [
-                    CosmosParam::new(String::from("@user_id"), user_id.0.clone()),
-                    CosmosParam::new(
-                        String::from("@ids"),
-                        list.items.iter().map(|i| i.id.clone()).collect::<Vec<_>>(),
-                    ),
-                ],
-            ),
-        ))
-        .await
-        .map_err(Error::from)
-}
-
-fn format_value(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.to_owned(),
-        Value::Number(n) => n.to_string(),
-        Value::Null => Value::Null.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Array(a) => a.iter().map(format_value).collect::<Vec<_>>().join(", "),
-        _ => todo!(),
-    }
 }
 
 async fn create_list(
@@ -539,7 +447,6 @@ async fn handle_stats_update(
 async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<StatusCode, Error> {
     let user_id = UserId(user.user_id.clone());
     let mut list = source::get_list(&state.client, &user_id, id).await?;
-    // TODO: create new playlist if one doesn't exist
     let (_, external_id) = list.get_unique_source()?;
     let access_token = spotify::get_access_token(&state.client, user).await?;
     let external_id = if let Some(external_id) = external_id {
@@ -555,7 +462,7 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
         update_list_doc(&state.client, &user_id, list.clone()).await?;
         id.id
     };
-    let ids: Vec<_> = get_list_query_impl(&state.client, &user_id, list)
+    let ids: Vec<_> = query::get_list_query(&state.client, &user_id, list)
         .await?
         .items
         .into_iter()
