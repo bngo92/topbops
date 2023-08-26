@@ -447,7 +447,7 @@ pub mod test {
             *client.query_mock.call_args.lock().unwrap(),
             [QueryDocumentsBuilder::new(
                 "items",
-                CosmosQuery::new("SELECT c.name, c.user_score, c.id FROM c WHERE c.user_id = \"\" AND c.id IN (\"\")".to_owned())
+                CosmosQuery::new("SELECT c.name, c.user_score, c.id FROM c WHERE c.user_id = \"\" AND c.id IN (\"id\")".to_owned())
             )]
         );
     }
