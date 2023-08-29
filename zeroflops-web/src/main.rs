@@ -237,62 +237,15 @@ async fn update_list(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     auth: AuthContext,
-    Json(mut list): Json<List>,
+    Json(list): Json<List>,
 ) -> Result<StatusCode, Response> {
     let user = require_user(auth)?;
     let user_id = UserId(user.user_id);
-    let user_id = &user_id;
-    let client = &state.client;
-    let current_list = source::get_list(client, user_id, &id).await?;
-    // Avoid updating sources if they haven't changed
-    // TODO: we should also check the snapshot ID
-    if current_list
-        .sources
-        .iter()
-        .map(|s| &s.source_type)
-        .ne(list.sources.iter().map(|s| &s.source_type))
-    {
-        list.items.clear();
-        let sources = list.sources;
-        list.sources = Vec::with_capacity(sources.len());
-        for (source, items) in futures::stream::iter(
-            sources
-                .into_iter()
-                .map(|source| source::get_source_and_items(&state.client, user_id, source)),
-        )
-        .buffered(5)
-        .try_collect::<Vec<_>>()
-        .await?
-        {
-            list.sources.push(source);
-            list.items.extend(items);
-        }
+    if list.id != id {
+        return Err(Error::client_error("list id doesn't match").into());
     }
-    if let Ok((Some("spotify"), Some(external_id))) = list.get_unique_source() {
-        list.iframe = Some(format!(
-            "https://open.spotify.com/embed/playlist/{}?utm_source=generator",
-            external_id.id
-        ));
-    }
-    update_list_doc(&state.client, user_id, list).await?;
+    source::update_list_items(&state.client, &user_id, list).await?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-async fn update_list_doc(
-    client: &CosmosSessionClient,
-    user_id: &UserId,
-    list: List,
-) -> Result<(), Error> {
-    client
-        .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
-            collection_name: "lists",
-            document_name: list.id.clone(),
-            partition_key: user_id.0.clone(),
-            document: list,
-        }))
-        .await
-        .map_err(Error::from)?;
-    Ok(())
 }
 
 /// Does not delete items
@@ -459,7 +412,7 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
             raw_id: playlist.external_urls.remove("spotify").unwrap(),
         };
         list.mode = ListMode::User(Some(id.clone()));
-        update_list_doc(&state.client, &user_id, list.clone()).await?;
+        source::update_list(&state.client, &user_id, list.clone()).await?;
         id.id
     };
     let ids: Vec<_> = query::get_list_query(&state.client, &user_id, list)

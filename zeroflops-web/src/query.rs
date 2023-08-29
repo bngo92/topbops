@@ -295,7 +295,8 @@ fn rewrite_identifier(id: Ident) -> Expr {
 pub mod test {
     use crate::{
         cosmos::{
-            CosmosQuery, DocumentWriter, GetDocumentBuilder, QueryDocumentsBuilder, SessionClient,
+            CosmosQuery, CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter,
+            GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
         },
         UserId,
     };
@@ -336,17 +337,20 @@ pub mod test {
         }
     }
 
-    struct TestSessionClient {
-        query_mock: Mock<QueryDocumentsBuilder, &'static str>,
+    pub struct TestSessionClient {
+        pub get_mock: Mock<GetDocumentBuilder, &'static str>,
+        pub query_mock: Mock<QueryDocumentsBuilder, &'static str>,
+        pub write_mock: Mock<DocumentWriter<String>, ()>,
     }
 
     #[async_trait]
     impl SessionClient for TestSessionClient {
-        async fn get_document<T>(&self, _: GetDocumentBuilder) -> Result<Option<T>, Error>
+        async fn get_document<T>(&self, builder: GetDocumentBuilder) -> Result<Option<T>, Error>
         where
             T: DeserializeOwned + Send + Sync,
         {
-            unimplemented!()
+            let value = self.get_mock.call(builder);
+            Ok(serde_json::de::from_str(value).unwrap())
         }
 
         async fn query_documents<T>(&self, builder: QueryDocumentsBuilder) -> Result<Vec<T>, Error>
@@ -360,12 +364,33 @@ pub mod test {
         /// CosmosDB creates new session tokens after writes
         async fn write_document<T>(
             &self,
-            _: DocumentWriter<T>,
+            builder: DocumentWriter<T>,
         ) -> Result<(), azure_core::error::Error>
         where
             T: Serialize + CosmosEntity + Send + 'static,
         {
-            unimplemented!()
+            let builder = match builder {
+                DocumentWriter::Create(builder) => DocumentWriter::Create(CreateDocumentBuilder {
+                    collection_name: builder.collection_name,
+                    document: serde_json::to_string(&builder.document).unwrap(),
+                    is_upsert: builder.is_upsert,
+                }),
+                DocumentWriter::Replace(builder) => {
+                    DocumentWriter::Replace(ReplaceDocumentBuilder {
+                        collection_name: builder.collection_name,
+                        document_name: builder.document_name,
+                        partition_key: builder.partition_key,
+                        document: serde_json::to_string(&builder.document).unwrap(),
+                    })
+                }
+                DocumentWriter::Delete(builder) => DocumentWriter::Delete(DeleteDocumentBuilder {
+                    collection_name: builder.collection_name,
+                    document_name: builder.document_name,
+                    partition_key: builder.partition_key,
+                }),
+            };
+            self.write_mock.call(builder);
+            Ok(())
         }
     }
 
@@ -385,7 +410,9 @@ pub mod test {
         assert_eq!(
             super::get_list_query(
                 &TestSessionClient {
+                    get_mock: Mock::empty(),
                     query_mock: Mock::empty(),
+                    write_mock: Mock::empty(),
                 },
                 &UserId(String::new()),
                 list,
@@ -421,7 +448,9 @@ pub mod test {
             query: String::from("SELECT name, user_score FROM c"),
         };
         let client = TestSessionClient {
+            get_mock: Mock::empty(),
             query_mock: Mock::new(vec![r#"[{"name":"test","user_score":0,"id":"id"}]"#]),
+            write_mock: Mock::empty(),
         };
         assert_eq!(
             super::get_list_query(&client, &UserId(String::new()), list)
@@ -474,7 +503,9 @@ pub mod test {
             query: String::from("SELECT name, user_score FROM c"),
         };
         let client = TestSessionClient {
-            query_mock: Mock::new(vec!["[]"]),
+            get_mock: Mock::empty(),
+            query_mock: Mock::new(vec![r#"[{"name":"test","user_score":0,"id":"id"}]"#]),
+            write_mock: Mock::empty(),
         };
         assert_eq!(
             super::get_list_query(&client, &UserId(String::new()), list,)

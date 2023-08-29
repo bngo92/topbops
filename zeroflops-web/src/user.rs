@@ -354,14 +354,12 @@ mod test {
     use super::{Auth, GoogleUser, User};
     use crate::{
         cosmos::{
-            CosmosParam, CosmosQuery, CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter,
-            GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
+            CosmosParam, CosmosQuery, CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder,
+            QueryDocumentsBuilder, ReplaceDocumentBuilder,
         },
-        query::test::Mock,
+        query::test::{Mock, TestSessionClient},
     };
     use async_trait::async_trait;
-    use azure_data_cosmos::prelude::CosmosEntity;
-    use serde::{de::DeserializeOwned, Serialize};
     use spotify::{AuthClient, SpotifyCredentials};
     use std::sync::{Arc, Mutex};
     use zeroflops::Error;
@@ -403,63 +401,6 @@ mod test {
                 spotify_credentials: None,
                 google_email: None,
             }
-        }
-    }
-
-    struct TestSessionClient {
-        get_mock: Mock<GetDocumentBuilder, &'static str>,
-        query_mock: Mock<QueryDocumentsBuilder, &'static str>,
-        write_mock: Mock<DocumentWriter<String>, ()>,
-    }
-
-    #[async_trait]
-    impl SessionClient for TestSessionClient {
-        async fn get_document<T>(&self, builder: GetDocumentBuilder) -> Result<Option<T>, Error>
-        where
-            T: DeserializeOwned + Send + Sync,
-        {
-            let value = self.get_mock.call(builder);
-            Ok(serde_json::de::from_str(value).unwrap())
-        }
-
-        async fn query_documents<T>(&self, builder: QueryDocumentsBuilder) -> Result<Vec<T>, Error>
-        where
-            T: DeserializeOwned + Send + Sync,
-        {
-            let value = self.query_mock.call(builder);
-            Ok(serde_json::de::from_str(value).unwrap())
-        }
-
-        /// CosmosDB creates new session tokens after writes
-        async fn write_document<T>(
-            &self,
-            builder: DocumentWriter<T>,
-        ) -> Result<(), azure_core::error::Error>
-        where
-            T: Serialize + CosmosEntity + Send + 'static,
-        {
-            let builder = match builder {
-                DocumentWriter::Create(builder) => DocumentWriter::Create(CreateDocumentBuilder {
-                    collection_name: builder.collection_name,
-                    document: serde_json::to_string(&builder.document).unwrap(),
-                    is_upsert: builder.is_upsert,
-                }),
-                DocumentWriter::Replace(builder) => {
-                    DocumentWriter::Replace(ReplaceDocumentBuilder {
-                        collection_name: builder.collection_name,
-                        document_name: builder.document_name,
-                        partition_key: builder.partition_key,
-                        document: serde_json::to_string(&builder.document).unwrap(),
-                    })
-                }
-                DocumentWriter::Delete(builder) => DocumentWriter::Delete(DeleteDocumentBuilder {
-                    collection_name: builder.collection_name,
-                    document_name: builder.document_name,
-                    partition_key: builder.partition_key,
-                }),
-            };
-            self.write_mock.call(builder);
-            Ok(())
         }
     }
 

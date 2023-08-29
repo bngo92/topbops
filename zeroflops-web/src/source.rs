@@ -1,6 +1,6 @@
 use crate::{
     cosmos::{
-        CosmosSessionClient, CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder,
+        CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder, ReplaceDocumentBuilder,
         SessionClient,
     },
     UserId,
@@ -12,8 +12,64 @@ use zeroflops::{Error, ItemMetadata, List, Source, SourceType, Spotify};
 pub mod setlist;
 pub mod spotify;
 
-pub async fn get_source_and_items(
-    client: &CosmosSessionClient,
+pub async fn update_list_items(
+    client: &impl SessionClient,
+    user_id: &UserId,
+    mut list: List,
+) -> Result<(), Error> {
+    let current_list = get_list(client, user_id, &list.id).await?;
+    // Avoid updating sources if they haven't changed
+    // TODO: we should also check the snapshot ID
+    if current_list
+        .sources
+        .iter()
+        .map(|s| &s.source_type)
+        .ne(list.sources.iter().map(|s| &s.source_type))
+    {
+        list.items.clear();
+        let sources = list.sources;
+        list.sources = Vec::with_capacity(sources.len());
+        for (source, items) in futures::stream::iter(
+            sources
+                .into_iter()
+                .map(|source| get_source_and_items(client, user_id, source)),
+        )
+        .buffered(5)
+        .try_collect::<Vec<_>>()
+        .await?
+        {
+            list.sources.push(source);
+            list.items.extend(items);
+        }
+    }
+    if let Ok((Some("spotify"), Some(external_id))) = list.get_unique_source() {
+        list.iframe = Some(format!(
+            "https://open.spotify.com/embed/playlist/{}?utm_source=generator",
+            external_id.id
+        ));
+    }
+    update_list(client, user_id, list).await?;
+    Ok(())
+}
+
+pub async fn update_list(
+    client: &impl SessionClient,
+    user_id: &UserId,
+    list: List,
+) -> Result<(), Error> {
+    client
+        .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
+            collection_name: "lists",
+            document_name: list.id.clone(),
+            partition_key: user_id.0.clone(),
+            document: list,
+        }))
+        .await
+        .map_err(Error::from)
+}
+
+async fn get_source_and_items(
+    client: &impl SessionClient,
     user_id: &UserId,
     mut source: Source,
 ) -> Result<(Source, Vec<ItemMetadata>), Error> {
@@ -84,7 +140,7 @@ fn new_custom_item(
 }
 
 pub async fn get_list(
-    client: &CosmosSessionClient,
+    client: &impl SessionClient,
     user_id: &UserId,
     id: &str,
 ) -> Result<List, Error> {
@@ -103,7 +159,7 @@ pub async fn get_list(
 }
 
 pub async fn create_items(
-    client: &CosmosSessionClient,
+    client: &impl SessionClient,
     items: Vec<super::Item>,
     is_upsert: bool,
 ) -> Result<(), Error> {
@@ -130,4 +186,133 @@ pub async fn create_items(
     .try_collect()
     .await
     .map_err(Error::from)
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        cosmos::{DocumentWriter, ReplaceDocumentBuilder},
+        query::test::{Mock, TestSessionClient},
+        UserId,
+    };
+    use zeroflops::{List, ListMode, Source, SourceType};
+
+    #[tokio::test]
+    async fn test_update_empty_list_items() {
+        let client = TestSessionClient {
+            get_mock: Mock::new(vec![
+                r#"{"id":"","user_id":"","mode":{"User":null},"name":"","sources":[],"items":[],"favorite":false,"query":"SELECT name, user_score FROM c"}"#,
+            ]),
+            query_mock: Mock::empty(),
+            write_mock: Mock::new(vec![()]),
+        };
+        super::update_list_items(
+            &client,
+            &UserId(String::new()),
+            List {
+                id: String::new(),
+                user_id: String::new(),
+                mode: ListMode::User(None),
+                name: String::from("New List"),
+                sources: Vec::new(),
+                iframe: None,
+                items: Vec::new(),
+                favorite: false,
+                query: String::from("SELECT name, user_score FROM c"),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            *client.write_mock.call_args.lock().unwrap(),
+            vec![DocumentWriter::Replace(ReplaceDocumentBuilder {
+                collection_name: "lists",
+                document_name: "".to_owned(),
+                partition_key: "".to_owned(),
+                document: r#"{"id":"","user_id":"","mode":{"User":null},"name":"New List","sources":[],"iframe":null,"items":[],"favorite":false,"query":"SELECT name, user_score FROM c"}"#.to_owned(),
+            })]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_list_items_with_empty_source() {
+        let client = TestSessionClient {
+            get_mock: Mock::new(vec![
+                r#"{"id":"","user_id":"","mode":{"User":null},"name":"","sources":[],"items":[],"favorite":false,"query":"SELECT name, user_score FROM c"}"#,
+                r#"{"id":"","user_id":"","mode":{"User":null},"name":"source","sources":[],"items":[],"favorite":false,"query":"SELECT name, user_score FROM c"}"#,
+            ]),
+            query_mock: Mock::empty(),
+            write_mock: Mock::new(vec![()]),
+        };
+        super::update_list_items(
+            &client,
+            &UserId(String::new()),
+            List {
+                id: String::new(),
+                user_id: String::new(),
+                mode: ListMode::User(None),
+                name: String::from("New List"),
+                sources: vec![Source {
+                    source_type: SourceType::ListItems("".to_owned()),
+                    name: String::new(),
+                }],
+                iframe: None,
+                items: Vec::new(),
+                favorite: false,
+                query: String::from("SELECT name, user_score FROM c"),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            *client.write_mock.call_args.lock().unwrap(),
+            vec![DocumentWriter::Replace(ReplaceDocumentBuilder {
+                collection_name: "lists",
+                document_name: "".to_owned(),
+                partition_key: "".to_owned(),
+                document: r#"{"id":"","user_id":"","mode":{"User":null},"name":"New List","sources":[{"source_type":{"ListItems":""},"name":"source"}],"iframe":null,"items":[],"favorite":false,"query":"SELECT name, user_score FROM c"}"#.to_owned(),
+            })]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_list_items_with_source() {
+        let client = TestSessionClient {
+            get_mock: Mock::new(vec![
+                r#"{"id":"","user_id":"","mode":{"User":null},"name":"","sources":[],"items":[],"favorite":false,"query":"SELECT name, user_score FROM c"}"#,
+                r#"{"id":"","user_id":"","mode":{"User":null},"name":"source","sources":[],"items":[{"id":"","name":"item","score":0,"wins":0,"losses":0}],"favorite":false,"query":"SELECT name, user_score FROM c"}"#,
+            ]),
+            query_mock: Mock::empty(),
+            write_mock: Mock::new(vec![()]),
+        };
+        super::update_list_items(
+            &client,
+            &UserId(String::new()),
+            List {
+                id: String::new(),
+                user_id: String::new(),
+                mode: ListMode::User(None),
+                name: String::from("New List"),
+                sources: vec![Source {
+                    source_type: SourceType::ListItems("".to_owned()),
+                    name: String::new(),
+                }],
+                iframe: None,
+                items: Vec::new(),
+                favorite: false,
+                query: String::from("SELECT name, user_score FROM c"),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            *client.write_mock.call_args.lock().unwrap(),
+            vec![DocumentWriter::Replace(ReplaceDocumentBuilder {
+                collection_name: "lists",
+                document_name: "".to_owned(),
+                partition_key: "".to_owned(),
+                document: r#"{"id":"","user_id":"","mode":{"User":null},"name":"New List","sources":[{"source_type":{"ListItems":""},"name":"source"}],"iframe":null,"items":[{"id":"","name":"item","iframe":null,"score":0,"wins":0,"losses":0,"rank":null}],"favorite":false,"query":"SELECT name, user_score FROM c"}"#.to_owned(),
+            })]
+        );
+    }
 }
