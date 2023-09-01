@@ -277,10 +277,12 @@ impl Component for Edit {
 
     fn rendered(&mut self, _ctx: &Context<Self>, first_render: bool) {
         if first_render {
-            self.name_ref
-                .cast::<HtmlInputElement>()
-                .unwrap()
-                .set_value(&self.list.name);
+            if !matches!(self.list.mode, ListMode::External) {
+                self.name_ref
+                    .cast::<HtmlInputElement>()
+                    .unwrap()
+                    .set_value(&self.list.name);
+            }
             if let ListMode::User(Some(external_id)) = &self.list.mode {
                 self.external_ref
                     .cast::<HtmlInputElement>()
