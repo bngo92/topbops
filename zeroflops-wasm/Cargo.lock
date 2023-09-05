@@ -260,6 +260,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "crunchy"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a81dae078cea95a014a339291cec439d2f232ebe854a9d672b796c6afafa9b7"
+
+[[package]]
 name = "dyn-clone"
 version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -603,6 +609,17 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "half"
+version = "2.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc52e53916c08643f1b56ec082790d1e86a32e58dc5268f897f313fbae7b4872"
+dependencies = [
+ "bytemuck",
+ "cfg-if",
+ "crunchy",
 ]
 
 [[package]]
@@ -1040,7 +1057,7 @@ dependencies = [
 [[package]]
 name = "polars"
 version = "0.31.1"
-source = "git+https://github.com/bngo92/polars#ef065c5399980b5316a70f9e30b013adfa70f60b"
+source = "git+https://github.com/bngo92/polars#96fa64a82734943b5bc5e0639af6aae57265bad0"
 dependencies = [
  "getrandom",
  "polars-core",
@@ -1054,7 +1071,7 @@ dependencies = [
 [[package]]
 name = "polars-arrow"
 version = "0.31.1"
-source = "git+https://github.com/bngo92/polars#ef065c5399980b5316a70f9e30b013adfa70f60b"
+source = "git+https://github.com/bngo92/polars#96fa64a82734943b5bc5e0639af6aae57265bad0"
 dependencies = [
  "arrow2",
  "hashbrown 0.14.0",
@@ -1067,7 +1084,7 @@ dependencies = [
 [[package]]
 name = "polars-core"
 version = "0.31.1"
-source = "git+https://github.com/bngo92/polars#ef065c5399980b5316a70f9e30b013adfa70f60b"
+source = "git+https://github.com/bngo92/polars#96fa64a82734943b5bc5e0639af6aae57265bad0"
 dependencies = [
  "ahash",
  "arrow2",
@@ -1095,7 +1112,7 @@ dependencies = [
 [[package]]
 name = "polars-error"
 version = "0.31.1"
-source = "git+https://github.com/bngo92/polars#ef065c5399980b5316a70f9e30b013adfa70f60b"
+source = "git+https://github.com/bngo92/polars#96fa64a82734943b5bc5e0639af6aae57265bad0"
 dependencies = [
  "arrow2",
  "regex",
@@ -1105,7 +1122,7 @@ dependencies = [
 [[package]]
 name = "polars-io"
 version = "0.31.1"
-source = "git+https://github.com/bngo92/polars#ef065c5399980b5316a70f9e30b013adfa70f60b"
+source = "git+https://github.com/bngo92/polars#96fa64a82734943b5bc5e0639af6aae57265bad0"
 dependencies = [
  "ahash",
  "arrow2",
@@ -1130,7 +1147,7 @@ dependencies = [
 [[package]]
 name = "polars-lazy"
 version = "0.31.1"
-source = "git+https://github.com/bngo92/polars#ef065c5399980b5316a70f9e30b013adfa70f60b"
+source = "git+https://github.com/bngo92/polars#96fa64a82734943b5bc5e0639af6aae57265bad0"
 dependencies = [
  "ahash",
  "bitflags",
@@ -1150,7 +1167,7 @@ dependencies = [
 [[package]]
 name = "polars-ops"
 version = "0.31.1"
-source = "git+https://github.com/bngo92/polars#ef065c5399980b5316a70f9e30b013adfa70f60b"
+source = "git+https://github.com/bngo92/polars#96fa64a82734943b5bc5e0639af6aae57265bad0"
 dependencies = [
  "argminmax",
  "arrow2",
@@ -1166,7 +1183,7 @@ dependencies = [
 [[package]]
 name = "polars-pipe"
 version = "0.31.1"
-source = "git+https://github.com/bngo92/polars#ef065c5399980b5316a70f9e30b013adfa70f60b"
+source = "git+https://github.com/bngo92/polars#96fa64a82734943b5bc5e0639af6aae57265bad0"
 dependencies = [
  "enum_dispatch",
  "hashbrown 0.14.0",
@@ -1185,7 +1202,7 @@ dependencies = [
 [[package]]
 name = "polars-plan"
 version = "0.31.1"
-source = "git+https://github.com/bngo92/polars#ef065c5399980b5316a70f9e30b013adfa70f60b"
+source = "git+https://github.com/bngo92/polars#96fa64a82734943b5bc5e0639af6aae57265bad0"
 dependencies = [
  "ahash",
  "arrow2",
@@ -1204,7 +1221,7 @@ dependencies = [
 [[package]]
 name = "polars-row"
 version = "0.31.1"
-source = "git+https://github.com/bngo92/polars#ef065c5399980b5316a70f9e30b013adfa70f60b"
+source = "git+https://github.com/bngo92/polars#96fa64a82734943b5bc5e0639af6aae57265bad0"
 dependencies = [
  "arrow2",
  "polars-error",
@@ -1214,7 +1231,7 @@ dependencies = [
 [[package]]
 name = "polars-sql"
 version = "0.31.1"
-source = "git+https://github.com/bngo92/polars#ef065c5399980b5316a70f9e30b013adfa70f60b"
+source = "git+https://github.com/bngo92/polars#96fa64a82734943b5bc5e0639af6aae57265bad0"
 dependencies = [
  "polars-arrow",
  "polars-core",
@@ -1228,7 +1245,7 @@ dependencies = [
 [[package]]
 name = "polars-utils"
 version = "0.31.1"
-source = "git+https://github.com/bngo92/polars#ef065c5399980b5316a70f9e30b013adfa70f60b"
+source = "git+https://github.com/bngo92/polars#96fa64a82734943b5bc5e0639af6aae57265bad0"
 dependencies = [
  "ahash",
  "hashbrown 0.14.0",
@@ -1504,12 +1521,14 @@ dependencies = [
 
 [[package]]
 name = "serde_arrow"
-version = "0.7.1"
+version = "0.8.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c903d8f35d8cc0c3fca4b5b586efc6e5d225dfe205de94e6c0b021377a00478"
+checksum = "1e727ae739d8ba17771e6b68c064790d5eb79b85a58f021f7eaf9428c0a98cf3"
 dependencies = [
  "arrow2",
+ "bytemuck",
  "chrono",
+ "half",
  "serde",
 ]
 

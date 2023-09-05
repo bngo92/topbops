@@ -1101,9 +1101,13 @@ async fn find_items(search: &str) -> Result<DataFrame, JsValue> {
 }
 
 fn serialize_into_df(items: &(impl Serialize + ?Sized)) -> DataFrame {
-    let fields =
-        arrow2::serialize_into_fields(items, TracingOptions::default().allow_null_fields(true))
-            .unwrap();
+    let fields = arrow2::serialize_into_fields(
+        items,
+        TracingOptions::default()
+            .allow_null_fields(true)
+            .coerce_numbers(true),
+    )
+    .unwrap();
     let arrays = arrow2::serialize_into_arrays(&fields, items).unwrap();
     DataFrame::new(
         fields

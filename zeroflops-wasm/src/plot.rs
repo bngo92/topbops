@@ -80,10 +80,20 @@ fn draw_column_graph(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
         .margin(5);
     let range = df[1].cast(&DataType::Float64)?;
     match df[0].dtype() {
-        DataType::Int64 => {
+        DataType::Int64 | DataType::UInt64 => {
             let mut data = HashMap::new();
-            for (i, f) in df[0].i64()?.into_iter().zip(range.f64()?.into_iter()) {
-                *data.entry(i.unwrap() as u32).or_insert(0f64) += f.unwrap();
+            match df[0].dtype() {
+                DataType::Int64 => {
+                    for (i, f) in df[0].i64()?.into_iter().zip(range.f64()?.into_iter()) {
+                        *data.entry(i.unwrap() as u32).or_insert(0f64) += f.unwrap();
+                    }
+                }
+                DataType::UInt64 => {
+                    for (i, f) in df[0].u64()?.into_iter().zip(range.f64()?.into_iter()) {
+                        *data.entry(i.unwrap() as u32).or_insert(0f64) += f.unwrap();
+                    }
+                }
+                _ => unreachable!(),
             }
             let domain = 0u32..df[0].max().unwrap();
             let mut chart = builder.build_cartesian_2d(
