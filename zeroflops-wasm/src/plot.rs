@@ -115,20 +115,11 @@ fn draw_column_graph(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
             )?;
         }
         DataType::Utf8 => {
-            let data: Vec<_> = df[0]
-                .utf8()?
-                .into_iter()
-                .zip(range.f64()?.into_iter())
-                .map(|(o1, o2)| (o1.unwrap(), o2.unwrap()))
-                .collect();
-            let domain = data.iter().map(|(s, _)| s).cloned().collect::<Vec<_>>();
+            let domain: Vec<_> = df[0].utf8()?.into_iter().map(Option::unwrap).collect();
+            let range: Vec<_> = range.f64()?.into_iter().map(Option::unwrap).collect();
             let mut chart = builder.build_cartesian_2d(
                 domain.into_segmented(),
-                0f64..*data
-                    .iter()
-                    .map(|(_, i)| i)
-                    .max_by(|a, b| a.total_cmp(b))
-                    .unwrap(),
+                0f64..*range.iter().max_by(|a, b| a.total_cmp(b)).unwrap(),
             )?;
             chart
                 .configure_mesh()
@@ -141,7 +132,7 @@ fn draw_column_graph(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
             chart.draw_series(
                 Histogram::vertical(&chart)
                     .style(RED.mix(0.5).filled())
-                    .data(data.iter().map(|(s, i)| (s, *i))),
+                    .data(domain.iter().zip(range.into_iter())),
             )?;
         }
         _ => todo!(),
