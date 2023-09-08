@@ -115,16 +115,20 @@ fn draw_column_graph(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
             )?;
         }
         DataType::Utf8 => {
-            let data: HashMap<_, _> = df[0]
+            let data: Vec<_> = df[0]
                 .utf8()?
                 .into_iter()
                 .zip(range.f64()?.into_iter())
                 .map(|(o1, o2)| (o1.unwrap(), o2.unwrap()))
                 .collect();
-            let domain = data.keys().cloned().collect::<Vec<_>>();
+            let domain = data.iter().map(|(s, _)| s).cloned().collect::<Vec<_>>();
             let mut chart = builder.build_cartesian_2d(
                 domain.into_segmented(),
-                0f64..*data.values().max_by(|a, b| a.total_cmp(b)).unwrap(),
+                0f64..*data
+                    .iter()
+                    .map(|(_, i)| i)
+                    .max_by(|a, b| a.total_cmp(b))
+                    .unwrap(),
             )?;
             chart
                 .configure_mesh()
