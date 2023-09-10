@@ -185,7 +185,10 @@ async fn get_list(
     auth: AuthContext,
 ) -> Result<Json<List>, Response> {
     let user_id = get_user_or_demo_user(auth);
-    let list = source::get_list(&state.client, &user_id, &id).await?;
+    let mut list = source::get_list(&state.client, &user_id, &id).await?;
+    if let ListMode::View(_) = list.mode {
+        list.items = query::get_view_items(&state.client, &list).await?.collect();
+    }
     Ok(Json(list))
 }
 
@@ -411,16 +414,27 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
             id: playlist.id,
             raw_id: playlist.external_urls.remove("spotify").unwrap(),
         };
-        list.mode = ListMode::User(Some(id.clone()));
+        list.mode = match list.mode {
+            ListMode::User(_) => ListMode::User(Some(id.clone())),
+            ListMode::View(_) => ListMode::View(Some(id.clone())),
+            _ => unreachable!(),
+        };
         source::update_list(&state.client, &user_id, list.clone()).await?;
         id.id
     };
-    let ids: Vec<_> = query::get_list_query(&state.client, &user_id, list)
-        .await?
-        .items
-        .into_iter()
-        .map(|i| i.metadata.unwrap().id)
-        .collect();
+    let ids: Vec<_> = match list.mode {
+        ListMode::User(_) => query::get_list_query(&state.client, &user_id, list)
+            .await?
+            .items
+            .into_iter()
+            .map(|i| i.metadata.unwrap().id)
+            .collect(),
+        ListMode::View(_) => query::get_view_items(&state.client, &list)
+            .await?
+            .map(|i| i.id)
+            .collect(),
+        _ => unreachable!(),
+    };
     spotify::update_list(access_token, &external_id, &ids).await?;
     Ok(StatusCode::OK)
 }

@@ -14,6 +14,41 @@ use sqlparser::{
 use std::collections::{HashMap, VecDeque};
 use zeroflops::{Error, ItemMetadata, ItemQuery, List, ListMode};
 
+pub async fn get_view_items(
+    client: &impl SessionClient,
+    list: &List,
+) -> Result<impl Iterator<Item = ItemMetadata>, Error> {
+    let mut query = list.query.into_query()?;
+    let SetExpr::Select(select) = &mut *query.body else {
+        return Err(Error::client_error("Only SELECT queries are supported"));
+    };
+    // GROUP BY queries create schemas that don't produce items
+    let items = if !select.group_by.is_empty() {
+        Vec::new()
+    } else {
+        select.projection = ["id", "name", "iframe"]
+            .into_iter()
+            .map(|s| SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(s))))
+            .collect();
+        let (query, _) = rewrite_query(query, &UserId(list.user_id.clone()))?;
+        client
+            .query_documents::<Map<String, Value>>(QueryDocumentsBuilder::new(
+                "items",
+                CosmosQuery::new(query.to_string()),
+            ))
+            .await?
+    };
+    Ok(items.into_iter().map(|item| ItemMetadata {
+        id: item["id"].as_str().unwrap().to_owned(),
+        name: item["name"].as_str().unwrap().to_owned(),
+        iframe: item["iframe"].as_str().map(ToOwned::to_owned),
+        score: 0,
+        wins: 0,
+        losses: 0,
+        rank: None,
+    }))
+}
+
 pub async fn get_list_query(
     client: &impl SessionClient,
     user_id: &UserId,
@@ -82,7 +117,8 @@ pub async fn get_list_items(
     list: List,
 ) -> Result<Vec<Map<String, Value>>, Error> {
     let query = if let ListMode::View(_) = &list.mode {
-        rewrite_query(&list.query, user_id)?.0.to_string()
+        let query = list.query.into_query()?;
+        rewrite_query(query, user_id)?.0.to_string()
     } else if list.items.is_empty() {
         return Ok(Vec::new());
     } else {
@@ -119,7 +155,7 @@ fn rewrite_list_query<'a>(
     Error,
 > {
     // TODO: clean up column parsing
-    let mut query = parse_select(&list.query)?;
+    let mut query = list.query.into_query()?;
     let SetExpr::Select(select) = &mut *query.body else {
         return Err(Error::client_error("Only SELECT queries are supported"));
     };
@@ -141,7 +177,7 @@ fn rewrite_list_query<'a>(
         for i in &list.items {
             map.insert(i.id.clone(), i);
         }
-        rewrite_query_impl(&query, user_id, Some(id_filter(&ids)))?
+        rewrite_query_impl(query.into_query()?, user_id, Some(id_filter(&ids)))?
     };
     Ok((query, fields, map, ids))
 }
@@ -160,16 +196,18 @@ fn id_filter(ids: &[String]) -> Expr {
     }
 }
 
-pub fn rewrite_query(s: &str, user_id: &UserId) -> Result<(Query, Vec<String>), Error> {
-    rewrite_query_impl(s, user_id, None)
+pub fn rewrite_query(
+    query: impl IntoQuery,
+    user_id: &UserId,
+) -> Result<(Query, Vec<String>), Error> {
+    rewrite_query_impl(query.into_query()?, user_id, None)
 }
 
 fn rewrite_query_impl(
-    s: &str,
+    mut query: Query,
     user_id: &UserId,
     filter: Option<Expr>,
 ) -> Result<(Query, Vec<String>), Error> {
-    let mut query = parse_select(s)?;
     let SetExpr::Select(select) = &mut *query.body else {
         return Err(Error::client_error("Only SELECT queries are supported"));
     };
@@ -241,14 +279,32 @@ fn rewrite_query_impl(
     Ok((query, column_names))
 }
 
-fn parse_select(s: &str) -> Result<Query, Error> {
-    // The MySQL dialect seems to be the closest to Cosmos DB in regards to string value handling
-    let dialect = MySqlDialect {};
-    let statement = Parser::parse_sql(&dialect, s)?.pop();
-    if let Some(Statement::Query(query)) = statement {
-        Ok(*query)
-    } else {
-        Err(Error::client_error("No query was provided"))
+pub trait IntoQuery {
+    fn into_query(self) -> Result<Query, Error>;
+}
+
+impl IntoQuery for &String {
+    fn into_query(self) -> Result<Query, Error> {
+        self.as_str().into_query()
+    }
+}
+
+impl IntoQuery for &str {
+    fn into_query(self) -> Result<Query, Error> {
+        // The MySQL dialect seems to be the closest to Cosmos DB in regards to string value handling
+        let dialect = MySqlDialect {};
+        let statement = Parser::parse_sql(&dialect, self)?.pop();
+        if let Some(Statement::Query(query)) = statement {
+            Ok(*query)
+        } else {
+            Err(Error::client_error("No query was provided"))
+        }
+    }
+}
+
+impl IntoQuery for Query {
+    fn into_query(self) -> Result<Query, Error> {
+        Ok(self)
     }
 }
 
@@ -293,6 +349,7 @@ fn rewrite_identifier(id: Ident) -> Expr {
 
 #[cfg(test)]
 pub mod test {
+    use super::IntoQuery;
     use crate::{
         cosmos::{
             CosmosQuery, CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter,
@@ -534,7 +591,7 @@ pub mod test {
         ids: &[String],
     ) -> Result<(Query, Vec<String>), Error> {
         super::rewrite_query_impl(
-            query,
+            query.into_query()?,
             &UserId(String::from("demo")),
             Some(super::id_filter(ids)),
         )

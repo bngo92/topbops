@@ -10,10 +10,11 @@ pub mod user;
 
 #[derive(Clone)]
 pub struct UserId(pub String);
-pub const ITEM_FIELDS: [&str; 8] = [
+pub const ITEM_FIELDS: [&str; 9] = [
     "id",
     "type",
     "name",
+    "iframe",
     "rating",
     "user_score",
     "user_wins",
