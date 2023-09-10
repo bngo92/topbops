@@ -52,6 +52,7 @@ struct ListItem {
 }
 
 enum ItemMode {
+    View,
     Update,
     Delete,
 }
@@ -62,8 +63,10 @@ impl Component for ListItems {
 
     fn create(ctx: &Context<Self>) -> Self {
         let list = ctx.props().list.clone();
-        ctx.link()
-            .send_future(async move { Msg::Load(crate::get_items(&list).await.unwrap()) });
+        if !matches!(list.mode, ListMode::View(_)) {
+            ctx.link()
+                .send_future(async move { Msg::Load(crate::get_items(&list).await.unwrap()) });
+        }
         ListItems {
             state: ctx
                 .props()
@@ -78,7 +81,11 @@ impl Component for ListItems {
                 })
                 .collect(),
             select_ref: NodeRef::default(),
-            mode: ItemMode::Update,
+            mode: if let ListMode::View(_) = ctx.props().list.mode {
+                ItemMode::View
+            } else {
+                ItemMode::Update
+            },
             alert: None,
             modal: None,
         }
@@ -109,6 +116,21 @@ impl Component for ListItems {
             }
         });
         let html: Html = match self.mode {
+            ItemMode::View => self
+                .state
+                .iter()
+                .map(|ListItem { item, .. }| {
+                    let open = {
+                        let item = item.clone();
+                        ctx.link().callback(move |_| Msg::Open(item.clone()))
+                    };
+                    html! {
+                        <div class="row mb-1">
+                            <label class="col col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
+                        </div>
+                    }
+                })
+                .collect(),
             ItemMode::Update => self
                 .state
                 .iter()
@@ -197,17 +219,19 @@ impl Component for ListItems {
                         }
                     </Modal>
                 }
-                <div class="row mb-3">
-                    <label class="col-auto col-form-label">
-                        <strong>{"Item Mode:"}</strong>
-                    </label>
-                    <div class="col-auto">
-                        <select ref={self.select_ref.clone()} class="form-select" onchange={ctx.link().callback(|_| Msg::SelectView)}>
-                            <option selected=true>{"Update"}</option>
-                            <option>{"Delete"}</option>
-                        </select>
+                if matches!(ctx.props().list.mode, ListMode::View(_)) {
+                    <div class="row mb-3">
+                        <label class="col-auto col-form-label">
+                            <strong>{"Item Mode:"}</strong>
+                        </label>
+                        <div class="col-auto">
+                            <select ref={self.select_ref.clone()} class="form-select" onchange={ctx.link().callback(|_| Msg::SelectView)}>
+                                <option selected=true>{"Update"}</option>
+                                <option>{"Delete"}</option>
+                            </select>
+                        </div>
                     </div>
-                </div>
+                }
                 if let Some(src) = list.iframe.clone() {
                     <div class="row">
                         <div class="col-12 col-xl-11">
@@ -257,7 +281,7 @@ impl Component for ListItems {
                     .collect()
                     .unwrap();
                 // polars requires that at least one row is not null
-                let ratings = df.column("rating").map(|s| s.u64().unwrap());
+                let ratings = df.column("rating").and_then(|s| s.u64());
                 let hidden = df["hidden"].bool().unwrap();
                 if let Ok(ratings) = ratings {
                     for i in 0..df.height() {

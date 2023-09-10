@@ -85,6 +85,10 @@ pub enum SourceType {
 
 impl List {
     pub fn get_unique_source(&self) -> Result<(Option<&str>, &Option<Id>), Error> {
+        // TODO: validate view lists
+        if let ListMode::View(external_id) = &self.mode {
+            return Ok((Some("spotify"), external_id));
+        }
         let ListMode::User(external_id) = &self.mode else {
             return Err(Error::client_error(
                 "Push is not supported for this list type",
