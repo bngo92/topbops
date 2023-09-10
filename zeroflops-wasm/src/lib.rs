@@ -535,7 +535,7 @@ impl Component for Widget {
             navigator.push(&ListsRoute::List { id: id.clone() });
         });
         // TODO: support actions on views
-        let disabled = matches!(list.mode, ListMode::View);
+        let disabled = matches!(list.mode, ListMode::View(_));
         html! {
             <div class="col-12 col-md-6">
                 <Accordion header={list.name.clone()} collapsed={self.collapsed} {on_toggle}>
@@ -632,7 +632,7 @@ impl Component for ListView {
                         <option>{"Cumulative Line Graph"}</option>
                     </select>
                 </div>
-                <Input input_ref={self.query_ref.clone()} onclick={query.clone()} error={self.error.clone()} disabled={matches!(ctx.props().list.mode, ListMode::View)}/>
+                <Input input_ref={self.query_ref.clone()} onclick={query.clone()} error={self.error.clone()} disabled={matches!(ctx.props().list.mode, ListMode::View(_))}/>
                 if let Some(df) = &self.df {
                     {self.view.render(df)}
                 }
@@ -649,7 +649,7 @@ impl Component for ListView {
                         .collect()
                         .unwrap(),
                 );
-                if let ListMode::View = ctx.props().list.mode {
+                if let ListMode::View(_) = ctx.props().list.mode {
                     self.df = self.data.clone();
                 } else {
                     update_list_view(self, ctx.props().list.query.clone());
@@ -684,7 +684,7 @@ impl Component for ListView {
     }
 
     fn rendered(&mut self, ctx: &Context<Self>, first_render: bool) {
-        if first_render || matches!(ctx.props().list.mode, ListMode::View) {
+        if first_render || matches!(ctx.props().list.mode, ListMode::View(_)) {
             let query = self.query_ref.cast::<HtmlSelectElement>().unwrap();
             query.set_value(&ctx.props().list.query);
         }

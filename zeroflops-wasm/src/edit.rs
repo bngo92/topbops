@@ -96,7 +96,7 @@ impl Component for Edit {
         let mode = match self.list.mode {
             ListMode::User(_) => "User",
             ListMode::External => "External",
-            ListMode::View => "View",
+            ListMode::View(_) => "View",
         };
         let add_source = ctx.link().callback(|_| Msg::AddSource);
         let save = ctx.link().callback(|_| Msg::Save);

@@ -677,7 +677,7 @@ async fn main() {
             List {
                 id: String::from("3c16df67-582d-449a-9862-0540f516d6b5"),
                 user_id: demo_user.clone(),
-                mode: ListMode::View,
+                mode: ListMode::View(None),
                 name: String::from("Artists"),
                 sources: Vec::new(),
                 iframe: None,
@@ -694,7 +694,7 @@ async fn main() {
             List {
                 id: String::from("4539f893-8471-4e23-b815-cd7c8b722016"),
                 user_id: demo_user.clone(),
-                mode: ListMode::View,
+                mode: ListMode::View(None),
                 name: String::from("Winners"),
                 sources: Vec::new(),
                 iframe: None,

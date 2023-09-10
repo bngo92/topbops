@@ -81,7 +81,7 @@ pub async fn get_list_items(
     user_id: &UserId,
     list: List,
 ) -> Result<Vec<Map<String, Value>>, Error> {
-    let query = if let ListMode::View = &list.mode {
+    let query = if let ListMode::View(_) = &list.mode {
         rewrite_query(&list.query, user_id)?.0.to_string()
     } else if list.items.is_empty() {
         return Ok(Vec::new());
@@ -132,7 +132,7 @@ fn rewrite_list_query<'a>(
         .iter()
         .map(|i| format!("\"{}\"", i.id))
         .collect::<Vec<_>>();
-    let (query, _) = if let ListMode::View = list.mode {
+    let (query, _) = if let ListMode::View(_) = list.mode {
         rewrite_query(&list.query, user_id)?
     } else {
         let mut query = list.query.clone();

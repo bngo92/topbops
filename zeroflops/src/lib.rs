@@ -66,7 +66,7 @@ pub enum ListMode {
     /// Lists that are pulled from an external source
     External,
     /// Read only lists
-    View,
+    View(Option<Id>),
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
