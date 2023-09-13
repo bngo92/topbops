@@ -65,7 +65,7 @@ impl Component for ListItems {
         let list = ctx.props().list.clone();
         if !matches!(list.mode, ListMode::View(_)) {
             ctx.link()
-                .send_future(async move { Msg::Load(crate::get_items(&list).await.unwrap()) });
+                .send_future(async move { Msg::Load(crate::query_list(&list).await.unwrap()) });
         }
         ListItems {
             state: ctx

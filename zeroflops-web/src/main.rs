@@ -25,7 +25,7 @@ use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 use zeroflops::{
     spotify::{Playlists, RecentTracks},
-    Error, Id, ItemQuery, List, ListMode, Lists,
+    Error, Id, Items, List, ListMode, Lists,
 };
 use zeroflops_web::{
     cosmos::{
@@ -192,19 +192,19 @@ async fn get_list(
     Ok(Json(list))
 }
 
-async fn get_list_query(
+async fn get_list_items(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     auth: AuthContext,
-) -> Result<Json<ItemQuery>, Response> {
+) -> Result<Json<Items>, Response> {
     let user_id = get_user_or_demo_user(auth);
     let list = source::get_list(&state.client, &user_id, &id).await?;
     Ok(Json(
-        query::get_list_query(&state.client, &user_id, list).await?,
+        query::get_list_items(&state.client, &user_id, list).await?,
     ))
 }
 
-async fn get_list_items(
+async fn query_list(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     auth: AuthContext,
@@ -212,7 +212,7 @@ async fn get_list_items(
     let user_id = get_user_or_demo_user(auth);
     let list = source::get_list(&state.client, &user_id, &id).await?;
     Ok(Json(
-        query::get_list_items(&state.client, &user_id, list).await?,
+        query::query_list(&state.client, &user_id, list).await?,
     ))
 }
 
@@ -423,7 +423,7 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
         id.id
     };
     let ids: Vec<_> = match list.mode {
-        ListMode::User(_) => query::get_list_query(&state.client, &user_id, list)
+        ListMode::User(_) => query::get_list_items(&state.client, &user_id, list)
             .await?
             .items
             .into_iter()
@@ -741,7 +741,7 @@ async fn main() {
             get(get_list).put(update_list).delete(delete_list),
         )
         .route("/lists/:id/items", get(get_list_items))
-        .route("/lists/:id/query", get(get_list_query))
+        .route("/lists/:id/query", get(query_list))
         .route("/items", get(find_items).delete(delete_items))
         .route("/", post(handle_action))
         .route("/login", get(login_handler))

@@ -2,7 +2,7 @@ use crate::base::IframeCompare;
 use rand::prelude::SliceRandom;
 use std::borrow::Cow;
 use yew::{html, Component, Context, Html, Properties};
-use zeroflops::{ItemMetadata, ItemQuery};
+use zeroflops::{ItemMetadata, Items};
 
 #[derive(Clone, PartialEq, Properties)]
 pub struct MatchProps {
@@ -53,11 +53,11 @@ pub enum Mode {
 struct MatchData {
     left: ItemMetadata,
     right: ItemMetadata,
-    query: ItemQuery,
+    query: Items,
 }
 
 pub enum Msg {
-    LoadRandom(ItemQuery),
+    LoadRandom(Items),
     UpdateStats((String, String)),
 }
 
@@ -79,7 +79,7 @@ impl Component for Match {
     fn create(ctx: &Context<Self>) -> Self {
         let id = ctx.props().id.clone();
         ctx.link().send_future(async move {
-            let query = crate::query_items(&id).await.unwrap();
+            let query = crate::get_items(&id).await.unwrap();
             Msg::LoadRandom(query)
         });
         Match {
@@ -168,7 +168,7 @@ impl Component for Match {
                 let list = ctx.props().id.clone();
                 ctx.link().send_future(async move {
                     crate::update_stats(&list, &win, &lose).await.unwrap();
-                    let query = crate::query_items(&list).await.unwrap();
+                    let query = crate::get_items(&list).await.unwrap();
                     Msg::LoadRandom(query)
                 });
                 false

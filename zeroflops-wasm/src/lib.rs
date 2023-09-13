@@ -18,7 +18,7 @@ use regex::Regex;
 use serde::Serialize;
 use serde_arrow::{arrow2, schema::TracingOptions};
 use serde_json::{Map, Value};
-use std::{borrow::Cow, collections::HashMap, rc::Rc};
+use std::{collections::HashMap, rc::Rc};
 use wasm_bindgen::{prelude::*, JsCast};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlSelectElement, MouseEvent, Request, RequestInit, RequestMode, Response, Window};
@@ -28,7 +28,7 @@ use yew_router::{
     scope_ext::RouterScopeExt,
     BrowserRouter, Routable, Switch,
 };
-use zeroflops::{Id, ItemQuery, List, ListMode, Lists, Spotify, User};
+use zeroflops::{Id, Items, List, ListMode, Lists, Spotify, User};
 
 mod base;
 mod bootstrap;
@@ -463,8 +463,8 @@ impl Home {
 }
 
 enum WidgetMsg {
-    Fetching(Rc<String>),
-    Success(ItemQuery),
+    Fetching(Rc<List>),
+    Success(DataFrame),
 }
 
 #[derive(PartialEq, Properties)]
@@ -475,7 +475,7 @@ pub struct WidgetProps {
 
 struct Widget {
     collapsed: bool,
-    query: Option<ItemQuery>,
+    query: Option<DataFrame>,
 }
 
 impl Component for Widget {
@@ -491,10 +491,10 @@ impl Component for Widget {
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         let list = &ctx.props().list;
-        let id = Rc::new(list.id.clone());
-        let on_toggle = ctx
-            .link()
-            .callback(move |_| WidgetMsg::Fetching(Rc::clone(&id)));
+        let on_toggle = ctx.link().callback({
+            let list = Rc::new(list.clone());
+            move |_| WidgetMsg::Fetching(Rc::clone(&list))
+        });
         let navigator = ctx.link().navigator().unwrap();
         let select_ref = ctx.props().select_ref.clone();
         let navigator_copy = navigator.clone();
@@ -540,7 +540,7 @@ impl Component for Widget {
             <div class="col-12 col-md-6">
                 <Accordion header={list.name.clone()} collapsed={self.collapsed} {on_toggle}>
                     if let Some(query) = &self.query {
-                        {crate::base::table_view(&query.fields.iter().map(String::as_str).collect::<Vec<_>>(), query.items.iter().zip(1..).map(|(item, i)| Some((i, Cow::from(&item.values)))))}
+                        {plot::df_table_view(query)}
                     } else {
                         <div></div>
                     }
@@ -559,11 +559,11 @@ impl Component for Widget {
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
-            WidgetMsg::Fetching(id) => {
+            WidgetMsg::Fetching(list) => {
                 // TODO: add the ability to refresh
                 if self.query.is_none() {
                     ctx.link().send_future(async move {
-                        WidgetMsg::Success(query_items(&id).await.unwrap())
+                        WidgetMsg::Success(query_list(&list).await.unwrap())
                     });
                     false
                 } else {
@@ -607,7 +607,7 @@ impl Component for ListView {
     fn create(ctx: &Context<Self>) -> Self {
         let list = ctx.props().list.clone();
         ctx.link()
-            .send_future(async move { ListViewMsg::Success(get_items(&list).await.unwrap()) });
+            .send_future(async move { ListViewMsg::Success(query_list(&list).await.unwrap()) });
         Self {
             data: None,
             select_ref: NodeRef::default(),
@@ -1020,9 +1020,9 @@ async fn delete_list(id: &str) -> Result<(), JsValue> {
     Ok(())
 }
 
-async fn get_items(list: &List) -> Result<DataFrame, JsValue> {
+async fn query_list(list: &List) -> Result<DataFrame, JsValue> {
     let window = window();
-    let request = query(&format!("/api/lists/{}/items", list.id), "GET").unwrap();
+    let request = query(&format!("/api/lists/{}/query", list.id), "GET").unwrap();
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
     let json = JsFuture::from(resp.json()?).await?;
@@ -1053,9 +1053,9 @@ async fn get_items(list: &List) -> Result<DataFrame, JsValue> {
     Ok(items)
 }
 
-async fn query_items(id: &str) -> Result<ItemQuery, JsValue> {
+async fn get_items(id: &str) -> Result<Items, JsValue> {
     let window = window();
-    let request = query(&format!("/api/lists/{}/query", id), "GET").unwrap();
+    let request = query(&format!("/api/lists/{}/items", id), "GET").unwrap();
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
     let json = JsFuture::from(resp.json()?).await?;

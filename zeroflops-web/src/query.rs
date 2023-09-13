@@ -12,7 +12,7 @@ use sqlparser::{
     parser::Parser,
 };
 use std::collections::{HashMap, VecDeque};
-use zeroflops::{Error, ItemMetadata, ItemQuery, List, ListMode};
+use zeroflops::{Error, ItemMetadata, Items, List, ListMode};
 
 pub async fn get_view_items(
     client: &impl SessionClient,
@@ -49,18 +49,15 @@ pub async fn get_view_items(
     }))
 }
 
-pub async fn get_list_query(
+pub async fn get_list_items(
     client: &impl SessionClient,
     user_id: &UserId,
     list: List,
-) -> Result<ItemQuery, Error> {
+) -> Result<Items, Error> {
     if list.items.is_empty() {
-        Ok(ItemQuery {
-            fields: Vec::new(),
-            items: Vec::new(),
-        })
+        Ok(Items { items: Vec::new() })
     } else {
-        let (query, fields, map, ids) = rewrite_list_query(&list, user_id)?;
+        let (query, map, ids) = rewrite_list_query(&list, user_id)?;
         let mut items: Vec<_> = client
             .query_documents(QueryDocumentsBuilder::new(
                 "items",
@@ -79,8 +76,7 @@ pub async fn get_list_query(
                 .filter_map(|id| item_metadata.remove(&id))
                 .collect();
         };
-        Ok(ItemQuery {
-            fields,
+        Ok(Items {
             items: items
                 .into_iter()
                 .map(|r| {
@@ -111,7 +107,7 @@ fn format_value(v: &Value) -> String {
     }
 }
 
-pub async fn get_list_items(
+pub async fn query_list(
     client: &CosmosSessionClient,
     user_id: &UserId,
     list: List,
@@ -145,22 +141,7 @@ pub async fn get_list_items(
 fn rewrite_list_query<'a>(
     list: &'a List,
     user_id: &UserId,
-) -> Result<
-    (
-        Query,
-        Vec<String>,
-        HashMap<String, &'a ItemMetadata>,
-        Vec<String>,
-    ),
-    Error,
-> {
-    // TODO: clean up column parsing
-    let mut query = list.query.into_query()?;
-    let SetExpr::Select(select) = &mut *query.body else {
-        return Err(Error::client_error("Only SELECT queries are supported"));
-    };
-    let fields = select.projection.iter().map(ToString::to_string).collect();
-
+) -> Result<(Query, HashMap<String, &'a ItemMetadata>, Vec<String>), Error> {
     let mut map = HashMap::new();
     // TODO: update AST directly
     let ids = list
@@ -179,7 +160,7 @@ fn rewrite_list_query<'a>(
         }
         rewrite_query_impl(query.into_query()?, user_id, Some(id_filter(&ids)))?
     };
-    Ok((query, fields, map, ids))
+    Ok((query, map, ids))
 }
 
 fn id_filter(ids: &[String]) -> Expr {
@@ -362,7 +343,7 @@ pub mod test {
     use serde::{de::DeserializeOwned, Serialize};
     use sqlparser::ast::Query;
     use std::sync::{Arc, Mutex};
-    use zeroflops::{Error, Item, ItemMetadata, ItemQuery, List, ListMode};
+    use zeroflops::{Error, Item, ItemMetadata, Items, List, ListMode};
 
     pub struct Mock<T, U> {
         pub call_args: Arc<Mutex<Vec<T>>>,
@@ -476,10 +457,7 @@ pub mod test {
             )
             .await
             .unwrap(),
-            ItemQuery {
-                fields: Vec::new(),
-                items: Vec::new()
-            }
+            Items { items: Vec::new() }
         );
     }
 
@@ -513,8 +491,7 @@ pub mod test {
             super::get_list_query(&client, &UserId(String::new()), list)
                 .await
                 .unwrap(),
-            ItemQuery {
-                fields: vec!["name".to_owned(), "user_score".to_owned()],
+            Items {
                 items: vec![Item {
                     values: vec!["test".to_owned(), "0".to_owned()],
                     metadata: Some(ItemMetadata {
@@ -568,10 +545,7 @@ pub mod test {
             super::get_list_query(&client, &UserId(String::new()), list,)
                 .await
                 .unwrap(),
-            ItemQuery {
-                fields: vec!["name".to_owned(), "user_score".to_owned()],
-                items: Vec::new()
-            }
+            Items { items: Vec::new() }
         );
         assert_eq!(
             *client.query_mock.call_args.lock().unwrap(),

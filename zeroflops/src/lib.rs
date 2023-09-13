@@ -161,8 +161,7 @@ impl CosmosEntity for List {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct ItemQuery {
-    pub fields: Vec<String>,
+pub struct Items {
     pub items: Vec<Item>,
 }
 
