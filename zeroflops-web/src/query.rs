@@ -446,7 +446,7 @@ pub mod test {
             query: String::from("SELECT name, user_score FROM c"),
         };
         assert_eq!(
-            super::get_list_query(
+            super::get_list_items(
                 &TestSessionClient {
                     get_mock: Mock::empty(),
                     query_mock: Mock::empty(),
@@ -488,7 +488,7 @@ pub mod test {
             write_mock: Mock::empty(),
         };
         assert_eq!(
-            super::get_list_query(&client, &UserId(String::new()), list)
+            super::get_list_items(&client, &UserId(String::new()), list)
                 .await
                 .unwrap(),
             Items {
@@ -516,7 +516,7 @@ pub mod test {
     }
 
     #[tokio::test]
-    async fn test_get_list_query() {
+    async fn test_get_list_items() {
         let list = List {
             id: String::new(),
             user_id: String::new(),
@@ -542,7 +542,7 @@ pub mod test {
             write_mock: Mock::empty(),
         };
         assert_eq!(
-            super::get_list_query(&client, &UserId(String::new()), list,)
+            super::get_list_items(&client, &UserId(String::new()), list,)
                 .await
                 .unwrap(),
             Items { items: Vec::new() }
