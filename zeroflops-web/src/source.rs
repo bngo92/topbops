@@ -5,7 +5,7 @@ use crate::{
     },
     UserId,
 };
-use futures::{StreamExt, TryStreamExt};
+use futures::{stream::FuturesUnordered, StreamExt, TryStreamExt};
 use serde_json::{Map, Value};
 use zeroflops::{Error, ItemMetadata, List, Source, SourceType, Spotify};
 
@@ -163,29 +163,31 @@ pub async fn create_items(
     items: Vec<super::Item>,
     is_upsert: bool,
 ) -> Result<(), Error> {
-    futures::stream::iter(items.into_iter().map(|item| async move {
-        match client
-            .write_document(DocumentWriter::Create(CreateDocumentBuilder {
-                collection_name: "items",
-                document: item,
-                is_upsert,
-            }))
-            .await
-        {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                if let azure_core::StatusCode::Conflict = e.as_http_error().unwrap().status() {
-                    Ok(())
-                } else {
-                    Err(e)
+    items
+        .into_iter()
+        .map(|item| async move {
+            match client
+                .write_document(DocumentWriter::Create(CreateDocumentBuilder {
+                    collection_name: "items",
+                    document: item,
+                    is_upsert,
+                }))
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    if let azure_core::StatusCode::Conflict = e.as_http_error().unwrap().status() {
+                        Ok(())
+                    } else {
+                        Err(e)
+                    }
                 }
             }
-        }
-    }))
-    .buffered(5)
-    .try_collect()
-    .await
-    .map_err(Error::from)
+        })
+        .collect::<FuturesUnordered<_>>()
+        .try_collect()
+        .await
+        .map_err(Error::from)
 }
 
 #[cfg(test)]

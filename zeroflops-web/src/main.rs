@@ -10,7 +10,7 @@ use axum::{
 use axum_login::{axum_sessions::SessionLayer, AuthLayer};
 use azure_data_cosmos::prelude::{AuthorizationToken, CosmosClient};
 use base64::prelude::{Engine, BASE64_STANDARD};
-use futures::{StreamExt, TryStreamExt};
+use futures::{stream::FuturesUnordered, TryStreamExt};
 use hyper::StatusCode;
 use serde_json::{Map, Value};
 use std::{
@@ -547,33 +547,35 @@ async fn update_items(
 ) -> Result<StatusCode, Error> {
     let updates: HashMap<String, HashMap<String, Value>> = serde_json::from_slice(&body)?;
     let user_id = &user_id;
-    futures::stream::iter(updates.into_iter().map(|(id, update)| async {
-        let mut item = get_item_doc(&state.client, user_id, &id).await?;
-        for (k, v) in update {
-            match k.as_str() {
-                "rating" => {
-                    item.rating = serde_json::from_value(v)?;
+    updates
+        .into_iter()
+        .map(|(id, update)| async {
+            let mut item = get_item_doc(&state.client, user_id, &id).await?;
+            for (k, v) in update {
+                match k.as_str() {
+                    "rating" => {
+                        item.rating = serde_json::from_value(v)?;
+                    }
+                    "hidden" => {
+                        item.hidden = serde_json::from_value(v)?;
+                    }
+                    _ => {}
                 }
-                "hidden" => {
-                    item.hidden = serde_json::from_value(v)?;
-                }
-                _ => {}
             }
-        }
-        state
-            .client
-            .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
-                collection_name: "items",
-                document_name: id,
-                partition_key: user_id.0.clone(),
-                document: item,
-            }))
-            .await
-            .map_err(Error::from)
-    }))
-    .buffered(5)
-    .try_collect::<()>()
-    .await?;
+            state
+                .client
+                .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
+                    collection_name: "items",
+                    document_name: id,
+                    partition_key: user_id.0.clone(),
+                    document: item,
+                }))
+                .await
+                .map_err(Error::from)
+        })
+        .collect::<FuturesUnordered<_>>()
+        .try_collect()
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -584,32 +586,33 @@ async fn delete_items(
 ) -> Result<StatusCode, Response> {
     let user = require_user(auth)?;
     let user_id = UserId(user.user_id);
-    let ids: Vec<_> = params["ids"].split(',').map(ToOwned::to_owned).collect();
     let state = &state;
     let user_id = &user_id;
-    futures::stream::iter(ids.into_iter().map(|id| async move {
-        match state
-            .client
-            .write_document(DocumentWriter::<Item>::Delete(DeleteDocumentBuilder {
-                collection_name: "items",
-                document_name: id.clone(),
-                partition_key: user_id.0.clone(),
-            }))
-            .await
-        {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                if let azure_core::StatusCode::NotFound = e.as_http_error().unwrap().status() {
-                    Ok(())
-                } else {
-                    Err(Error::from(e))
+    params["ids"]
+        .split(',')
+        .map(|id| async move {
+            match state
+                .client
+                .write_document(DocumentWriter::<Item>::Delete(DeleteDocumentBuilder {
+                    collection_name: "items",
+                    document_name: id.to_owned(),
+                    partition_key: user_id.0.clone(),
+                }))
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    if let azure_core::StatusCode::NotFound = e.as_http_error().unwrap().status() {
+                        Ok(())
+                    } else {
+                        Err(Error::from(e))
+                    }
                 }
             }
-        }
-    }))
-    .buffered(5)
-    .try_collect::<()>()
-    .await?;
+        })
+        .collect::<FuturesUnordered<_>>()
+        .try_collect()
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
