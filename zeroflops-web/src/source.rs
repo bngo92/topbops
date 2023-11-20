@@ -1,9 +1,7 @@
-use crate::{
-    cosmos::{
-        CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder, ReplaceDocumentBuilder,
-        SessionClient,
-    },
-    UserId,
+use crate::UserId;
+use cosmos::{
+    CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder, ReplaceDocumentBuilder,
+    SessionClient,
 };
 use futures::{stream::FuturesUnordered, StreamExt, TryStreamExt};
 use serde_json::{Map, Value};
@@ -193,10 +191,10 @@ pub async fn create_items(
 #[cfg(test)]
 mod test {
     use crate::{
-        cosmos::{DocumentWriter, ReplaceDocumentBuilder},
         query::test::{Mock, TestSessionClient},
         UserId,
     };
+    use cosmos::{DocumentWriter, ReplaceDocumentBuilder};
     use zeroflops::{List, ListMode, Source, SourceType};
 
     #[tokio::test]

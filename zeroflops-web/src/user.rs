@@ -1,7 +1,3 @@
-use crate::cosmos::{
-    CosmosParam, CosmosQuery, CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder,
-    QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
-};
 use ::spotify::{AuthClient, SpotifyCredentials};
 use async_trait::async_trait;
 use axum_login::{
@@ -14,6 +10,10 @@ use azure_data_cosmos::{
     CosmosEntity,
 };
 use base64::prelude::{Engine, BASE64_STANDARD};
+use cosmos::{
+    CosmosParam, CosmosQuery, CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder,
+    QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
+};
 use hyper::{Body, Client, Method, Request, Uri};
 use hyper_tls::HttpsConnector;
 use rand::Rng;
@@ -352,14 +352,12 @@ pub fn generate_secret() -> String {
 #[cfg(test)]
 mod test {
     use super::{Auth, GoogleUser, User};
-    use crate::{
-        cosmos::{
-            CosmosParam, CosmosQuery, CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder,
-            QueryDocumentsBuilder, ReplaceDocumentBuilder,
-        },
-        query::test::{Mock, TestSessionClient},
-    };
+    use crate::query::test::{Mock, TestSessionClient};
     use async_trait::async_trait;
+    use cosmos::{
+        CosmosParam, CosmosQuery, CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder,
+        QueryDocumentsBuilder, ReplaceDocumentBuilder,
+    };
     use spotify::{AuthClient, SpotifyCredentials};
     use std::sync::{Arc, Mutex};
     use zeroflops::Error;

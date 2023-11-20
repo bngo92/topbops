@@ -1,7 +1,5 @@
-use crate::{
-    cosmos::{CosmosParam, CosmosQuery, CosmosSessionClient, QueryDocumentsBuilder, SessionClient},
-    UserId, ITEM_FIELDS,
-};
+use crate::{UserId, ITEM_FIELDS};
+use cosmos::{CosmosParam, CosmosQuery, CosmosSessionClient, QueryDocumentsBuilder, SessionClient};
 use serde_json::{Map, Value};
 use sqlparser::{
     ast::{
@@ -331,15 +329,13 @@ fn rewrite_identifier(id: Ident) -> Expr {
 #[cfg(test)]
 pub mod test {
     use super::IntoQuery;
-    use crate::{
-        cosmos::{
-            CosmosQuery, CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter,
-            GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
-        },
-        UserId,
-    };
+    use crate::UserId;
     use async_trait::async_trait;
     use azure_data_cosmos::CosmosEntity;
+    use cosmos::{
+        CosmosQuery, CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter,
+        GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
+    };
     use serde::{de::DeserializeOwned, Serialize};
     use sqlparser::ast::Query;
     use std::sync::{Arc, Mutex};

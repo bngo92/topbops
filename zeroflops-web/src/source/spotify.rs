@@ -1,7 +1,5 @@
-use crate::{
-    cosmos::{CosmosParam, CosmosQuery, CosmosSessionClient, QueryDocumentsBuilder, SessionClient},
-    UserId,
-};
+use crate::UserId;
+use cosmos::{CosmosParam, CosmosQuery, CosmosSessionClient, QueryDocumentsBuilder, SessionClient};
 use futures::{StreamExt, TryStreamExt};
 use hyper::{Body, Client, Method, Request, Uri};
 use hyper_tls::HttpsConnector;

@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use zeroflops::ItemMetadata;
 
-pub mod cosmos;
 pub mod query;
 pub mod source;
 pub mod user;

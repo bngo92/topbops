@@ -10,11 +10,12 @@ anyhow = "1.0.71"
 async-trait.workspace = true
 axum = "0.6.18"
 axum-login = "0.5.0"
-azure_core = "0.4.0"
-azure_data_cosmos = "0.5.0"
+azure_core.workspace = true
+azure_data_cosmos.workspace = true
 base64 = "0.21.0"
+cosmos = { path = "../cosmos/" }
 eyre = "0.6.8"
-futures = "0.3.19"
+futures.workspace = true
 hyper = { version = "0.14", features = ["full"] }
 hyper-tls = "0.5.0"
 rand = { version = "0.8.4", features = ["min_const_gen"] }

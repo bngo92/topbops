@@ -10,6 +10,11 @@ use axum::{
 use axum_login::{axum_sessions::SessionLayer, AuthLayer};
 use azure_data_cosmos::prelude::{AuthorizationToken, CosmosClient};
 use base64::prelude::{Engine, BASE64_STANDARD};
+use cosmos::{
+    CosmosParam, CosmosQuery, CosmosSessionClient, CreateDocumentBuilder, DeleteDocumentBuilder,
+    DocumentWriter, GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder,
+    SessionClient,
+};
 use futures::{stream::FuturesUnordered, TryStreamExt};
 use hyper::StatusCode;
 use serde_json::{Map, Value};
@@ -28,11 +33,6 @@ use zeroflops::{
     Error, Id, Items, List, ListMode, Lists,
 };
 use zeroflops_web::{
-    cosmos::{
-        CosmosParam, CosmosQuery, CosmosSessionClient, CreateDocumentBuilder,
-        DeleteDocumentBuilder, DocumentWriter, GetDocumentBuilder, QueryDocumentsBuilder,
-        ReplaceDocumentBuilder, SessionClient,
-    },
     query, source,
     source::spotify,
     user,

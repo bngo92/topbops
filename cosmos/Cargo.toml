@@ -1,0 +1,15 @@
+[package]
+name = "cosmos"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait.workspace = true
+azure_core.workspace = true
+azure_data_cosmos.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zeroflops = { path = "../zeroflops/", features = ["hyper"] }
