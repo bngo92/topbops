@@ -1,11 +1,13 @@
 use crate::UserId;
-use cosmos::{
-    CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder, ReplaceDocumentBuilder,
-    SessionClient,
-};
 use futures::{stream::FuturesUnordered, StreamExt, TryStreamExt};
 use serde_json::{Map, Value};
-use zeroflops::{Error, ItemMetadata, List, Source, SourceType, Spotify};
+use zeroflops::{
+    storage::{
+        CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder, ReplaceDocumentBuilder,
+        SessionClient,
+    },
+    Error, ItemMetadata, List, Source, SourceType, Spotify,
+};
 
 pub mod setlist;
 pub mod spotify;
@@ -194,8 +196,10 @@ mod test {
         query::test::{Mock, TestSessionClient},
         UserId,
     };
-    use cosmos::{DocumentWriter, ReplaceDocumentBuilder};
-    use zeroflops::{List, ListMode, Source, SourceType};
+    use zeroflops::{
+        storage::{DocumentWriter, ReplaceDocumentBuilder},
+        List, ListMode, Source, SourceType,
+    };
 
     #[tokio::test]
     async fn test_update_empty_list_items() {

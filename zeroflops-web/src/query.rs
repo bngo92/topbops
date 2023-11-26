@@ -1,5 +1,5 @@
 use crate::{UserId, ITEM_FIELDS};
-use cosmos::{CosmosParam, CosmosQuery, CosmosSessionClient, QueryDocumentsBuilder, SessionClient};
+use cosmos::CosmosSessionClient;
 use serde_json::{Map, Value};
 use sqlparser::{
     ast::{
@@ -10,7 +10,10 @@ use sqlparser::{
     parser::Parser,
 };
 use std::collections::{HashMap, VecDeque};
-use zeroflops::{Error, ItemMetadata, Items, List, ListMode};
+use zeroflops::{
+    storage::{CosmosParam, CosmosQuery, QueryDocumentsBuilder, SessionClient},
+    Error, ItemMetadata, Items, List, ListMode,
+};
 
 pub async fn get_view_items(
     client: &impl SessionClient,
@@ -332,14 +335,16 @@ pub mod test {
     use crate::UserId;
     use async_trait::async_trait;
     use azure_data_cosmos::CosmosEntity;
-    use cosmos::{
-        CosmosQuery, CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter,
-        GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
-    };
     use serde::{de::DeserializeOwned, Serialize};
     use sqlparser::ast::Query;
     use std::sync::{Arc, Mutex};
-    use zeroflops::{Error, Item, ItemMetadata, Items, List, ListMode};
+    use zeroflops::{
+        storage::{
+            CosmosQuery, CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter,
+            GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
+        },
+        Error, Item, ItemMetadata, Items, List, ListMode,
+    };
 
     pub struct Mock<T, U> {
         pub call_args: Arc<Mutex<Vec<T>>>,

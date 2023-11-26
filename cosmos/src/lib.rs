@@ -1,145 +1,18 @@
 use async_trait::async_trait;
 use azure_data_cosmos::{
-    prelude::{
-        self as cosmos, ConsistencyLevel, DatabaseClient, GetDocumentResponse, Param, Query,
-    },
+    prelude::{self as cosmos, ConsistencyLevel, DatabaseClient, GetDocumentResponse},
     CosmosEntity,
 };
 use futures::TryStreamExt;
 use serde::{de::DeserializeOwned, Serialize};
-use serde_json::Value;
 use std::sync::{Arc, RwLock};
-use zeroflops::Error;
-
-#[derive(Debug, PartialEq)]
-pub struct CosmosQuery {
-    query: String,
-    parameters: Vec<CosmosParam>,
-}
-
-impl CosmosQuery {
-    pub fn new(query: String) -> CosmosQuery {
-        CosmosQuery {
-            query,
-            parameters: Vec::new(),
-        }
-    }
-
-    pub fn with_params<T: Into<Vec<CosmosParam>>>(query: String, parameters: T) -> CosmosQuery {
-        CosmosQuery {
-            query,
-            parameters: parameters.into(),
-        }
-    }
-
-    fn into_query(self) -> Query {
-        Query::with_params(
-            self.query,
-            self.parameters
-                .into_iter()
-                .map(|param| Param::new(param.name, param.value))
-                .collect::<Vec<_>>(),
-        )
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct CosmosParam {
-    name: String,
-    value: Value,
-}
-
-impl CosmosParam {
-    pub fn new<T: Into<Value>>(name: String, value: T) -> CosmosParam {
-        CosmosParam {
-            name,
-            value: value.into(),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct GetDocumentBuilder {
-    pub collection_name: &'static str,
-    pub document_name: String,
-    pub partition_key: String,
-}
-
-impl GetDocumentBuilder {
-    pub fn new(
-        collection_name: &'static str,
-        document_name: String,
-        partition_key: String,
-    ) -> GetDocumentBuilder {
-        GetDocumentBuilder {
-            collection_name,
-            document_name,
-            partition_key,
-        }
-    }
-
-    fn into_cosmos<T: DeserializeOwned + Send + Sync>(
-        self,
-        db: &DatabaseClient,
-    ) -> Result<cosmos::GetDocumentBuilder<T>, Error> {
-        Ok(db
-            .collection_client(self.collection_name)
-            .document_client(self.document_name, &self.partition_key)?
-            .get_document())
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct QueryDocumentsBuilder {
-    pub collection_name: &'static str,
-    pub query: CosmosQuery,
-    pub query_cross_partition: bool,
-    pub parallelize_cross_partition_query: bool,
-}
-
-impl QueryDocumentsBuilder {
-    pub fn new(collection_name: &'static str, query: CosmosQuery) -> QueryDocumentsBuilder {
-        QueryDocumentsBuilder {
-            collection_name,
-            query,
-            query_cross_partition: false,
-            parallelize_cross_partition_query: false,
-        }
-    }
-
-    fn into_cosmos(self, db: &DatabaseClient) -> Result<cosmos::QueryDocumentsBuilder, Error> {
-        let mut builder = db
-            .collection_client(self.collection_name)
-            .query_documents(self.query.into_query());
-        if self.query_cross_partition {
-            builder = builder.query_cross_partition(true)
-        }
-        if self.parallelize_cross_partition_query {
-            builder = builder.parallelize_cross_partition_query(true)
-        }
-        Ok(builder)
-    }
-}
-
-#[async_trait]
-pub trait SessionClient {
-    /// Use the existing session token if it exists
-    async fn get_document<T>(&self, builder: GetDocumentBuilder) -> Result<Option<T>, Error>
-    where
-        T: DeserializeOwned + Send + Sync;
-
-    async fn query_documents<T>(&self, builder: QueryDocumentsBuilder) -> Result<Vec<T>, Error>
-    where
-        T: DeserializeOwned + Send + Sync;
-
-    /// CosmosDB creates new session tokens after writes
-    async fn write_document<T>(
-        &self,
-        builder: DocumentWriter<T>,
-    ) -> Result<(), azure_core::error::Error>
-    where
-        T: Serialize + CosmosEntity + Send + 'static;
-}
+use zeroflops::{
+    storage::{
+        CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter, GetDocumentBuilder,
+        QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
+    },
+    Error,
+};
 
 pub struct CosmosSessionClient {
     db: DatabaseClient,
@@ -223,20 +96,17 @@ impl SessionClient for CosmosSessionClient {
             let session: ConsistencyLevel = session;
             println!("{:?}", session);
             match builder {
-                DocumentWriter::Create(builder) => builder
-                    .into_cosmos(&self.db)?
+                DocumentWriter::Create(builder) => create_cosmos(builder, &self.db)?
                     .consistency_level(session)
                     .into_future()
                     .await
                     .map(|r| r.session_token)?,
-                DocumentWriter::Replace(builder) => builder
-                    .into_cosmos(&self.db)?
+                DocumentWriter::Replace(builder) => replace_cosmos(builder, &self.db)?
                     .consistency_level(session)
                     .into_future()
                     .await
                     .map(|r| r.session_token)?,
-                DocumentWriter::Delete(builder) => builder
-                    .into_cosmos(&self.db)?
+                DocumentWriter::Delete(builder) => delete_cosmos(builder, &self.db)?
                     .consistency_level(session)
                     .into_future()
                     .await
@@ -244,18 +114,15 @@ impl SessionClient for CosmosSessionClient {
             }
         } else {
             match builder {
-                DocumentWriter::Create(builder) => builder
-                    .into_cosmos(&self.db)?
+                DocumentWriter::Create(builder) => create_cosmos(builder, &self.db)?
                     .into_future()
                     .await
                     .map(|r| r.session_token)?,
-                DocumentWriter::Replace(builder) => builder
-                    .into_cosmos(&self.db)?
+                DocumentWriter::Replace(builder) => replace_cosmos(builder, &self.db)?
                     .into_future()
                     .await
                     .map(|r| r.session_token)?,
-                DocumentWriter::Delete(builder) => builder
-                    .into_cosmos(&self.db)?
+                DocumentWriter::Delete(builder) => delete_cosmos(builder, &self.db)?
                     .into_future()
                     .await
                     .map(|r| r.session_token)?,
@@ -266,70 +133,35 @@ impl SessionClient for CosmosSessionClient {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum DocumentWriter<T> {
-    Create(CreateDocumentBuilder<T>),
-    Replace(ReplaceDocumentBuilder<T>),
-    Delete(DeleteDocumentBuilder),
-}
-
-#[derive(Debug, PartialEq)]
-pub struct CreateDocumentBuilder<T> {
-    pub collection_name: &'static str,
-    pub document: T,
-    pub is_upsert: bool,
-}
-
-impl<T: Serialize + CosmosEntity + Send + 'static> CreateDocumentBuilder<T> {
-    fn into_cosmos(
-        self,
-        db: &DatabaseClient,
-    ) -> Result<cosmos::CreateDocumentBuilder<T>, azure_core::error::Error> {
-        let mut builder = db
-            .collection_client(self.collection_name)
-            .create_document(self.document);
-        if self.is_upsert {
-            builder = builder.is_upsert(true)
-        }
-        Ok(builder)
+fn create_cosmos<T: Serialize + CosmosEntity + Send + 'static>(
+    builder: CreateDocumentBuilder<T>,
+    db: &DatabaseClient,
+) -> Result<cosmos::CreateDocumentBuilder<T>, azure_core::error::Error> {
+    let mut b = db
+        .collection_client(builder.collection_name)
+        .create_document(builder.document);
+    if builder.is_upsert {
+        b = b.is_upsert(true)
     }
+    Ok(b)
 }
 
-#[derive(Debug, PartialEq)]
-pub struct ReplaceDocumentBuilder<T> {
-    pub collection_name: &'static str,
-    pub document_name: String,
-    pub partition_key: String,
-    pub document: T,
+fn replace_cosmos<T: Serialize + CosmosEntity + Send + 'static>(
+    builder: ReplaceDocumentBuilder<T>,
+    db: &DatabaseClient,
+) -> Result<cosmos::ReplaceDocumentBuilder<T>, azure_core::error::Error> {
+    Ok(db
+        .collection_client(builder.collection_name)
+        .document_client(&builder.document_name, &builder.partition_key)?
+        .replace_document(builder.document))
 }
 
-impl<T: Serialize + CosmosEntity + Send + 'static> ReplaceDocumentBuilder<T> {
-    fn into_cosmos(
-        self,
-        db: &DatabaseClient,
-    ) -> Result<cosmos::ReplaceDocumentBuilder<T>, azure_core::error::Error> {
-        Ok(db
-            .collection_client(self.collection_name)
-            .document_client(&self.document_name, &self.partition_key)?
-            .replace_document(self.document))
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct DeleteDocumentBuilder {
-    pub collection_name: &'static str,
-    pub document_name: String,
-    pub partition_key: String,
-}
-
-impl DeleteDocumentBuilder {
-    fn into_cosmos(
-        self,
-        db: &DatabaseClient,
-    ) -> Result<cosmos::DeleteDocumentBuilder, azure_core::error::Error> {
-        Ok(db
-            .collection_client(self.collection_name)
-            .document_client(&self.document_name, &self.partition_key)?
-            .delete_document())
-    }
+fn delete_cosmos(
+    builder: DeleteDocumentBuilder,
+    db: &DatabaseClient,
+) -> Result<cosmos::DeleteDocumentBuilder, azure_core::error::Error> {
+    Ok(db
+        .collection_client(builder.collection_name)
+        .document_client(&builder.document_name, &builder.partition_key)?
+        .delete_document())
 }

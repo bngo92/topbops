@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub mod spotify;
+pub mod storage;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Lists {

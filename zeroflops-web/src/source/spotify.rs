@@ -1,5 +1,5 @@
 use crate::UserId;
-use cosmos::{CosmosParam, CosmosQuery, CosmosSessionClient, QueryDocumentsBuilder, SessionClient};
+use cosmos::CosmosSessionClient;
 use futures::{StreamExt, TryStreamExt};
 use hyper::{Body, Client, Method, Request, Uri};
 use hyper_tls::HttpsConnector;
@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 use std::collections::HashMap;
 use zeroflops::{
     spotify::{Playlist, Playlists, RecentTrack},
+    storage::{CosmosParam, CosmosQuery, QueryDocumentsBuilder, SessionClient},
     Error, Id, List, ListMode, Source, SourceType, Spotify,
 };
 

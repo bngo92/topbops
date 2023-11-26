@@ -2374,6 +2374,7 @@ dependencies = [
 name = "zeroflops"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "azure_core",
  "azure_data_cosmos",

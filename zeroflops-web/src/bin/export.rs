@@ -4,8 +4,11 @@ use std::{
 };
 
 use azure_data_cosmos::{clients::CosmosClient, resources::permission::AuthorizationToken};
-use cosmos::{CosmosQuery, CosmosSessionClient, QueryDocumentsBuilder, SessionClient};
-use zeroflops::List;
+use cosmos::CosmosSessionClient;
+use zeroflops::{
+    storage::{CosmosQuery, QueryDocumentsBuilder, SessionClient},
+    List,
+};
 use zeroflops_web::Item;
 
 #[tokio::main]

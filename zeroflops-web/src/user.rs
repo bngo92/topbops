@@ -10,17 +10,19 @@ use azure_data_cosmos::{
     CosmosEntity,
 };
 use base64::prelude::{Engine, BASE64_STANDARD};
-use cosmos::{
-    CosmosParam, CosmosQuery, CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder,
-    QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
-};
 use hyper::{Body, Client, Method, Request, Uri};
 use hyper_tls::HttpsConnector;
 use rand::Rng;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-use zeroflops::Error;
+use zeroflops::{
+    storage::{
+        CosmosParam, CosmosQuery, CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder,
+        QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
+    },
+    Error,
+};
 
 #[async_trait]
 pub trait Auth {
@@ -354,13 +356,15 @@ mod test {
     use super::{Auth, GoogleUser, User};
     use crate::query::test::{Mock, TestSessionClient};
     use async_trait::async_trait;
-    use cosmos::{
-        CosmosParam, CosmosQuery, CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder,
-        QueryDocumentsBuilder, ReplaceDocumentBuilder,
-    };
     use spotify::{AuthClient, SpotifyCredentials};
     use std::sync::{Arc, Mutex};
-    use zeroflops::Error;
+    use zeroflops::{
+        storage::{
+            CosmosParam, CosmosQuery, CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder,
+            QueryDocumentsBuilder, ReplaceDocumentBuilder,
+        },
+        Error,
+    };
 
     struct TestAuth {
         current_user: Option<User>,
