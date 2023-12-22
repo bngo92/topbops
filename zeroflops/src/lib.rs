@@ -1,14 +1,15 @@
-#[cfg(feature = "hyper")]
+#[cfg(feature = "full")]
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-#[cfg(feature = "hyper")]
+#[cfg(feature = "full")]
 use azure_data_cosmos::prelude::CosmosEntity;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub mod spotify;
+#[cfg(feature = "full")]
 pub mod storage;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -152,7 +153,7 @@ pub struct Id {
     pub raw_id: String,
 }
 
-#[cfg(feature = "hyper")]
+#[cfg(feature = "full")]
 impl CosmosEntity for List {
     type Entity = String;
 
@@ -206,25 +207,29 @@ impl std::error::Error for Error {}
 
 #[derive(Debug)]
 pub enum InternalError {
-    #[cfg(feature = "hyper")]
+    #[cfg(feature = "full")]
     HyperError(hyper::Error),
-    #[cfg(feature = "hyper")]
+    #[cfg(feature = "full")]
     RequestError(hyper::http::Error),
     JSONError(serde_json::Error),
-    #[cfg(feature = "hyper")]
+    #[cfg(feature = "full")]
     CosmosError(azure_core::error::Error),
     IOError(std::io::Error),
+    #[cfg(feature = "full")]
+    SqlError(rusqlite::Error),
+    #[cfg(feature = "full")]
+    SerdeError(serde_rusqlite::Error),
     Error(String),
 }
 
-#[cfg(feature = "hyper")]
+#[cfg(feature = "full")]
 impl From<hyper::Error> for Error {
     fn from(e: hyper::Error) -> Error {
         Error::InternalError(InternalError::HyperError(e))
     }
 }
 
-#[cfg(feature = "hyper")]
+#[cfg(feature = "full")]
 impl From<hyper::http::Error> for Error {
     fn from(e: hyper::http::Error) -> Error {
         Error::InternalError(InternalError::RequestError(e))
@@ -237,7 +242,7 @@ impl From<serde_json::Error> for Error {
     }
 }
 
-#[cfg(feature = "hyper")]
+#[cfg(feature = "full")]
 impl From<azure_core::error::Error> for Error {
     fn from(e: azure_core::error::Error) -> Error {
         Error::InternalError(InternalError::CosmosError(e))
@@ -262,7 +267,7 @@ impl From<sqlparser::parser::ParserError> for Error {
     }
 }
 
-#[cfg(feature = "hyper")]
+#[cfg(feature = "full")]
 impl From<Error> for Response {
     fn from(e: Error) -> Response {
         match e {
@@ -272,5 +277,19 @@ impl From<Error> for Response {
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
         }
+    }
+}
+
+#[cfg(feature = "full")]
+impl From<rusqlite::Error> for Error {
+    fn from(e: rusqlite::Error) -> Error {
+        Error::InternalError(InternalError::SqlError(e))
+    }
+}
+
+#[cfg(feature = "full")]
+impl From<serde_rusqlite::Error> for Error {
+    fn from(e: serde_rusqlite::Error) -> Error {
+        Error::InternalError(InternalError::SerdeError(e))
     }
 }

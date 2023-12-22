@@ -11,9 +11,11 @@ axum = { version = "0.6.18", optional = true }
 azure_core = { version = "0.4.0", optional = true }
 azure_data_cosmos = { version = "0.5.0", optional = true }
 hyper = { version = "0.14", features = ["full"], optional = true }
+rusqlite = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
+serde_rusqlite = { workspace = true, optional = true }
 sqlparser.workspace = true
 
 [features]
-hyper = ["dep:axum", "dep:azure_core", "dep:azure_data_cosmos", "dep:hyper"]
+full = ["dep:axum", "dep:azure_core", "dep:azure_data_cosmos", "dep:hyper", "dep:rusqlite", "dep:serde_rusqlite"]

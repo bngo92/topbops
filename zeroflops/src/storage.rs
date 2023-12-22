@@ -1,13 +1,12 @@
+use crate::Error;
 use async_trait::async_trait;
 use azure_data_cosmos::{
-    prelude::{
-        self as cosmos, DatabaseClient, Param, Query,
-    },
+    prelude::{self as cosmos, DatabaseClient, Param, Query},
     CosmosEntity,
 };
+use rusqlite::{Connection, OptionalExtension, ToSql};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
-use crate::Error;
 
 #[derive(Debug, PartialEq)]
 pub struct CosmosQuery {
@@ -137,6 +136,65 @@ pub trait SessionClient {
     ) -> Result<(), azure_core::error::Error>
     where
         T: Serialize + CosmosEntity + Send + 'static;
+}
+
+pub struct SqlSessionClient {
+    pub path: &'static str,
+}
+
+#[async_trait]
+impl SessionClient for SqlSessionClient {
+    async fn get_document<T>(&self, builder: GetDocumentBuilder) -> Result<Option<T>, Error>
+    where
+        T: DeserializeOwned + Send + Sync,
+    {
+        let conn = Connection::open(self.path)?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT * FROM {} WHERE id = ?1 AND user_id = ?2",
+            builder.collection_name
+        ))?;
+        stmt.query_row([&builder.document_name, &builder.partition_key], |row| {
+            Ok(serde_rusqlite::from_row(row))
+        })
+        .optional()?
+        .transpose()
+        .map_err(Error::from)
+    }
+
+    async fn query_documents<T>(&self, builder: QueryDocumentsBuilder) -> Result<Vec<T>, Error>
+    where
+        T: DeserializeOwned + Send + Sync,
+    {
+        let params: Vec<_> = builder
+            .query
+            .parameters
+            .into_iter()
+            .map(|p| {
+                if let Some(s) = p.value.as_str() {
+                    Box::new(s.to_owned()) as Box<dyn ToSql>
+                } else {
+                    Box::new(p.value) as Box<dyn ToSql>
+                }
+            })
+            .collect();
+        let conn = Connection::open(self.path)?;
+        let mut stmt = conn.prepare(&builder.query.query)?;
+        let query = stmt.query(rusqlite::params_from_iter(params))?;
+        serde_rusqlite::from_rows(query)
+            .collect::<Result<_, _>>()
+            .map_err(Error::from)
+    }
+
+    /// CosmosDB creates new session tokens after writes
+    async fn write_document<T>(
+        &self,
+        _builder: DocumentWriter<T>,
+    ) -> Result<(), azure_core::error::Error>
+    where
+        T: Serialize + CosmosEntity + Send + 'static,
+    {
+        todo!()
+    }
 }
 
 #[derive(Debug, PartialEq)]

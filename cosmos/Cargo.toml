@@ -12,4 +12,4 @@ azure_data_cosmos.workspace = true
 futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-zeroflops = { path = "../zeroflops/", features = ["hyper"] }
+zeroflops = { path = "../zeroflops/", features = ["full"] }
