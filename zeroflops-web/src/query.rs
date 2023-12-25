@@ -1,17 +1,16 @@
 use crate::{UserId, ITEM_FIELDS};
-use cosmos::CosmosSessionClient;
 use serde_json::{Map, Value};
 use sqlparser::{
     ast::{
-        BinaryOperator, Expr, FunctionArg, FunctionArgExpr, Ident, Query, SelectItem, SetExpr,
-        Statement, TableFactor,
+        BinaryOperator, Expr, FunctionArg, FunctionArgExpr, Ident, JsonOperator, Query, SelectItem,
+        SetExpr, Statement, TableFactor,
     },
     dialect::MySqlDialect,
     parser::Parser,
 };
 use std::collections::{HashMap, VecDeque};
 use zeroflops::{
-    storage::{CosmosParam, CosmosQuery, QueryDocumentsBuilder, SessionClient},
+    storage::{CosmosParam, CosmosQuery, QueryDocumentsBuilder, SessionClient, SqlSessionClient},
     Error, ItemMetadata, Items, List, ListMode,
 };
 
@@ -34,7 +33,7 @@ pub async fn get_view_items(
         let (query, _) = rewrite_query(query, &UserId(list.user_id.clone()))?;
         client
             .query_documents::<Map<String, Value>>(QueryDocumentsBuilder::new(
-                "items",
+                "item",
                 CosmosQuery::new(query.to_string()),
             ))
             .await?
@@ -61,7 +60,7 @@ pub async fn get_list_items(
         let (query, map, ids) = rewrite_list_query(&list, user_id)?;
         let mut items: Vec<_> = client
             .query_documents(QueryDocumentsBuilder::new(
-                "items",
+                "item",
                 CosmosQuery::new(query.to_string()),
             ))
             .await
@@ -109,7 +108,7 @@ fn format_value(v: &Value) -> String {
 }
 
 pub async fn query_list(
-    client: &CosmosSessionClient,
+    client: &SqlSessionClient,
     user_id: &UserId,
     list: List,
 ) -> Result<Vec<Map<String, Value>>, Error> {
@@ -119,24 +118,39 @@ pub async fn query_list(
     } else if list.items.is_empty() {
         return Ok(Vec::new());
     } else {
-        String::from("SELECT c.id, c.type, c.name, c.rating, c.user_score, c.user_wins, c.user_losses, c.hidden, c.metadata FROM c WHERE c.user_id = @user_id AND ARRAY_CONTAINS(@ids, c.id)")
+        format!(
+            "SELECT id, type, name, rating, user_score, user_wins, user_losses, hidden, metadata FROM item WHERE user_id = ?1 AND id IN ({})",
+            &"?,".repeat(list.items.len())[..list.items.len() * 2 - 1]
+        )
     };
-    client
-        .query_documents(QueryDocumentsBuilder::new(
-            "items",
+    Ok(client
+        .query_documents::<Map<String, Value>>(QueryDocumentsBuilder::new(
+            "item",
             CosmosQuery::with_params(
                 query,
-                [
-                    CosmosParam::new(String::from("@user_id"), user_id.0.clone()),
-                    CosmosParam::new(
-                        String::from("@ids"),
-                        list.items.iter().map(|i| i.id.clone()).collect::<Vec<_>>(),
-                    ),
-                ],
+                std::iter::once(CosmosParam::new(
+                    String::from("@user_id"),
+                    user_id.0.clone(),
+                ))
+                .chain(
+                    list.items
+                        .iter()
+                        .map(|i| CosmosParam::new(String::from("@ids"), i.id.clone())),
+                )
+                .collect::<Vec<_>>(),
             ),
         ))
         .await
-        .map_err(Error::from)
+        .map_err(Error::from)?
+        .into_iter()
+        // Cast hidden to bool
+        .map(|mut m| {
+            if let Some(hidden) = m.get_mut("hidden") {
+                *hidden = Value::Bool(hidden.as_i64().unwrap() != 0);
+            }
+            m
+        })
+        .collect())
 }
 
 fn rewrite_list_query<'a>(
@@ -166,10 +180,7 @@ fn rewrite_list_query<'a>(
 
 fn id_filter(ids: &[String]) -> Expr {
     Expr::InList {
-        expr: Box::new(Expr::CompoundIdentifier(vec![
-            Ident::new("c"),
-            Ident::new("id"),
-        ])),
+        expr: Box::new(Expr::CompoundIdentifier(vec![Ident::new("id")])),
         list: ids
             .iter()
             .map(|id| Expr::Identifier(Ident::new(id)))
@@ -203,7 +214,7 @@ fn rewrite_query_impl(
         if alias.is_some() {
             return Err(Error::client_error("alias is not supported"));
         }
-        name.0[0].value = String::from("c");
+        name.0[0].value = String::from("item");
     } else {
         todo!();
     };
@@ -222,10 +233,7 @@ fn rewrite_query_impl(
         }
     }
     let required_user_id = Expr::BinaryOp {
-        left: Box::new(Expr::CompoundIdentifier(vec![
-            Ident::new("c"),
-            Ident::new("user_id"),
-        ])),
+        left: Box::new(Expr::CompoundIdentifier(vec![Ident::new("user_id")])),
         op: BinaryOperator::Eq,
         right: Box::new(Expr::Identifier(Ident::new(format!("\"{}\"", user_id.0)))),
     };
@@ -322,11 +330,15 @@ fn rewrite_expr(expr: &mut Expr) {
 }
 
 fn rewrite_identifier(id: Ident) -> Expr {
-    Expr::CompoundIdentifier(if ITEM_FIELDS.contains(&id.value.as_ref()) {
-        vec![Ident::new("c"), id]
+    if ITEM_FIELDS.contains(&id.value.as_ref()) {
+        Expr::Identifier(id)
     } else {
-        vec![Ident::new("c"), Ident::new("metadata"), id]
-    })
+        Expr::JsonAccess {
+            left: Box::new(Expr::Identifier(Ident::new("metadata"))),
+            operator: JsonOperator::Arrow,
+            right: Box::new(Expr::Identifier(Ident::new(format!("'{}'", id.value)))),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -510,8 +522,11 @@ pub mod test {
         assert_eq!(
             *client.query_mock.call_args.lock().unwrap(),
             [QueryDocumentsBuilder::new(
-                "items",
-                CosmosQuery::new("SELECT c.name, c.user_score, c.id FROM c WHERE c.user_id = \"\" AND c.id IN (\"id\")".to_owned())
+                "item",
+                CosmosQuery::new(
+                    "SELECT name, user_score, id FROM item WHERE user_id = \"\" AND id IN (\"id\")"
+                        .to_owned()
+                )
             )]
         );
     }
@@ -551,8 +566,11 @@ pub mod test {
         assert_eq!(
             *client.query_mock.call_args.lock().unwrap(),
             [QueryDocumentsBuilder::new(
-                "items",
-                CosmosQuery::new("SELECT c.name, c.user_score, c.id FROM c WHERE c.user_id = \"\" AND c.id IN (\"\")".to_owned())
+                "item",
+                CosmosQuery::new(
+                    "SELECT name, user_score, id FROM item WHERE user_id = \"\" AND id IN (\"\")"
+                        .to_owned()
+                )
             )]
         );
     }
@@ -577,7 +595,7 @@ pub mod test {
         let (query, column_names) = rewrite_query("SELECT name, user_score FROM tracks").unwrap();
         assert_eq!(
             query.to_string(),
-            "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\""
+            "SELECT name, user_score FROM item WHERE user_id = \"demo\""
         );
         assert_eq!(column_names, vec!["name", "user_score"]);
     }
@@ -586,15 +604,15 @@ pub mod test {
     fn test_where() {
         for (input, expected) in [
             ("SELECT name, user_score FROM tracks WHERE user_score >= 1500",
-             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.user_score >= 1500"),
+             "SELECT name, user_score FROM item WHERE user_id = \"demo\" AND user_score >= 1500"),
             ("SELECT name, user_score FROM tracks WHERE user_score IN (1500)",
-             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.user_score IN (1500)"),
+             "SELECT name, user_score FROM item WHERE user_id = \"demo\" AND user_score IN (1500)"),
             ("SELECT name, user_score FROM tracks WHERE album = 'foo'",
-             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.metadata.album = 'foo'"),
+             "SELECT name, user_score FROM item WHERE user_id = \"demo\" AND metadata -> 'album' = 'foo'"),
             ("SELECT name, user_score FROM tracks WHERE album = \"foo\"",
-             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.metadata.album = \"foo\""),
+             "SELECT name, user_score FROM item WHERE user_id = \"demo\" AND metadata -> 'album' = \"foo\""),
             ("SELECT name, user_score FROM tracks WHERE ARRAY_CONTAINS(artists, \"foo\")",
-             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND ARRAY_CONTAINS(c.metadata.artists, \"foo\")"),
+             "SELECT name, user_score FROM item WHERE user_id = \"demo\" AND ARRAY_CONTAINS(metadata -> 'artists', \"foo\")"),
         ] {
             let (query, column_names) = rewrite_query(input).unwrap();
             assert_eq!(query.to_string(), expected);
@@ -606,9 +624,9 @@ pub mod test {
     fn test_id_filter() {
         for (input, expected) in [
             ("SELECT name, user_score FROM tracks WHERE user_score >= 1500",
-             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.id IN (\"1\", \"2\", \"3\") AND c.user_score >= 1500"),
+             "SELECT name, user_score FROM item WHERE user_id = \"demo\" AND id IN (\"1\", \"2\", \"3\") AND user_score >= 1500"),
             ("SELECT name, user_score FROM tracks WHERE user_score IN (1500)",
-             "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.id IN (\"1\", \"2\", \"3\") AND c.user_score IN (1500)"),
+             "SELECT name, user_score FROM item WHERE user_id = \"demo\" AND id IN (\"1\", \"2\", \"3\") AND user_score IN (1500)"),
         ] {
             let (query, column_names) = rewrite_query_with_id_filter(input, &["\"1\"".into(), "\"2\"".into(), "\"3\"".into()]).unwrap();
             assert_eq!(query.to_string(), expected);
@@ -620,7 +638,7 @@ pub mod test {
     fn test_group_by() {
         let (query, column_names) =
             rewrite_query("SELECT artists, AVG(user_score) FROM tracks GROUP BY artists").unwrap();
-        assert_eq!(query.to_string(), "SELECT c.metadata.artists, AVG(c.user_score) FROM c WHERE c.user_id = \"demo\" GROUP BY c.metadata.artists");
+        assert_eq!(query.to_string(), "SELECT metadata -> 'artists', AVG(user_score) FROM item WHERE user_id = \"demo\" GROUP BY metadata -> 'artists'");
         assert_eq!(column_names, vec!["artists", "AVG(user_score)"]);
     }
 
@@ -630,7 +648,7 @@ pub mod test {
             rewrite_query("SELECT name, user_score FROM tracks ORDER BY user_score").unwrap();
         assert_eq!(
             query.to_string(),
-            "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" ORDER BY c.user_score"
+            "SELECT name, user_score FROM item WHERE user_id = \"demo\" ORDER BY user_score"
         );
         assert_eq!(column_names, vec!["name", "user_score"]);
     }
@@ -640,7 +658,7 @@ pub mod test {
         let (query, column_names) = rewrite_query("SELECT COUNT(1) FROM tracks").unwrap();
         assert_eq!(
             query.to_string(),
-            "SELECT COUNT(1) FROM c WHERE c.user_id = \"demo\""
+            "SELECT COUNT(1) FROM item WHERE user_id = \"demo\""
         );
         assert_eq!(column_names, vec!["COUNT(1)"]);
     }
@@ -651,7 +669,7 @@ pub mod test {
             rewrite_query("SELECT name, user_score FROM tracks WHERE hidden = false").unwrap();
         assert_eq!(
             query.to_string(),
-            "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.hidden = false"
+            "SELECT name, user_score FROM item WHERE user_id = \"demo\" AND hidden = false"
         );
         assert_eq!(column_names, vec!["name", "user_score"]);
     }
@@ -662,7 +680,7 @@ pub mod test {
             rewrite_query("SELECT name, user_score FROM tracks WHERE hidden = true").unwrap();
         assert_eq!(
             query.to_string(),
-            "SELECT c.name, c.user_score FROM c WHERE c.user_id = \"demo\" AND c.hidden = true"
+            "SELECT name, user_score FROM item WHERE user_id = \"demo\" AND hidden = true"
         );
         assert_eq!(column_names, vec!["name", "user_score"]);
     }

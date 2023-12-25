@@ -61,7 +61,7 @@ impl Component for Search {
                         <p>{"Count how many songs were performed by each distinct group of artists:"}</p>
                         <code>{"SELECT artists, COUNT(1) FROM c WHERE type='track' GROUP BY artists"}</code>
                         <p>{"Get songs performed by Troy:"}</p>
-                        <code>{"SELECT name FROM c WHERE type='track' AND ARRAY_CONTAINS(artists, 'Troy')"}</code>
+                        <code>{"SELECT name, artists FROM c, json_each(metadata->'artists') WHERE json_each.value='Troy'"}</code>
                         <p>{"Get your average score for each group of artists:"}</p>
                         <code>{"SELECT artists, AVG(user_score) FROM c WHERE type='track' GROUP BY artists"}</code>
                         <p><strong>{"Fields"}</strong></p>

@@ -29,15 +29,16 @@ use zeroflops::{
     storage::{
         CosmosParam, CosmosQuery, CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter,
         GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
+        SqlSessionClient,
     },
-    Error, Id, Items, List, ListMode, Lists,
+    Error, Id, Items, List, ListMode, Lists, RawList,
 };
 use zeroflops_web::{
     query, source,
     source::spotify,
     user,
     user::{Auth, CosmosStore, GoogleClient, User},
-    Item, UserId,
+    Item, RawItem, UserId,
 };
 
 type AuthContext = axum_login::extractors::AuthContext<String, User, CosmosStore>;
@@ -160,22 +161,25 @@ async fn get_lists(
 ) -> Result<Json<Lists>, Response> {
     let user_id = get_user_or_demo_user(auth);
     let query = if let Some("true") = params.get("favorite").map(String::as_ref) {
-        "SELECT * FROM c WHERE c.user_id = @user_id AND c.favorite = true"
+        "SELECT * FROM list WHERE user_id = ?1 AND favorite = true"
     } else {
-        "SELECT * FROM c WHERE c.user_id = @user_id"
+        "SELECT * FROM list WHERE user_id = ?1"
     };
     Ok(Json(Lists {
         lists: state
-            .client
-            .query_documents(QueryDocumentsBuilder::new(
-                "lists",
+            .sql_client
+            .query_documents::<RawList>(QueryDocumentsBuilder::new(
+                "list",
                 CosmosQuery::with_params(
                     String::from(query),
                     [CosmosParam::new(String::from("@user_id"), user_id.0)],
                 ),
             ))
             .await
-            .map_err(Error::from)?,
+            .map_err(Error::from)?
+            .into_iter()
+            .map(RawList::try_into)
+            .collect::<Result<_, _>>()?,
     }))
 }
 
@@ -185,9 +189,11 @@ async fn get_list(
     auth: AuthContext,
 ) -> Result<Json<List>, Response> {
     let user_id = get_user_or_demo_user(auth);
-    let mut list = source::get_list(&state.client, &user_id, &id).await?;
+    let mut list = source::get_list(&state.sql_client, &user_id, &id).await?;
     if let ListMode::View(_) = list.mode {
-        list.items = query::get_view_items(&state.client, &list).await?.collect();
+        list.items = query::get_view_items(&state.sql_client, &list)
+            .await?
+            .collect();
     }
     Ok(Json(list))
 }
@@ -198,9 +204,9 @@ async fn get_list_items(
     auth: AuthContext,
 ) -> Result<Json<Items>, Response> {
     let user_id = get_user_or_demo_user(auth);
-    let list = source::get_list(&state.client, &user_id, &id).await?;
+    let list = source::get_list(&state.sql_client, &user_id, &id).await?;
     Ok(Json(
-        query::get_list_items(&state.client, &user_id, list).await?,
+        query::get_list_items(&state.sql_client, &user_id, list).await?,
     ))
 }
 
@@ -210,9 +216,9 @@ async fn query_list(
     auth: AuthContext,
 ) -> Result<Json<Vec<Map<String, Value>>>, Response> {
     let user_id = get_user_or_demo_user(auth);
-    let list = source::get_list(&state.client, &user_id, &id).await?;
+    let list = source::get_list(&state.sql_client, &user_id, &id).await?;
     Ok(Json(
-        query::query_list(&state.client, &user_id, list).await?,
+        query::query_list(&state.sql_client, &user_id, list).await?,
     ))
 }
 
@@ -262,7 +268,7 @@ async fn delete_list(
     state
         .client
         .write_document(DocumentWriter::<List>::Delete(DeleteDocumentBuilder {
-            collection_name: "lists",
+            collection_name: "list",
             document_name: id,
             partition_key: user_id.0,
         }))
@@ -283,9 +289,9 @@ async fn find_items(
 
     let (query, _) = query::rewrite_query(query, &user_id)?;
     let values: Vec<Map<String, Value>> = state
-        .client
+        .sql_client
         .query_documents(QueryDocumentsBuilder::new(
-            "items",
+            "item",
             CosmosQuery::new(query.to_string()),
         ))
         .await
@@ -343,9 +349,9 @@ async fn handle_stats_update(
 ) -> Result<StatusCode, Error> {
     let client = &state.client;
     let (list, win_item, lose_item) = futures::future::join3(
-        source::get_list(client, &user_id, id),
-        get_item_doc(client, &user_id, win),
-        get_item_doc(client, &user_id, lose),
+        source::get_list(&state.sql_client, &user_id, id),
+        get_item_doc(&state.sql_client, &user_id, win),
+        get_item_doc(&state.sql_client, &user_id, lose),
     )
     .await;
     let mut list = list?;
@@ -402,7 +408,7 @@ async fn handle_stats_update(
 
 async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<StatusCode, Error> {
     let user_id = UserId(user.user_id.clone());
-    let mut list = source::get_list(&state.client, &user_id, id).await?;
+    let mut list = source::get_list(&state.sql_client, &user_id, id).await?;
     let (_, external_id) = list.get_unique_source()?;
     let access_token = spotify::get_access_token(&state.client, user).await?;
     let external_id = if let Some(external_id) = external_id {
@@ -423,13 +429,13 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
         id.id
     };
     let ids: Vec<_> = match list.mode {
-        ListMode::User(_) => query::get_list_items(&state.client, &user_id, list)
+        ListMode::User(_) => query::get_list_items(&state.sql_client, &user_id, list)
             .await?
             .items
             .into_iter()
             .map(|i| i.metadata.unwrap().id)
             .collect(),
-        ListMode::View(_) => query::get_view_items(&state.client, &list)
+        ListMode::View(_) => query::get_view_items(&state.sql_client, &list)
             .await?
             .map(|i| i.id)
             .collect(),
@@ -494,19 +500,19 @@ pub async fn import_spotify(
 }
 
 async fn get_item_doc(
-    client: &CosmosSessionClient,
+    client: &SqlSessionClient,
     user_id: &UserId,
     id: &str,
 ) -> Result<Item, Error> {
     if let Some(item) = client
-        .get_document(GetDocumentBuilder::new(
-            "items",
+        .get_document::<RawItem>(GetDocumentBuilder::new(
+            "item",
             id.to_owned(),
             user_id.0.clone(),
         ))
         .await?
     {
-        Ok(item)
+        item.try_into()
     } else {
         todo!()
     }
@@ -532,7 +538,7 @@ async fn create_list_doc(
 ) -> Result<(), Error> {
     client
         .write_document(DocumentWriter::Create(CreateDocumentBuilder {
-            collection_name: "lists",
+            collection_name: "list",
             document: list,
             is_upsert,
         }))
@@ -550,7 +556,7 @@ async fn update_items(
     updates
         .into_iter()
         .map(|(id, update)| async {
-            let mut item = get_item_doc(&state.client, user_id, &id).await?;
+            let mut item = get_item_doc(&state.sql_client, user_id, &id).await?;
             for (k, v) in update {
                 match k.as_str() {
                     "rating" => {
@@ -565,7 +571,7 @@ async fn update_items(
             state
                 .client
                 .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
-                    collection_name: "items",
+                    collection_name: "item",
                     document_name: id,
                     partition_key: user_id.0.clone(),
                     document: item,
@@ -594,7 +600,7 @@ async fn delete_items(
             match state
                 .client
                 .write_document(DocumentWriter::<Item>::Delete(DeleteDocumentBuilder {
-                    collection_name: "items",
+                    collection_name: "item",
                     document_name: id.to_owned(),
                     partition_key: user_id.0.clone(),
                 }))
@@ -637,7 +643,7 @@ async fn get_spotify_recent_tracks(
     };
     let access_token = spotify::get_access_token(&state.client, &mut user).await?;
     Ok(Json(
-        spotify::get_recent_tracks(&state.client, &user_id, access_token).await?,
+        spotify::get_recent_tracks(&state.sql_client, &user_id, access_token).await?,
     ))
 }
 
@@ -655,6 +661,7 @@ async fn get_spotify_playlists(
 
 struct AppState {
     client: CosmosSessionClient,
+    sql_client: SqlSessionClient,
 }
 
 #[tokio::main]
@@ -674,6 +681,7 @@ async fn main() {
     let db = CosmosClient::new(account, authorization_token).database_client("topbops");
     let shared_state = Arc::new(AppState {
         client: CosmosSessionClient::new(db.clone(), Arc::new(RwLock::new(None))),
+        sql_client: SqlSessionClient { path: "zeroflops" },
     });
 
     // Reset demo user data during startup in production

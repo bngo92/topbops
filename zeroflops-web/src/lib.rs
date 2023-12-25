@@ -1,7 +1,7 @@
 use azure_data_cosmos::prelude::CosmosEntity;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use zeroflops::ItemMetadata;
+use zeroflops::{Error, ItemMetadata};
 
 pub mod query;
 pub mod source;
@@ -40,6 +40,58 @@ pub struct Item {
     pub user_losses: i32,
     pub metadata: Map<String, Value>,
     pub hidden: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct RawItem {
+    pub id: String,
+    pub user_id: String,
+    pub r#type: String,
+    pub name: String,
+    pub iframe: Option<String>,
+    pub rating: Option<i32>,
+    pub user_score: i32,
+    pub user_wins: i32,
+    pub user_losses: i32,
+    pub metadata: String,
+    pub hidden: bool,
+}
+
+impl From<Item> for RawItem {
+    fn from(i: Item) -> RawItem {
+        RawItem {
+            id: i.id,
+            user_id: i.user_id,
+            r#type: i.r#type,
+            name: i.name,
+            iframe: i.iframe,
+            rating: i.rating,
+            user_score: i.user_score,
+            user_wins: i.user_wins,
+            user_losses: i.user_losses,
+            metadata: serde_json::to_string(&i.metadata).expect("metadata should serialize"),
+            hidden: i.hidden,
+        }
+    }
+}
+
+impl TryFrom<RawItem> for Item {
+    type Error = Error;
+    fn try_from(i: RawItem) -> Result<Item, Error> {
+        Ok(Item {
+            id: i.id,
+            user_id: i.user_id,
+            r#type: i.r#type,
+            name: i.name,
+            iframe: i.iframe,
+            rating: i.rating,
+            user_score: i.user_score,
+            user_wins: i.user_wins,
+            user_losses: i.user_losses,
+            metadata: serde_json::from_str(&i.metadata)?,
+            hidden: i.hidden,
+        })
+    }
 }
 
 impl CosmosEntity for Item {

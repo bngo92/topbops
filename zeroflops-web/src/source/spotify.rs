@@ -8,7 +8,7 @@ use serde_json::{Map, Value};
 use std::collections::HashMap;
 use zeroflops::{
     spotify::{Playlist, Playlists, RecentTrack},
-    storage::{CosmosParam, CosmosQuery, QueryDocumentsBuilder, SessionClient},
+    storage::{CosmosParam, CosmosQuery, QueryDocumentsBuilder, SessionClient, SqlSessionClient},
     Error, Id, List, ListMode, Source, SourceType, Spotify,
 };
 
@@ -607,7 +607,7 @@ pub async fn search_song(
 }
 
 pub async fn get_recent_tracks(
-    cosmos_client: &CosmosSessionClient,
+    cosmos_client: &SqlSessionClient,
     user_id: &UserId,
     access_token: &str,
 ) -> Result<zeroflops::spotify::RecentTracks, Error> {
@@ -631,16 +631,24 @@ pub async fn get_recent_tracks(
         .iter()
         .map(|i| i.track.uri.to_owned())
         .collect();
-    let query = "SELECT c.id, c.rating, c.user_score FROM c WHERE c.user_id = @user_id AND ARRAY_CONTAINS(@ids, c.id)".to_owned();
+    let query = format!(
+        "SELECT id, rating, user_score FROM item WHERE user_id = ?1 AND id IN ({})",
+        &"?,".repeat(ids.len())[..ids.len() * 2 - 1]
+    );
     let items = cosmos_client
         .query_documents(QueryDocumentsBuilder::new(
-            "items",
+            "item",
             CosmosQuery::with_params(
                 query,
-                [
-                    CosmosParam::new(String::from("@user_id"), user_id.0.clone()),
-                    CosmosParam::new(String::from("@ids"), ids.clone()),
-                ],
+                std::iter::once(CosmosParam::new(
+                    String::from("@user_id"),
+                    user_id.0.clone(),
+                ))
+                .chain(
+                    ids.into_iter()
+                        .map(|i| CosmosParam::new(String::from("@ids"), i)),
+                )
+                .collect::<Vec<_>>(),
             ),
         ))
         .await

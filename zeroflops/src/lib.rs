@@ -36,6 +36,56 @@ pub struct List {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RawList {
+    pub id: String,
+    pub user_id: String,
+    pub mode: String,
+    // This is not editable for external lists
+    pub name: String,
+    // External lists can only have one data source that must match id
+    // Views have no data sources
+    pub sources: String,
+    pub iframe: Option<String>,
+    pub items: String,
+    pub favorite: bool,
+    // For external lists, query is only used to select fields (not filter)
+    pub query: String,
+}
+
+impl From<List> for RawList {
+    fn from(l: List) -> RawList {
+        RawList {
+            id: l.id,
+            user_id: l.user_id,
+            mode: serde_json::to_string(&l.mode).expect("mode should serialize"),
+            name: l.name,
+            sources: serde_json::to_string(&l.sources).expect("sources should serialize"),
+            iframe: l.iframe,
+            items: serde_json::to_string(&l.items).expect("items should serialize"),
+            favorite: l.favorite,
+            query: l.query,
+        }
+    }
+}
+
+impl TryFrom<RawList> for List {
+    type Error = Error;
+    fn try_from(l: RawList) -> Result<List, Error> {
+        Ok(List {
+            id: l.id,
+            user_id: l.user_id,
+            mode: serde_json::from_str(&l.mode)?,
+            name: l.name,
+            sources: serde_json::from_str(&l.sources)?,
+            iframe: l.iframe,
+            items: serde_json::from_str(&l.items)?,
+            favorite: l.favorite,
+            query: l.query,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ItemMetadata {
     pub id: String,
     pub name: String,

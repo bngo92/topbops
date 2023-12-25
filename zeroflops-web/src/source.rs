@@ -6,7 +6,7 @@ use zeroflops::{
         CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder, ReplaceDocumentBuilder,
         SessionClient,
     },
-    Error, ItemMetadata, List, Source, SourceType, Spotify,
+    Error, ItemMetadata, List, RawList, Source, SourceType, Spotify,
 };
 
 pub mod setlist;
@@ -59,7 +59,7 @@ pub async fn update_list(
 ) -> Result<(), Error> {
     client
         .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
-            collection_name: "lists",
+            collection_name: "list",
             document_name: list.id.clone(),
             partition_key: user_id.0.clone(),
             document: list,
@@ -145,14 +145,14 @@ pub async fn get_list(
     id: &str,
 ) -> Result<List, Error> {
     if let Some(list) = client
-        .get_document(GetDocumentBuilder::new(
-            "lists",
+        .get_document::<RawList>(GetDocumentBuilder::new(
+            "list",
             id.to_owned(),
             user_id.0.clone(),
         ))
         .await?
     {
-        Ok(list)
+        list.try_into()
     } else {
         todo!()
     }
@@ -168,7 +168,7 @@ pub async fn create_items(
         .map(|item| async move {
             match client
                 .write_document(DocumentWriter::Create(CreateDocumentBuilder {
-                    collection_name: "items",
+                    collection_name: "item",
                     document: item,
                     is_upsert,
                 }))
@@ -205,7 +205,7 @@ mod test {
     async fn test_update_empty_list_items() {
         let client = TestSessionClient {
             get_mock: Mock::new(vec![
-                r#"{"id":"","user_id":"","mode":{"User":null},"name":"","sources":[],"items":[],"favorite":false,"query":"SELECT name, user_score FROM c"}"#,
+                r#"{"id":"","user_id":"","mode":"{\"User\":null}","name":"","sources":"[]","items":"[]","favorite":false,"query":"SELECT name, user_score FROM c"}"#,
             ]),
             query_mock: Mock::empty(),
             write_mock: Mock::new(vec![()]),
@@ -230,7 +230,7 @@ mod test {
         assert_eq!(
             *client.write_mock.call_args.lock().unwrap(),
             vec![DocumentWriter::Replace(ReplaceDocumentBuilder {
-                collection_name: "lists",
+                collection_name: "list",
                 document_name: "".to_owned(),
                 partition_key: "".to_owned(),
                 document: r#"{"id":"","user_id":"","mode":{"User":null},"name":"New List","sources":[],"iframe":null,"items":[],"favorite":false,"query":"SELECT name, user_score FROM c"}"#.to_owned(),
@@ -242,8 +242,8 @@ mod test {
     async fn test_update_list_items_with_empty_source() {
         let client = TestSessionClient {
             get_mock: Mock::new(vec![
-                r#"{"id":"","user_id":"","mode":{"User":null},"name":"","sources":[],"items":[],"favorite":false,"query":"SELECT name, user_score FROM c"}"#,
-                r#"{"id":"","user_id":"","mode":{"User":null},"name":"source","sources":[],"items":[],"favorite":false,"query":"SELECT name, user_score FROM c"}"#,
+                r#"{"id":"","user_id":"","mode":"{\"User\":null}","name":"","sources":"[]","items":"[]","favorite":false,"query":"SELECT name, user_score FROM c"}"#,
+                r#"{"id":"","user_id":"","mode":"{\"User\":null}","name":"source","sources":"[]","items":"[]","favorite":false,"query":"SELECT name, user_score FROM c"}"#,
             ]),
             query_mock: Mock::empty(),
             write_mock: Mock::new(vec![()]),
@@ -271,7 +271,7 @@ mod test {
         assert_eq!(
             *client.write_mock.call_args.lock().unwrap(),
             vec![DocumentWriter::Replace(ReplaceDocumentBuilder {
-                collection_name: "lists",
+                collection_name: "list",
                 document_name: "".to_owned(),
                 partition_key: "".to_owned(),
                 document: r#"{"id":"","user_id":"","mode":{"User":null},"name":"New List","sources":[{"source_type":{"ListItems":""},"name":"source"}],"iframe":null,"items":[],"favorite":false,"query":"SELECT name, user_score FROM c"}"#.to_owned(),
@@ -283,8 +283,8 @@ mod test {
     async fn test_update_list_items_with_source() {
         let client = TestSessionClient {
             get_mock: Mock::new(vec![
-                r#"{"id":"","user_id":"","mode":{"User":null},"name":"","sources":[],"items":[],"favorite":false,"query":"SELECT name, user_score FROM c"}"#,
-                r#"{"id":"","user_id":"","mode":{"User":null},"name":"source","sources":[],"items":[{"id":"","name":"item","score":0,"wins":0,"losses":0}],"favorite":false,"query":"SELECT name, user_score FROM c"}"#,
+                r#"{"id":"","user_id":"","mode":"{\"User\":null}","name":"","sources":"[]","items":"[]","favorite":false,"query":"SELECT name, user_score FROM c"}"#,
+                r#"{"id":"","user_id":"","mode":"{\"User\":null}","name":"source","sources":"[]","items":"[{\"id\":\"\",\"name\":\"item\",\"score\":0,\"wins\":0,\"losses\":0}]","favorite":false,"query":"SELECT name, user_score FROM c"}"#,
             ]),
             query_mock: Mock::empty(),
             write_mock: Mock::new(vec![()]),
@@ -312,7 +312,7 @@ mod test {
         assert_eq!(
             *client.write_mock.call_args.lock().unwrap(),
             vec![DocumentWriter::Replace(ReplaceDocumentBuilder {
-                collection_name: "lists",
+                collection_name: "list",
                 document_name: "".to_owned(),
                 partition_key: "".to_owned(),
                 document: r#"{"id":"","user_id":"","mode":{"User":null},"name":"New List","sources":[{"source_type":{"ListItems":""},"name":"source"}],"iframe":null,"items":[{"id":"","name":"item","iframe":null,"score":0,"wins":0,"losses":0,"rank":null}],"favorite":false,"query":"SELECT name, user_score FROM c"}"#.to_owned(),
