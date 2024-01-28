@@ -94,7 +94,7 @@ impl TryFrom<RawItem> for Item {
     }
 }
 
-impl CosmosEntity for Item {
+impl CosmosEntity for RawItem {
     type Entity = String;
 
     fn partition_key(&self) -> Self::Entity {

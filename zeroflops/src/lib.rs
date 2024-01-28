@@ -204,7 +204,7 @@ pub struct Id {
 }
 
 #[cfg(feature = "full")]
-impl CosmosEntity for List {
+impl CosmosEntity for RawList {
     type Entity = String;
 
     fn partition_key(&self) -> Self::Entity {

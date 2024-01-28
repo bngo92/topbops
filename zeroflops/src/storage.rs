@@ -188,12 +188,59 @@ impl SessionClient for SqlSessionClient {
     /// CosmosDB creates new session tokens after writes
     async fn write_document<T>(
         &self,
-        _builder: DocumentWriter<T>,
+        builder: DocumentWriter<T>,
     ) -> Result<(), azure_core::error::Error>
     where
         T: Serialize + CosmosEntity + Send + 'static,
     {
-        todo!()
+        let conn = Connection::open(self.path).unwrap();
+        match builder {
+            DocumentWriter::Create(builder) => {
+                conn.execute(
+                    get_insert_stmt(builder.collection_name),
+                    serde_rusqlite::to_params_named(&builder.document)
+                        .unwrap()
+                        .to_slice()
+                        .as_slice(),
+                )
+                .unwrap();
+            }
+            DocumentWriter::Replace(builder) => {
+                let (stmt, fields) = get_update_stmt(builder.collection_name);
+                conn.execute(
+                    stmt,
+                    serde_rusqlite::to_params_named_with_fields(&builder.document, fields)
+                        .unwrap()
+                        .to_slice()
+                        .as_slice(),
+                )
+                .unwrap();
+            }
+            DocumentWriter::Delete(builder) => {
+                conn.execute(
+                    &format!("DELETE FROM {} WHERE id = ?1", builder.collection_name),
+                    [builder.document_name],
+                )
+                .unwrap();
+            }
+        }
+        Ok(())
+    }
+}
+
+fn get_insert_stmt(collection_name: &str) -> &str {
+    match collection_name {
+        "item" => "INSERT INTO item (id, user_id, type, name, iframe, rating, user_score, user_wins, user_losses, metadata, hidden) VALUES (:id, :user_id, :type, :name, :iframe, :rating, :user_score, :user_wins, :user_losses, :metadata, :hidden)",
+        "list" => "INSERT INTO list (id, user_id, mode, name, sources, iframe, items, favorite, query) VALUES (:id, :user_id, :mode, :name, :sources, :iframe, :items, :favorite, :query)",
+        _ => unreachable!()
+    }
+}
+
+fn get_update_stmt(collection_name: &str) -> (&str, &[&str]) {
+    match collection_name {
+        "item" => ("UPDATE item SET rating = :rating, user_score = :user_score, user_wins = :user_wins, user_losses = :user_losses WHERE id = :id AND user_id = :user_id", &["id", "user_id", "rating", "user_score", "user_wins", "user_losses"]),
+        "list" => ("UPDATE list SET name = :name, sources = :sources, items = :items, favorite = :favorite, query = :query WHERE id = :id AND user_id = :user_id", &["id", "user_id", "name", "sources", "items", "favorite", "query"]),
+        _ => unreachable!()
     }
 }
 

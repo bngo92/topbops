@@ -238,7 +238,7 @@ async fn create_list(
         favorite: false,
         query: String::from("SELECT name, user_score FROM c"),
     };
-    create_list_doc(&state.client, list.clone(), false).await?;
+    create_list_doc(&state.sql_client, list.clone(), false).await?;
     Ok((StatusCode::CREATED, Json(list)))
 }
 
@@ -253,7 +253,7 @@ async fn update_list(
     if list.id != id {
         return Err(Error::client_error("list id doesn't match").into());
     }
-    source::update_list_items(&state.client, &user_id, list).await?;
+    source::update_list_items(&state.sql_client, &user_id, list).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -266,8 +266,8 @@ async fn delete_list(
     let user = require_user(auth)?;
     let user_id = UserId(user.user_id);
     state
-        .client
-        .write_document(DocumentWriter::<List>::Delete(DeleteDocumentBuilder {
+        .sql_client
+        .write_document(DocumentWriter::<RawList>::Delete(DeleteDocumentBuilder {
             collection_name: "list",
             document_name: id,
             partition_key: user_id.0,
@@ -347,11 +347,11 @@ async fn handle_stats_update(
     win: &str,
     lose: &str,
 ) -> Result<StatusCode, Error> {
-    let client = &state.client;
+    let client = &state.sql_client;
     let (list, win_item, lose_item) = futures::future::join3(
-        source::get_list(&state.sql_client, &user_id, id),
-        get_item_doc(&state.sql_client, &user_id, win),
-        get_item_doc(&state.sql_client, &user_id, lose),
+        source::get_list(client, &user_id, id),
+        get_item_doc(client, &user_id, win),
+        get_item_doc(client, &user_id, lose),
     )
     .await;
     let mut list = list?;
@@ -384,22 +384,22 @@ async fn handle_stats_update(
 
     futures::future::try_join3(
         client.write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
-            collection_name: "lists",
+            collection_name: "list",
             document_name: id.to_owned(),
             partition_key: user_id.0.clone(),
-            document: list,
+            document: RawList::from(list),
         })),
         client.write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
-            collection_name: "items",
+            collection_name: "item",
             document_name: win_item.id.clone(),
             partition_key: user_id.0.clone(),
-            document: win_item,
+            document: RawItem::from(win_item),
         })),
         client.write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
-            collection_name: "items",
+            collection_name: "item",
             document_name: lose_item.id.clone(),
             partition_key: user_id.0.clone(),
-            document: lose_item,
+            document: RawItem::from(lose_item),
         })),
     )
     .await?;
@@ -425,7 +425,7 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
             ListMode::View(_) => ListMode::View(Some(id.clone())),
             _ => unreachable!(),
         };
-        source::update_list(&state.client, &user_id, list.clone()).await?;
+        source::update_list(&state.sql_client, &user_id, list.clone()).await?;
         id.id
     };
     let ids: Vec<_> = match list.mode {
@@ -454,7 +454,7 @@ async fn import_list(
 ) -> Result<StatusCode, Error> {
     match source.split_once(':') {
         Some(("spotify", source)) => {
-            import_spotify(&state.client, &user_id, source, id, favorite).await?
+            import_spotify(&state.sql_client, &user_id, source, id, favorite).await?
         }
         _ => todo!(),
     };
@@ -462,7 +462,7 @@ async fn import_list(
 }
 
 pub async fn import_spotify(
-    client: &CosmosSessionClient,
+    client: &SqlSessionClient,
     user_id: &UserId,
     source: &str,
     id: String,
@@ -532,14 +532,14 @@ fn update_stats(
 }
 
 async fn create_list_doc(
-    client: &CosmosSessionClient,
+    client: &SqlSessionClient,
     list: List,
     is_upsert: bool,
 ) -> Result<(), Error> {
     client
         .write_document(DocumentWriter::Create(CreateDocumentBuilder {
             collection_name: "list",
-            document: list,
+            document: RawList::from(list),
             is_upsert,
         }))
         .await
@@ -569,12 +569,12 @@ async fn update_items(
                 }
             }
             state
-                .client
+                .sql_client
                 .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
                     collection_name: "item",
                     document_name: id,
                     partition_key: user_id.0.clone(),
-                    document: item,
+                    document: RawItem::from(item),
                 }))
                 .await
                 .map_err(Error::from)
@@ -598,8 +598,8 @@ async fn delete_items(
         .split(',')
         .map(|id| async move {
             match state
-                .client
-                .write_document(DocumentWriter::<Item>::Delete(DeleteDocumentBuilder {
+                .sql_client
+                .write_document(DocumentWriter::<RawItem>::Delete(DeleteDocumentBuilder {
                     collection_name: "item",
                     document_name: id.to_owned(),
                     partition_key: user_id.0.clone(),
@@ -698,7 +698,7 @@ async fn main() {
         .unwrap();
         // Generate IDs using random but constant UUIDs
         create_list_doc(
-            &shared_state.client,
+            &shared_state.sql_client,
             List {
                 id: String::from("3c16df67-582d-449a-9862-0540f516d6b5"),
                 user_id: demo_user.clone(),
@@ -715,7 +715,7 @@ async fn main() {
         .await
         .unwrap();
         create_list_doc(
-            &shared_state.client,
+            &shared_state.sql_client,
             List {
                 id: String::from("4539f893-8471-4e23-b815-cd7c8b722016"),
                 user_id: demo_user.clone(),

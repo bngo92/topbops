@@ -1,4 +1,4 @@
-use crate::UserId;
+use crate::{RawItem, UserId};
 use futures::{stream::FuturesUnordered, StreamExt, TryStreamExt};
 use serde_json::{Map, Value};
 use zeroflops::{
@@ -62,7 +62,7 @@ pub async fn update_list(
             collection_name: "list",
             document_name: list.id.clone(),
             partition_key: user_id.0.clone(),
-            document: list,
+            document: RawList::from(list),
         }))
         .await
         .map_err(Error::from)
@@ -169,7 +169,7 @@ pub async fn create_items(
             match client
                 .write_document(DocumentWriter::Create(CreateDocumentBuilder {
                     collection_name: "item",
-                    document: item,
+                    document: RawItem::from(item),
                     is_upsert,
                 }))
                 .await
@@ -233,7 +233,7 @@ mod test {
                 collection_name: "list",
                 document_name: "".to_owned(),
                 partition_key: "".to_owned(),
-                document: r#"{"id":"","user_id":"","mode":{"User":null},"name":"New List","sources":[],"iframe":null,"items":[],"favorite":false,"query":"SELECT name, user_score FROM c"}"#.to_owned(),
+                document: r#"{"id":"","user_id":"","mode":"{\"User\":null}","name":"New List","sources":"[]","iframe":null,"items":"[]","favorite":false,"query":"SELECT name, user_score FROM c"}"#.to_owned(),
             })]
         );
     }
@@ -274,7 +274,7 @@ mod test {
                 collection_name: "list",
                 document_name: "".to_owned(),
                 partition_key: "".to_owned(),
-                document: r#"{"id":"","user_id":"","mode":{"User":null},"name":"New List","sources":[{"source_type":{"ListItems":""},"name":"source"}],"iframe":null,"items":[],"favorite":false,"query":"SELECT name, user_score FROM c"}"#.to_owned(),
+                document: r#"{"id":"","user_id":"","mode":"{\"User\":null}","name":"New List","sources":"[{\"source_type\":{\"ListItems\":\"\"},\"name\":\"source\"}]","iframe":null,"items":"[]","favorite":false,"query":"SELECT name, user_score FROM c"}"#.to_owned(),
             })]
         );
     }
@@ -315,7 +315,7 @@ mod test {
                 collection_name: "list",
                 document_name: "".to_owned(),
                 partition_key: "".to_owned(),
-                document: r#"{"id":"","user_id":"","mode":{"User":null},"name":"New List","sources":[{"source_type":{"ListItems":""},"name":"source"}],"iframe":null,"items":[{"id":"","name":"item","iframe":null,"score":0,"wins":0,"losses":0,"rank":null}],"favorite":false,"query":"SELECT name, user_score FROM c"}"#.to_owned(),
+                document: r#"{"id":"","user_id":"","mode":"{\"User\":null}","name":"New List","sources":"[{\"source_type\":{\"ListItems\":\"\"},\"name\":\"source\"}]","iframe":null,"items":"[{\"id\":\"\",\"name\":\"item\",\"iframe\":null,\"score\":0,\"wins\":0,\"losses\":0,\"rank\":null}]","favorite":false,"query":"SELECT name, user_score FROM c"}"#.to_owned(),
             })]
         );
     }
