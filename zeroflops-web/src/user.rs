@@ -1,10 +1,13 @@
 use ::spotify::{AuthClient, SpotifyCredentials};
 use async_trait::async_trait;
 use axum_login::{
-    axum_sessions::async_session::{Session, SessionStore},
-    secrecy::SecretVec,
-    AuthUser, UserStore,
+    tower_sessions::{
+        session::{Id, IdError, Record},
+        session_store, SessionStore,
+    },
+    AuthUser, AuthnBackend,
 };
+use azure_core::{error::ErrorKind, StatusCode};
 use azure_data_cosmos::{
     prelude::{DatabaseClient, GetDocumentResponse},
     CosmosEntity,
@@ -13,7 +16,8 @@ use base64::prelude::{Engine, BASE64_STANDARD};
 use hyper::{Body, Client, Method, Request, Uri};
 use hyper_tls::HttpsConnector;
 use rand::Rng;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
 use zeroflops::{
@@ -258,13 +262,15 @@ impl AuthClient for GoogleClient {
     }
 }
 
-impl AuthUser<String> for User {
-    fn get_id(&self) -> String {
+impl AuthUser for User {
+    type Id = String;
+
+    fn id(&self) -> String {
         self.id.clone()
     }
 
-    fn get_password_hash(&self) -> SecretVec<u8> {
-        SecretVec::new(self.secret.clone().into())
+    fn session_auth_hash(&self) -> &[u8] {
+        self.secret.as_bytes()
     }
 }
 
@@ -275,66 +281,121 @@ pub struct CosmosStore {
 
 #[async_trait]
 impl SessionStore for CosmosStore {
-    async fn load_session(&self, cookie_value: String) -> anyhow::Result<Option<Session>> {
-        let id = Session::id_from_cookie_value(&cookie_value)?;
+    async fn load(&self, cookie_value: &Id) -> session_store::Result<Option<Record>> {
+        let id = cookie_value.to_string();
         let client = self
             .db
             .collection_client("sessions")
-            .document_client(id.clone(), &id)?;
-        if let GetDocumentResponse::Found(list) = client.get_document().into_future().await? {
-            Ok(Some(list.document.document))
+            .document_client(id.clone(), &id)
+            .map_err(|e| session_store::Error::Backend(e.to_string()))?;
+        if let Ok(GetDocumentResponse::Found(list)) =
+            client.get_document::<Value>().into_future().await
+        {
+            let mut session = list.document.document;
+            let id = session
+                .as_object()
+                .ok_or_else(|| session_store::Error::Decode("Invalid session".to_owned()))?["id"]
+                .as_str()
+                .ok_or_else(|| session_store::Error::Decode("Invalid session".to_owned()))?
+                .parse()
+                .map_err(|e: IdError| session_store::Error::Decode(e.to_string()))?;
+            let mut record = session
+                .as_object_mut()
+                .ok_or_else(|| session_store::Error::Decode("Invalid session".to_owned()))?
+                .remove("record")
+                .ok_or_else(|| session_store::Error::Decode("Invalid session".to_owned()))?;
+            // id is i128 but it gets serialized as f64
+            // Deserializing it as i128 fails so clear it and pull it from the top-level field
+            record
+                .as_object_mut()
+                .ok_or_else(|| session_store::Error::Decode("Invalid session".to_owned()))?
+                .insert("id".to_owned(), 0.into());
+            let mut record: Record = serde_json::from_value(record)
+                .map_err(|e| session_store::Error::Decode(e.to_string()))?;
+            record.id = id;
+            Ok(Some(record))
         } else {
             Ok(None)
         }
     }
 
-    async fn store_session(&self, session: Session) -> anyhow::Result<Option<String>> {
+    async fn save(&self, session: &Record) -> session_store::Result<()> {
+        let mut record = session.clone();
+        let id = std::mem::take(&mut record.id).to_string();
         self.db
             .collection_client("sessions")
-            .create_document(CosmosSession(session.clone()))
+            .create_document(CosmosSession { id, record })
             .is_upsert(true)
             .into_future()
-            .await?;
+            .await
+            .map_err(|e| session_store::Error::Backend(e.to_string()))?;
 
-        session.reset_data_changed();
-        Ok(session.into_cookie_value())
-    }
-
-    async fn destroy_session(&self, session: Session) -> anyhow::Result<()> {
-        self.db
-            .collection_client("sessions")
-            .document_client(session.id(), &session.id())?
-            .delete_document()
-            .into_future()
-            .await?;
         Ok(())
     }
 
-    async fn clear_store(&self) -> anyhow::Result<()> {
-        todo!()
+    async fn delete(&self, session: &Id) -> session_store::Result<()> {
+        let id = session.to_string();
+        match self
+            .db
+            .collection_client("sessions")
+            .document_client(id.clone(), &id)
+            .map_err(|e| session_store::Error::Backend(e.to_string()))?
+            .delete_document()
+            .into_future()
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                if let ErrorKind::HttpResponse {
+                    status: StatusCode::NotFound,
+                    ..
+                } = e.kind()
+                {
+                    Ok(())
+                } else {
+                    Err(session_store::Error::Backend(e.to_string()))
+                }
+            }
+        }
     }
 }
 
-#[derive(Serialize)]
-struct CosmosSession(Session);
+#[derive(Deserialize, Serialize)]
+struct CosmosSession {
+    id: String,
+    record: Record,
+}
 
 impl CosmosEntity for CosmosSession {
     type Entity = String;
 
     fn partition_key(&self) -> Self::Entity {
-        self.0.id().to_owned()
+        self.id.to_string()
     }
 }
 
 #[async_trait]
-impl<Role> UserStore<String, Role> for CosmosStore
-where
-    Role: PartialOrd + PartialEq + Clone + Send + Sync + 'static,
-    User: AuthUser<String, Role> + DeserializeOwned,
-{
+impl AuthnBackend for CosmosStore {
     type User = User;
+    type Credentials = User;
+    type Error = Error;
 
-    async fn load_user(&self, user_id: &String) -> Result<Option<Self::User>, eyre::Report> {
+    async fn authenticate(
+        &self,
+        creds: Self::Credentials,
+    ) -> Result<Option<Self::User>, Self::Error> {
+        let user: Option<Self::User> = self.get_user(&creds.user_id).await?;
+
+        Ok(user.filter(|user| {
+            password_auth::verify_password(creds.secret, &user.secret)
+                .ok()
+                .is_some() // We're using password-based authentication--this
+                           // works by comparing our form input with an argon2
+                           // password hash.
+        }))
+    }
+
+    async fn get_user(&self, user_id: &String) -> Result<Option<Self::User>, Error> {
         let client = self
             .db
             .collection_client("users")
@@ -459,7 +520,9 @@ mod test {
         );
         let write_mock =
             Mutex::into_inner(Arc::into_inner(client.write_mock.call_args).unwrap()).unwrap();
-        let DocumentWriter::Create(builder) = &write_mock[0] else { unreachable!() };
+        let DocumentWriter::Create(builder) = &write_mock[0] else {
+            unreachable!()
+        };
         let User { id, secret, .. } = serde_json::de::from_str(&builder.document).unwrap();
         assert_eq!(
             write_mock,
@@ -642,7 +705,9 @@ mod test {
         );
         let write_mock =
             Mutex::into_inner(Arc::into_inner(client.write_mock.call_args).unwrap()).unwrap();
-        let DocumentWriter::Create(builder) = &write_mock[0] else { unreachable!() };
+        let DocumentWriter::Create(builder) = &write_mock[0] else {
+            unreachable!()
+        };
         let User { id, secret, .. } = serde_json::de::from_str(&builder.document).unwrap();
         assert_eq!(
             write_mock,

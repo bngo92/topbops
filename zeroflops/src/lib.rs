@@ -1,5 +1,6 @@
 #[cfg(feature = "full")]
 use axum::{
+    body::Body,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -318,8 +319,8 @@ impl From<sqlparser::parser::ParserError> for Error {
 }
 
 #[cfg(feature = "full")]
-impl From<Error> for Response {
-    fn from(e: Error) -> Response {
+impl From<Error> for Response<Body> {
+    fn from(e: Error) -> Response<Body> {
         match e {
             Error::ClientError(e) => (StatusCode::BAD_REQUEST, e).into_response(),
             Error::InternalError(e) => {

@@ -3,23 +3,25 @@ use async_trait::async_trait;
 use axum::{
     body::Bytes,
     extract::{Host, OriginalUri, Path, Query, State},
+    http::StatusCode,
     response::{IntoResponse, Json, Redirect, Response},
     routing::{get, post},
     Router,
 };
-use axum_login::{axum_sessions::SessionLayer, AuthLayer};
+use axum_login::{
+    tower_sessions::{Expiry, SessionManagerLayer},
+    AuthManagerLayerBuilder,
+};
 use azure_data_cosmos::prelude::{AuthorizationToken, CosmosClient};
-use base64::prelude::{Engine, BASE64_STANDARD};
 use cosmos::CosmosSessionClient;
 use futures::{stream::FuturesUnordered, TryStreamExt};
-use hyper::StatusCode;
 use serde_json::{Map, Value};
 use std::{
     collections::HashMap,
     net::SocketAddr,
     sync::{Arc, RwLock},
-    time::Duration,
 };
+use time::Duration;
 #[cfg(feature = "dev")]
 use tower_http::services::ServeFile;
 use tower_http::trace::TraceLayer;
@@ -41,11 +43,11 @@ use zeroflops_web::{
     Item, RawItem, UserId,
 };
 
-type AuthContext = axum_login::extractors::AuthContext<String, User, CosmosStore>;
+type AuthContext = axum_login::AuthSession<CosmosStore>;
 struct AuthWrapper(AuthContext);
 
 fn get_user_or_demo_user(auth: AuthContext) -> UserId {
-    if let Some(user) = auth.current_user {
+    if let Some(user) = auth.user {
         UserId(user.user_id)
     } else {
         UserId(DEMO_USER.to_owned())
@@ -53,7 +55,7 @@ fn get_user_or_demo_user(auth: AuthContext) -> UserId {
 }
 
 fn require_user(auth: AuthContext) -> Result<User, Response> {
-    if let Some(user) = auth.current_user {
+    if let Some(user) = auth.user {
         Ok(user)
     } else {
         Err(StatusCode::UNAUTHORIZED.into_response())
@@ -94,7 +96,7 @@ async fn logout_handler(
     State(state): State<Arc<AppState>>,
     mut auth: AuthContext,
 ) -> impl IntoResponse {
-    if let Some(user) = &mut auth.current_user {
+    if let Some(user) = &mut auth.user {
         // Log out of all sessions with axum-login by changing the user secret
         user.secret = zeroflops_web::user::generate_secret();
         state
@@ -106,7 +108,7 @@ async fn logout_handler(
             }))
             .await
             .expect("Couldn't reset password");
-        auth.logout().await;
+        auth.logout().await.unwrap();
     }
     Redirect::to("/")
 }
@@ -141,7 +143,7 @@ async fn google_login_handler(
 #[async_trait]
 impl Auth for AuthWrapper {
     fn current_user(&self) -> &Option<User> {
-        &self.0.current_user
+        &self.0.user
     }
 
     async fn login(&mut self, user: &User) -> Result<(), Error> {
@@ -150,7 +152,7 @@ impl Auth for AuthWrapper {
     }
 
     async fn logout(&mut self) {
-        self.0.logout().await
+        self.0.logout().await.unwrap();
     }
 }
 
@@ -308,7 +310,7 @@ async fn handle_action(
     auth: AuthContext,
     body: Bytes,
 ) -> Result<StatusCode, Response> {
-    let user = auth.current_user.clone();
+    let user = auth.user.clone();
     let user_id = get_user_or_demo_user(auth);
     match params.get("action").map(String::as_ref) {
         Some("update") => {
@@ -734,16 +736,12 @@ async fn main() {
         println!("Demo lists were created");
     }
 
-    let secret = BASE64_STANDARD
-        .decode(std::env::var("SECRET_KEY").expect("SECRET_KEY is missing"))
-        .expect("SECRET_KEY is not base64");
-
     let session_store = CosmosStore { db };
-    let session_layer = SessionLayer::new(session_store.clone(), &secret)
+    let session_layer = SessionManagerLayer::new(session_store.clone())
         .with_secure(false)
-        .with_session_ttl(Some(Duration::from_secs(31536000)));
+        .with_expiry(Expiry::OnInactivity(Duration::seconds(31536000)));
 
-    let auth_layer = AuthLayer::new(session_store, &secret);
+    let auth_layer = AuthManagerLayerBuilder::new(session_store, session_layer.clone()).build();
 
     let api_router = Router::new()
         .route("/lists", get(get_lists).post(create_list))
@@ -785,8 +783,8 @@ async fn main() {
         .fallback_service(ServeFile::new("../zeroflops-wasm/www/index.html"))
     };
 
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
+    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    axum::serve(listener, app.into_make_service())
         .await
         .unwrap();
 }
