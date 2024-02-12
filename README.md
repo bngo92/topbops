@@ -15,7 +15,7 @@ rustup run nightly wasm-pack build --target web
 - [x] Support custom queries for lists
 - [x] Support hiding items
 - [x] Support deleting lists
-- [ ] Debug session issues
+- [x] Debug session issues
 - [ ] Audit authz
 ### P1
 - [x] Add sort/rank page to lists

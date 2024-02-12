@@ -12,15 +12,9 @@ use axum_login::{
     tower_sessions::{Expiry, SessionManagerLayer},
     AuthManagerLayerBuilder,
 };
-use azure_data_cosmos::prelude::{AuthorizationToken, CosmosClient};
-use cosmos::CosmosSessionClient;
 use futures::{stream::FuturesUnordered, TryStreamExt};
 use serde_json::{Map, Value};
-use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    sync::{Arc, RwLock},
-};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use time::Duration;
 #[cfg(feature = "dev")]
 use tower_http::services::ServeFile;
@@ -36,14 +30,13 @@ use zeroflops::{
     Error, Id, Items, List, ListMode, Lists, RawList,
 };
 use zeroflops_web::{
-    query, source,
-    source::spotify,
-    user,
-    user::{Auth, CosmosStore, GoogleClient, User},
+    query,
+    source::{self, spotify},
+    user::{self, Auth, GoogleClient, RawUser, SqlStore, User},
     Item, RawItem, UserId,
 };
 
-type AuthContext = axum_login::AuthSession<CosmosStore>;
+type AuthContext = axum_login::AuthSession<SqlStore>;
 struct AuthWrapper(AuthContext);
 
 fn get_user_or_demo_user(auth: AuthContext) -> UserId {
@@ -81,7 +74,7 @@ async fn login_handler(
         origin = format!("https://{}{}", host, original_uri.path());
     }
     user::spotify_login(
-        &state.client,
+        &state.sql_client,
         SpotifyClient,
         &mut AuthWrapper(auth),
         &params["code"],
@@ -100,10 +93,10 @@ async fn logout_handler(
         // Log out of all sessions with axum-login by changing the user secret
         user.secret = zeroflops_web::user::generate_secret();
         state
-            .client
+            .sql_client
             .write_document(DocumentWriter::Create(CreateDocumentBuilder {
-                collection_name: "users",
-                document: user.clone(),
+                collection_name: "user",
+                document: RawUser::from(user.clone()),
                 is_upsert: true,
             }))
             .await
@@ -130,7 +123,7 @@ async fn google_login_handler(
         origin = format!("https://{}{}", host, original_uri.path());
     }
     user::google_login(
-        &state.client,
+        &state.sql_client,
         GoogleClient,
         &mut AuthWrapper(auth),
         &params["code"],
@@ -412,7 +405,7 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
     let user_id = UserId(user.user_id.clone());
     let mut list = source::get_list(&state.sql_client, &user_id, id).await?;
     let (_, external_id) = list.get_unique_source()?;
-    let access_token = spotify::get_access_token(&state.client, user).await?;
+    let access_token = spotify::get_access_token(&state.sql_client, user).await?;
     let external_id = if let Some(external_id) = external_id {
         spotify::update_playlist(access_token, &external_id.id, &list.name).await?;
         external_id.id.clone()
@@ -643,7 +636,7 @@ async fn get_spotify_recent_tracks(
     if user.spotify_credentials.is_none() {
         return Err(Error::client_error("Spotify integration is required").into());
     };
-    let access_token = spotify::get_access_token(&state.client, &mut user).await?;
+    let access_token = spotify::get_access_token(&state.sql_client, &mut user).await?;
     Ok(Json(
         spotify::get_recent_tracks(&state.sql_client, &user_id, access_token).await?,
     ))
@@ -657,12 +650,11 @@ async fn get_spotify_playlists(
     if user.spotify_credentials.is_none() {
         return Err(Error::client_error("Spotify integration is required").into());
     };
-    let access_token = spotify::get_access_token(&state.client, &mut user).await?;
+    let access_token = spotify::get_access_token(&state.sql_client, &mut user).await?;
     Ok(Json(spotify::get_playlists(access_token).await?))
 }
 
 struct AppState {
-    client: CosmosSessionClient,
     sql_client: SqlSessionClient,
 }
 
@@ -675,14 +667,7 @@ async fn main() {
 
     // A `Service` is needed for every connection, so this
     // creates one from our `hello_world` function.
-    let master_key =
-        std::env::var("COSMOS_MASTER_KEY").expect("Set env variable COSMOS_MASTER_KEY first!");
-    let account = std::env::var("COSMOS_ACCOUNT").expect("Set env variable COSMOS_ACCOUNT first!");
-    let authorization_token =
-        AuthorizationToken::primary_from_base64(&master_key).expect("cosmos config");
-    let db = CosmosClient::new(account, authorization_token).database_client("topbops");
     let shared_state = Arc::new(AppState {
-        client: CosmosSessionClient::new(db.clone(), Arc::new(RwLock::new(None))),
         sql_client: SqlSessionClient { path: "zeroflops" },
     });
 
@@ -736,7 +721,7 @@ async fn main() {
         println!("Demo lists were created");
     }
 
-    let session_store = CosmosStore { db };
+    let session_store = SqlStore { path: "zeroflops" };
     let session_layer = SessionManagerLayer::new(session_store.clone())
         .with_secure(false)
         .with_expiry(Expiry::OnInactivity(Duration::seconds(31536000)));

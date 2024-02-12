@@ -2,22 +2,18 @@ use ::spotify::{AuthClient, SpotifyCredentials};
 use async_trait::async_trait;
 use axum_login::{
     tower_sessions::{
-        session::{Id, IdError, Record},
+        session::{Id, Record},
         session_store, SessionStore,
     },
     AuthUser, AuthnBackend,
 };
-use azure_core::{error::ErrorKind, StatusCode};
-use azure_data_cosmos::{
-    prelude::{DatabaseClient, GetDocumentResponse},
-    CosmosEntity,
-};
+use azure_data_cosmos::CosmosEntity;
 use base64::prelude::{Engine, BASE64_STANDARD};
 use hyper::{Body, Client, Method, Request, Uri};
 use hyper_tls::HttpsConnector;
 use rand::Rng;
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
 use zeroflops::{
@@ -45,6 +41,45 @@ pub struct User {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct RawUser {
+    pub id: String,
+    pub user_id: String,
+    pub secret: String,
+    pub spotify_credentials: Option<String>,
+    pub google_email: Option<String>,
+}
+
+impl From<User> for RawUser {
+    fn from(value: User) -> Self {
+        RawUser {
+            id: value.id,
+            user_id: value.user_id,
+            secret: value.secret,
+            spotify_credentials: value
+                .spotify_credentials
+                .map(|s| serde_json::to_string(&s).expect("spotify credentials should serialize")),
+            google_email: value.google_email,
+        }
+    }
+}
+
+impl TryFrom<RawUser> for User {
+    type Error = Error;
+    fn try_from(value: RawUser) -> Result<Self, Self::Error> {
+        Ok(User {
+            id: value.id,
+            user_id: value.user_id,
+            secret: value.secret,
+            spotify_credentials: value
+                .spotify_credentials
+                .map(|s| serde_json::from_str(&s))
+                .transpose()?,
+            google_email: value.google_email,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct GoogleCredentials {
     pub access_token: String,
 }
@@ -54,7 +89,7 @@ pub struct GoogleUser {
     pub email: String,
 }
 
-impl CosmosEntity for User {
+impl CosmosEntity for RawUser {
     type Entity = String;
 
     fn partition_key(&self) -> Self::Entity {
@@ -77,17 +112,17 @@ pub async fn spotify_login(
         user.spotify_credentials = Some(spotify_credentials);
         session_client
             .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
-                collection_name: "users",
+                collection_name: "user",
                 document_name: user.id.clone(),
                 partition_key: user.id.clone(),
-                document: user.clone(),
+                document: RawUser::from(user.clone()),
             }))
             .await?;
         return Ok(());
     }
 
     let query = CosmosQuery::with_params(
-        String::from("SELECT c.id, c.secret FROM c WHERE c.spotify_credentials.user_id = @user_id"),
+        String::from("SELECT id, secret FROM user WHERE spotify_credentials->'user_id' = ?1"),
         [CosmosParam::new(
             String::from("@user_id"),
             spotify_credentials.user_id.clone(),
@@ -95,7 +130,7 @@ pub async fn spotify_login(
     );
     let mut results: Vec<HashMap<String, String>> = session_client
         .query_documents({
-            let mut builder = QueryDocumentsBuilder::new("users", query);
+            let mut builder = QueryDocumentsBuilder::new("user", query);
             builder.query_cross_partition = true;
             builder.parallelize_cross_partition_query = true;
             builder
@@ -104,7 +139,7 @@ pub async fn spotify_login(
     let user = if let Some(map) = results.pop() {
         let id = &map["id"];
         let mut user: User = session_client
-            .get_document(GetDocumentBuilder::new("users", id.clone(), id.clone()))
+            .get_document(GetDocumentBuilder::new("user", id.clone(), id.clone()))
             .await?
             .ok_or(Error::internal_error(format!(
                 "User doesn't exist for {id}"
@@ -113,10 +148,10 @@ pub async fn spotify_login(
         user.spotify_credentials = Some(spotify_credentials);
         session_client
             .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
-                collection_name: "users",
+                collection_name: "user",
                 document_name: user.id.clone(),
                 partition_key: user.id.clone(),
-                document: user.clone(),
+                document: RawUser::from(user.clone()),
             }))
             .await?;
         user
@@ -130,8 +165,8 @@ pub async fn spotify_login(
         };
         session_client
             .write_document(DocumentWriter::Create(CreateDocumentBuilder {
-                collection_name: "users",
-                document: user.clone(),
+                collection_name: "user",
+                document: RawUser::from(user.clone()),
                 is_upsert: false,
             }))
             .await?;
@@ -156,17 +191,17 @@ pub async fn google_login(
         user.google_email = Some(google_user.email);
         session_client
             .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
-                collection_name: "users",
+                collection_name: "user",
                 document_name: user.id.clone(),
                 partition_key: user.id.clone(),
-                document: user.clone(),
+                document: RawUser::from(user.clone()),
             }))
             .await?;
         return Ok(());
     }
 
     let query = CosmosQuery::with_params(
-        String::from("SELECT c.id FROM c WHERE c.google_email = @google_email"),
+        String::from("SELECT id FROM user WHERE google_email = ?1"),
         [CosmosParam::new(
             String::from("@google_email"),
             google_user.email.clone(),
@@ -174,7 +209,7 @@ pub async fn google_login(
     );
     let mut results: Vec<HashMap<String, String>> = session_client
         .query_documents({
-            let mut builder = QueryDocumentsBuilder::new("users", query);
+            let mut builder = QueryDocumentsBuilder::new("user", query);
             builder.query_cross_partition = true;
             builder.parallelize_cross_partition_query = true;
             builder
@@ -183,7 +218,7 @@ pub async fn google_login(
     let user = if let Some(map) = results.pop() {
         let id = &map["id"];
         session_client
-            .get_document(GetDocumentBuilder::new("users", id.clone(), id.clone()))
+            .get_document(GetDocumentBuilder::new("user", id.clone(), id.clone()))
             .await?
             .ok_or(Error::internal_error(format!(
                 "User doesn't exist for {id}"
@@ -206,8 +241,8 @@ pub async fn google_login(
         };
         session_client
             .write_document(DocumentWriter::Create(CreateDocumentBuilder {
-                collection_name: "users",
-                document: user.clone(),
+                collection_name: "user",
+                document: RawUser::from(user.clone()),
                 is_upsert: false,
             }))
             .await?;
@@ -275,107 +310,63 @@ impl AuthUser for User {
 }
 
 #[derive(Clone, Debug)]
-pub struct CosmosStore {
-    pub db: DatabaseClient,
+pub struct SqlStore {
+    pub path: &'static str,
 }
 
 #[async_trait]
-impl SessionStore for CosmosStore {
+impl SessionStore for SqlStore {
     async fn load(&self, cookie_value: &Id) -> session_store::Result<Option<Record>> {
         let id = cookie_value.to_string();
-        let client = self
-            .db
-            .collection_client("sessions")
-            .document_client(id.clone(), &id)
+        let conn = Connection::open(self.path)
             .map_err(|e| session_store::Error::Backend(e.to_string()))?;
-        if let Ok(GetDocumentResponse::Found(list)) =
-            client.get_document::<Value>().into_future().await
-        {
-            let mut session = list.document.document;
-            let id = session
-                .as_object()
-                .ok_or_else(|| session_store::Error::Decode("Invalid session".to_owned()))?["id"]
-                .as_str()
-                .ok_or_else(|| session_store::Error::Decode("Invalid session".to_owned()))?
-                .parse()
-                .map_err(|e: IdError| session_store::Error::Decode(e.to_string()))?;
-            let mut record = session
-                .as_object_mut()
-                .ok_or_else(|| session_store::Error::Decode("Invalid session".to_owned()))?
-                .remove("record")
-                .ok_or_else(|| session_store::Error::Decode("Invalid session".to_owned()))?;
-            // id is i128 but it gets serialized as f64
-            // Deserializing it as i128 fails so clear it and pull it from the top-level field
-            record
-                .as_object_mut()
-                .ok_or_else(|| session_store::Error::Decode("Invalid session".to_owned()))?
-                .insert("id".to_owned(), 0.into());
-            let mut record: Record = serde_json::from_value(record)
-                .map_err(|e| session_store::Error::Decode(e.to_string()))?;
-            record.id = id;
-            Ok(Some(record))
-        } else {
-            Ok(None)
+        let mut stmt = conn
+            .prepare("SELECT data FROM session WHERE id = ?1")
+            .map_err(|e| session_store::Error::Backend(e.to_string()))?;
+        match stmt.query_row([&id], |row| row.get::<_, String>(0)) {
+            Ok(s) => match serde_json::from_str(&s) {
+                Ok(record) => Ok(Some(record)),
+                Err(e) => Err(session_store::Error::Decode(e.to_string())),
+            },
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(session_store::Error::Backend(e.to_string())),
         }
     }
 
     async fn save(&self, session: &Record) -> session_store::Result<()> {
-        let mut record = session.clone();
-        let id = std::mem::take(&mut record.id).to_string();
-        self.db
-            .collection_client("sessions")
-            .create_document(CosmosSession { id, record })
-            .is_upsert(true)
-            .into_future()
-            .await
+        let conn = Connection::open(self.path)
             .map_err(|e| session_store::Error::Backend(e.to_string()))?;
-
-        Ok(())
+        let mut stmt = conn
+            .prepare(
+                "INSERT INTO session (id, data) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+            )
+            .map_err(|e| session_store::Error::Backend(e.to_string()))?;
+        match stmt.execute([
+            session.id.to_string(),
+            serde_json::to_string(&session)
+                .map_err(|e| session_store::Error::Encode(e.to_string()))?,
+        ]) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(session_store::Error::Backend(e.to_string())),
+        }
     }
 
     async fn delete(&self, session: &Id) -> session_store::Result<()> {
         let id = session.to_string();
-        match self
-            .db
-            .collection_client("sessions")
-            .document_client(id.clone(), &id)
-            .map_err(|e| session_store::Error::Backend(e.to_string()))?
-            .delete_document()
-            .into_future()
-            .await
-        {
+        let conn = Connection::open(self.path)
+            .map_err(|e| session_store::Error::Backend(e.to_string()))?;
+        let mut stmt = conn
+            .prepare("DELETE FROM session WHERE id = ?1")
+            .map_err(|e| session_store::Error::Backend(e.to_string()))?;
+        match stmt.execute([&id]) {
             Ok(_) => Ok(()),
-            Err(e) => {
-                if let ErrorKind::HttpResponse {
-                    status: StatusCode::NotFound,
-                    ..
-                } = e.kind()
-                {
-                    Ok(())
-                } else {
-                    Err(session_store::Error::Backend(e.to_string()))
-                }
-            }
+            Err(e) => Err(session_store::Error::Backend(e.to_string())),
         }
     }
 }
 
-#[derive(Deserialize, Serialize)]
-struct CosmosSession {
-    id: String,
-    record: Record,
-}
-
-impl CosmosEntity for CosmosSession {
-    type Entity = String;
-
-    fn partition_key(&self) -> Self::Entity {
-        self.id.to_string()
-    }
-}
-
 #[async_trait]
-impl AuthnBackend for CosmosStore {
+impl AuthnBackend for SqlStore {
     type User = User;
     type Credentials = User;
     type Error = Error;
@@ -396,14 +387,14 @@ impl AuthnBackend for CosmosStore {
     }
 
     async fn get_user(&self, user_id: &String) -> Result<Option<Self::User>, Error> {
-        let client = self
-            .db
-            .collection_client("users")
-            .document_client(user_id, user_id)?;
-        if let GetDocumentResponse::Found(user) = client.get_document().into_future().await? {
-            Ok(Some(user.document.document))
-        } else {
-            Ok(None)
+        let conn = Connection::open(self.path)?;
+        let mut stmt = conn.prepare("SELECT * FROM user WHERE id = ?1")?;
+        match stmt.query_row([&user_id], |row| {
+            Ok(serde_rusqlite::from_row::<RawUser>(row).unwrap())
+        }) {
+            Ok(user) => user.try_into().map(Some),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(Error::from(e)),
         }
     }
 }
@@ -414,7 +405,7 @@ pub fn generate_secret() -> String {
 
 #[cfg(test)]
 mod test {
-    use super::{Auth, GoogleUser, User};
+    use super::{Auth, GoogleUser, RawUser, User};
     use crate::query::test::{Mock, TestSessionClient};
     use async_trait::async_trait;
     use spotify::{AuthClient, SpotifyCredentials};
@@ -508,9 +499,9 @@ mod test {
         assert_eq!(
             *client.query_mock.call_args.lock().unwrap(),
             [QueryDocumentsBuilder {
-                collection_name: "users",
+                collection_name: "user",
                 query: CosmosQuery::with_params(
-                    "SELECT c.id, c.secret FROM c WHERE c.spotify_credentials.user_id = @user_id"
+                    "SELECT id, secret FROM user WHERE spotify_credentials->'user_id' = ?1"
                         .to_owned(),
                     vec![CosmosParam::new("@user_id".to_owned(), "user".to_owned())],
                 ),
@@ -523,13 +514,13 @@ mod test {
         let DocumentWriter::Create(builder) = &write_mock[0] else {
             unreachable!()
         };
-        let User { id, secret, .. } = serde_json::de::from_str(&builder.document).unwrap();
+        let RawUser { id, secret, .. } = serde_json::de::from_str(&builder.document).unwrap();
         assert_eq!(
             write_mock,
             [DocumentWriter::Create(CreateDocumentBuilder {
-                collection_name: "users",
+                collection_name: "user",
                 document: format!(
-                    r#"{{"id":"{id}","user_id":"user","secret":"{secret}","spotify_credentials":{{"user_id":"user","url":"","access_token":"test","refresh_token":""}},"google_email":null}}"#
+                    r#"{{"id":"{id}","user_id":"user","secret":"{secret}","spotify_credentials":"{{\"user_id\":\"user\",\"url\":\"\",\"access_token\":\"test\",\"refresh_token\":\"\"}}","google_email":null}}"#
                 ),
                 is_upsert: false,
             })]
@@ -572,7 +563,7 @@ mod test {
         assert_eq!(
             *client.get_mock.call_args.lock().unwrap(),
             [GetDocumentBuilder {
-                collection_name: "users",
+                collection_name: "user",
                 document_name: "user".to_owned(),
                 partition_key: "user".to_owned(),
             }],
@@ -580,9 +571,9 @@ mod test {
         assert_eq!(
             *client.query_mock.call_args.lock().unwrap(),
             [QueryDocumentsBuilder {
-                collection_name: "users",
+                collection_name: "user",
                 query: CosmosQuery::with_params(
-                    "SELECT c.id, c.secret FROM c WHERE c.spotify_credentials.user_id = @user_id"
+                    "SELECT id, secret FROM user WHERE spotify_credentials->'user_id' = ?1"
                         .to_owned(),
                     vec![CosmosParam::new("@user_id".to_owned(), "user".to_owned())],
                 ),
@@ -593,10 +584,10 @@ mod test {
         assert_eq!(
             *client.write_mock.call_args.lock().unwrap(),
             [DocumentWriter::Replace(ReplaceDocumentBuilder {
-                collection_name: "users",
+                collection_name: "user",
                 document_name: "".to_owned(),
                 partition_key: "".to_owned(),
-                document: r#"{"id":"","user_id":"","secret":"","spotify_credentials":{"user_id":"user","url":"","access_token":"test","refresh_token":""},"google_email":null}"#.to_owned(),
+                document: r#"{"id":"","user_id":"","secret":"","spotify_credentials":"{\"user_id\":\"user\",\"url\":\"\",\"access_token\":\"test\",\"refresh_token\":\"\"}","google_email":null}"#.to_owned(),
             })]
         );
         assert_eq!(
@@ -641,10 +632,10 @@ mod test {
         assert_eq!(
             *client.write_mock.call_args.lock().unwrap(),
             [DocumentWriter::Replace(ReplaceDocumentBuilder {
-                collection_name: "users",
+                collection_name: "user",
                 document_name: "".to_owned(),
                 partition_key: "".to_owned(),
-                document: r#"{"id":"","user_id":"","secret":"","spotify_credentials":{"user_id":"user","url":"","access_token":"test","refresh_token":""},"google_email":null}"#.to_owned(),
+                document: r#"{"id":"","user_id":"","secret":"","spotify_credentials":"{\"user_id\":\"user\",\"url\":\"\",\"access_token\":\"test\",\"refresh_token\":\"\"}","google_email":null}"#.to_owned(),
             })]
         );
         assert!(auth.expected_user.is_none());
@@ -691,9 +682,9 @@ mod test {
         assert_eq!(
             *client.query_mock.call_args.lock().unwrap(),
             [QueryDocumentsBuilder {
-                collection_name: "users",
+                collection_name: "user",
                 query: CosmosQuery::with_params(
-                    "SELECT c.id FROM c WHERE c.google_email = @google_email".to_owned(),
+                    "SELECT id FROM user WHERE google_email = ?1".to_owned(),
                     vec![CosmosParam::new(
                         "@google_email".to_owned(),
                         "user@gmail.com".to_owned()
@@ -712,7 +703,7 @@ mod test {
         assert_eq!(
             write_mock,
             [DocumentWriter::Create(CreateDocumentBuilder {
-                collection_name: "users",
+                collection_name: "user",
                 document: format!(
                     r#"{{"id":"{id}","user_id":"user","secret":"{secret}","spotify_credentials":null,"google_email":"user@gmail.com"}}"#
                 ),
@@ -755,7 +746,7 @@ mod test {
         assert_eq!(
             *client.get_mock.call_args.lock().unwrap(),
             [GetDocumentBuilder {
-                collection_name: "users",
+                collection_name: "user",
                 document_name: "user".to_owned(),
                 partition_key: "user".to_owned(),
             }],
@@ -763,9 +754,9 @@ mod test {
         assert_eq!(
             *client.query_mock.call_args.lock().unwrap(),
             [QueryDocumentsBuilder {
-                collection_name: "users",
+                collection_name: "user",
                 query: CosmosQuery::with_params(
-                    "SELECT c.id FROM c WHERE c.google_email = @google_email".to_owned(),
+                    "SELECT id FROM user WHERE google_email = ?1".to_owned(),
                     vec![CosmosParam::new(
                         "@google_email".to_owned(),
                         "user@gmail.com".to_owned()
@@ -809,7 +800,7 @@ mod test {
         assert_eq!(
             *client.write_mock.call_args.lock().unwrap(),
             [DocumentWriter::Replace(ReplaceDocumentBuilder {
-                collection_name: "users",
+                collection_name: "user",
                 document_name: "".to_owned(),
                 partition_key: "".to_owned(),
                 document: r#"{"id":"","user_id":"","secret":"","spotify_credentials":null,"google_email":"user@gmail.com"}"#.to_owned(),

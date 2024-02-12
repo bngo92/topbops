@@ -1,5 +1,4 @@
 use crate::UserId;
-use cosmos::CosmosSessionClient;
 use futures::{StreamExt, TryStreamExt};
 use hyper::{Body, Client, Method, Request, Uri};
 use hyper_tls::HttpsConnector;
@@ -468,7 +467,7 @@ pub async fn get_token() -> Result<crate::Token, Error> {
 }
 
 pub async fn get_access_token<'a>(
-    _client: &'_ CosmosSessionClient,
+    _client: &impl SessionClient,
     user: &'a mut crate::user::User,
 ) -> Result<&'a str, Error> {
     let Some(credentials) = &mut user.spotify_credentials else {

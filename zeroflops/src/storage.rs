@@ -232,6 +232,7 @@ fn get_insert_stmt(collection_name: &str) -> &str {
     match collection_name {
         "item" => "INSERT INTO item (id, user_id, type, name, iframe, rating, user_score, user_wins, user_losses, metadata, hidden) VALUES (:id, :user_id, :type, :name, :iframe, :rating, :user_score, :user_wins, :user_losses, :metadata, :hidden)",
         "list" => "INSERT INTO list (id, user_id, mode, name, sources, iframe, items, favorite, query) VALUES (:id, :user_id, :mode, :name, :sources, :iframe, :items, :favorite, :query)",
+        "user" => "INSERT INTO user (id, user_id, secret, spotify_credentials, google_email) VALUES (:id, :user_id, :secret, :spotify_credentials, :google_email) ON CONFLICT(id, user_id) DO UPDATE SET secret=excluded.secret",
         _ => unreachable!()
     }
 }
