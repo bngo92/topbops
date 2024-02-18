@@ -197,7 +197,7 @@ impl SessionClient for SqlSessionClient {
         match builder {
             DocumentWriter::Create(builder) => {
                 conn.execute(
-                    get_insert_stmt(builder.collection_name),
+                    get_insert_stmt(builder.collection_name, builder.is_upsert),
                     serde_rusqlite::to_params_named(&builder.document)
                         .unwrap()
                         .to_slice()
@@ -228,11 +228,14 @@ impl SessionClient for SqlSessionClient {
     }
 }
 
-fn get_insert_stmt(collection_name: &str) -> &str {
-    match collection_name {
-        "item" => "INSERT INTO item (id, user_id, type, name, iframe, rating, user_score, user_wins, user_losses, metadata, hidden) VALUES (:id, :user_id, :type, :name, :iframe, :rating, :user_score, :user_wins, :user_losses, :metadata, :hidden)",
-        "list" => "INSERT INTO list (id, user_id, mode, name, sources, iframe, items, favorite, query) VALUES (:id, :user_id, :mode, :name, :sources, :iframe, :items, :favorite, :query)",
-        "user" => "INSERT INTO user (id, user_id, secret, spotify_credentials, google_email) VALUES (:id, :user_id, :secret, :spotify_credentials, :google_email) ON CONFLICT(id, user_id) DO UPDATE SET secret=excluded.secret",
+fn get_insert_stmt(collection_name: &str, is_upsert: bool) -> &str {
+    match (collection_name, is_upsert) {
+        ("item", false) => "INSERT INTO item (id, user_id, type, name, iframe, rating, user_score, user_wins, user_losses, metadata, hidden) VALUES (:id, :user_id, :type, :name, :iframe, :rating, :user_score, :user_wins, :user_losses, :metadata, :hidden)",
+        ("item", true) => "INSERT INTO item (id, user_id, type, name, iframe, rating, user_score, user_wins, user_losses, metadata, hidden) VALUES (:id, :user_id, :type, :name, :iframe, :rating, :user_score, :user_wins, :user_losses, :metadata, :hidden) ON CONFLICT(id, user_id) DO UPDATE SET rating=excluded.rating, user_score=excluded.user_score, user_wins=excluded.user_wins, user_losses=excluded.user_losses",
+        ("list", false) => "INSERT INTO list (id, user_id, mode, name, sources, iframe, items, favorite, query) VALUES (:id, :user_id, :mode, :name, :sources, :iframe, :items, :favorite, :query)",
+        ("list", true) => "INSERT INTO list (id, user_id, mode, name, sources, iframe, items, favorite, query) VALUES (:id, :user_id, :mode, :name, :sources, :iframe, :items, :favorite, :query) ON CONFLICT(id, user_id) DO UPDATE SET items=excluded.items, query=excluded.query",
+        ("user", false) => "INSERT INTO user (id, user_id, secret, spotify_credentials, google_email) VALUES (:id, :user_id, :secret, :spotify_credentials, :google_email)",
+        ("user", true) => "INSERT INTO user (id, user_id, secret, spotify_credentials, google_email) VALUES (:id, :user_id, :secret, :spotify_credentials, :google_email) ON CONFLICT(id, user_id) DO UPDATE SET secret=excluded.secret",
         _ => unreachable!()
     }
 }

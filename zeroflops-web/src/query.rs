@@ -115,32 +115,29 @@ pub async fn query_list(
 ) -> Result<Vec<Map<String, Value>>, Error> {
     let query = if let ListMode::View(_) = &list.mode {
         let query = list.query.into_query()?;
-        rewrite_query(query, user_id)?.0.to_string()
+        CosmosQuery::with_params(rewrite_query(query, user_id)?.0.to_string(), Vec::new())
     } else if list.items.is_empty() {
         return Ok(Vec::new());
     } else {
-        format!(
-            "SELECT id, type, name, rating, user_score, user_wins, user_losses, hidden, metadata FROM item WHERE user_id = ?1 AND id IN ({})",
-            &"?,".repeat(list.items.len())[..list.items.len() * 2 - 1]
+        CosmosQuery::with_params(
+            format!(
+                "SELECT id, type, name, rating, user_score, user_wins, user_losses, hidden, metadata FROM item WHERE user_id = ?1 AND id IN ({})",
+                &"?,".repeat(list.items.len())[..list.items.len() * 2 - 1],
+            ),
+            std::iter::once(CosmosParam::new(
+                String::from("@user_id"),
+                user_id.0.clone(),
+            ))
+            .chain(
+                list.items
+                    .iter()
+                    .map(|i| CosmosParam::new(String::from("@ids"), i.id.clone())),
+            )
+            .collect::<Vec<_>>(),
         )
     };
     Ok(client
-        .query_documents::<Map<String, Value>>(QueryDocumentsBuilder::new(
-            "item",
-            CosmosQuery::with_params(
-                query,
-                std::iter::once(CosmosParam::new(
-                    String::from("@user_id"),
-                    user_id.0.clone(),
-                ))
-                .chain(
-                    list.items
-                        .iter()
-                        .map(|i| CosmosParam::new(String::from("@ids"), i.id.clone())),
-                )
-                .collect::<Vec<_>>(),
-            ),
-        ))
+        .query_documents::<Map<String, Value>>(QueryDocumentsBuilder::new("item", query))
         .await
         .map_err(Error::from)?
         .into_iter()

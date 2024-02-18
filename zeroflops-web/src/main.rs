@@ -695,7 +695,7 @@ async fn main() {
                 iframe: None,
                 items: Vec::new(),
                 favorite: true,
-                query: String::from("SELECT artists, AVG(user_score) FROM c GROUP BY artists"),
+                query: String::from("SELECT artists, AVG(user_score) FROM item GROUP BY artists"),
             },
             true,
         )
@@ -712,7 +712,7 @@ async fn main() {
                 iframe: None,
                 items: Vec::new(),
                 favorite: true,
-                query: String::from("SELECT name, user_score FROM c WHERE user_score >= 1500"),
+                query: String::from("SELECT name, user_score FROM item WHERE user_score >= 1500"),
             },
             true,
         )
