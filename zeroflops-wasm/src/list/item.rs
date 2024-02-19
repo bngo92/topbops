@@ -17,7 +17,7 @@ use zeroflops::{Id, ItemMetadata, List, ListMode, SourceType, Spotify, User};
 
 pub enum Msg {
     None,
-    Load(DataFrame),
+    Load(Option<DataFrame>),
     Save,
     SaveError(String),
     HideAlert,
@@ -270,6 +270,9 @@ impl Component for ListItems {
         match msg {
             Msg::None => false,
             Msg::Load(query) => {
+                let Some(query) = query else {
+                    return false;
+                };
                 let ids = self
                     .state
                     .iter()

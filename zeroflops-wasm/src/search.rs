@@ -119,7 +119,7 @@ impl Component for Search {
 
 pub enum Msg {
     Fetching,
-    Success(DataFrame),
+    Success(Option<DataFrame>),
     Failed(String),
     Select,
 }
@@ -219,7 +219,7 @@ impl Component for SearchPane {
                 return false;
             }
             Msg::Success(query) => {
-                self.query = Some(query);
+                self.query = query;
                 self.error = None;
             }
             Msg::Failed(error) => {

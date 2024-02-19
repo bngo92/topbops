@@ -464,7 +464,7 @@ impl Home {
 
 enum WidgetMsg {
     Fetching(Rc<List>),
-    Success(DataFrame),
+    Success(Option<DataFrame>),
 }
 
 #[derive(PartialEq, Properties)]
@@ -573,7 +573,7 @@ impl Component for Widget {
             }
             WidgetMsg::Success(query) => {
                 self.collapsed = false;
-                self.query = Some(query);
+                self.query = query;
                 true
             }
         }
@@ -581,7 +581,7 @@ impl Component for Widget {
 }
 
 enum ListViewMsg {
-    Success(DataFrame),
+    Success(Option<DataFrame>),
     Select,
     Query,
 }
@@ -643,6 +643,9 @@ impl Component for ListView {
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
             ListViewMsg::Success(data) => {
+                let Some(data) = data else {
+                    return false;
+                };
                 self.data = Some(
                     data.lazy()
                         .select(&[col("*").exclude(["id"])])
@@ -1020,7 +1023,7 @@ async fn delete_list(id: &str) -> Result<(), JsValue> {
     Ok(())
 }
 
-async fn query_list(list: &List) -> Result<DataFrame, JsValue> {
+async fn query_list(list: &List) -> Result<Option<DataFrame>, JsValue> {
     let window = window();
     let request = query(&format!("/api/lists/{}/query", list.id), "GET").unwrap();
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
@@ -1036,21 +1039,22 @@ async fn query_list(list: &List) -> Result<DataFrame, JsValue> {
             m
         })
         .collect();
-    let mut items = serialize_into_df(&items);
-    if items.column("id").is_ok() {
-        items = items
-            .lazy()
-            .inner_join(
-                df!("id" => &list.items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>())
-                    .unwrap()
-                    .lazy(),
-                col("id"),
-                col("id"),
-            )
-            .collect()
-            .unwrap();
-    }
-    Ok(items)
+    Ok(serialize_into_df(&items).map(|mut items| {
+        if items.column("id").is_ok() {
+            items = items
+                .lazy()
+                .inner_join(
+                    df!("id" => &list.items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>())
+                        .unwrap()
+                        .lazy(),
+                    col("id"),
+                    col("id"),
+                )
+                .collect()
+                .unwrap();
+        }
+        items
+    }))
 }
 
 async fn get_items(id: &str) -> Result<Items, JsValue> {
@@ -1092,7 +1096,7 @@ async fn import_list(source: &str, id: &str) -> Result<(), JsValue> {
     Ok(())
 }
 
-async fn find_items(search: &str) -> Result<DataFrame, JsValue> {
+async fn find_items(search: &str) -> Result<Option<DataFrame>, JsValue> {
     let window = window();
     let request = query(&format!("/api/items?q=search&query={}", search), "GET")?;
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
@@ -1105,7 +1109,7 @@ async fn find_items(search: &str) -> Result<DataFrame, JsValue> {
     Ok(serialize_into_df(&items))
 }
 
-fn serialize_into_df(items: &(impl Serialize + ?Sized)) -> DataFrame {
+fn serialize_into_df(items: &(impl Serialize + ?Sized)) -> Option<DataFrame> {
     let fields = arrow2::serialize_into_fields(
         items,
         TracingOptions::default()
@@ -1114,14 +1118,16 @@ fn serialize_into_df(items: &(impl Serialize + ?Sized)) -> DataFrame {
     )
     .unwrap();
     let arrays = arrow2::serialize_into_arrays(&fields, items).unwrap();
-    DataFrame::new(
-        fields
-            .into_iter()
-            .zip(arrays.into_iter())
-            .map(|(f, a)| Series::try_from((f.name.as_str(), a)).unwrap())
-            .collect(),
+    Some(
+        DataFrame::new(
+            fields
+                .into_iter()
+                .zip(arrays.into_iter())
+                .map(|(f, a)| Series::try_from((f.name.as_str(), a)).unwrap())
+                .collect(),
+        )
+        .unwrap(),
     )
-    .unwrap()
 }
 
 async fn delete_items(ids: &[String]) -> Result<(), JsValue> {
