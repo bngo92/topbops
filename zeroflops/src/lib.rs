@@ -270,6 +270,8 @@ pub enum InternalError {
     SqlError(rusqlite::Error),
     #[cfg(feature = "full")]
     SerdeError(serde_rusqlite::Error),
+    ArrowError(arrow2::error::Error),
+    SerdeArrowError(serde_arrow::Error),
     Error(String),
 }
 
@@ -342,5 +344,19 @@ impl From<rusqlite::Error> for Error {
 impl From<serde_rusqlite::Error> for Error {
     fn from(e: serde_rusqlite::Error) -> Error {
         Error::InternalError(InternalError::SerdeError(e))
+    }
+}
+
+#[cfg(feature = "full")]
+impl From<arrow2::error::Error> for Error {
+    fn from(e: arrow2::error::Error) -> Error {
+        Error::InternalError(InternalError::ArrowError(e))
+    }
+}
+
+#[cfg(feature = "full")]
+impl From<serde_arrow::Error> for Error {
+    fn from(e: serde_arrow::Error) -> Error {
+        Error::InternalError(InternalError::SerdeArrowError(e))
     }
 }

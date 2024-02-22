@@ -10,15 +10,14 @@ use crate::{
     search::Search,
     tournament::{RandomTournamentLoader, TournamentLoader},
 };
+use arrow2::io::ipc::read::FileReader;
+use js_sys::Uint8Array;
 use polars::{
     prelude::{col, df, DataFrame, IntoLazy, NamedFrom, Series},
     sql::SQLContext,
 };
 use regex::Regex;
-use serde::Serialize;
-use serde_arrow::{arrow2, schema::TracingOptions};
-use serde_json::{Map, Value};
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, io::Cursor, rc::Rc};
 use wasm_bindgen::{prelude::*, JsCast};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlSelectElement, MouseEvent, Request, RequestInit, RequestMode, Response, Window};
@@ -647,13 +646,14 @@ impl Component for ListView {
                     return false;
                 };
                 self.data = Some(
-                    data.lazy()
+                    data.clone()
+                        .lazy()
                         .select(&[col("*").exclude(["id"])])
                         .collect()
                         .unwrap(),
                 );
                 if let ListMode::View(_) = ctx.props().list.mode {
-                    self.df = self.data.clone();
+                    self.df = Some(data);
                 } else {
                     update_list_view(self, ctx.props().list.query.clone());
                 }
@@ -1028,18 +1028,7 @@ async fn query_list(list: &List) -> Result<Option<DataFrame>, JsValue> {
     let request = query(&format!("/api/lists/{}/query", list.id), "GET").unwrap();
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
-    let json = JsFuture::from(resp.json()?).await?;
-    let mut items: Vec<Map<String, Value>> = serde_wasm_bindgen::from_value(json).unwrap();
-    items = items
-        .into_iter()
-        .map(|mut m| {
-            if let Some(Value::Object(mut metadata)) = m.remove("metadata") {
-                m.append(&mut metadata);
-            }
-            m
-        })
-        .collect();
-    Ok(serialize_into_df(&items).map(|mut items| {
+    Ok(serialize_into_df(resp).await?.map(|mut items| {
         if items.column("id").is_ok() {
             items = items
                 .lazy()
@@ -1104,30 +1093,29 @@ async fn find_items(search: &str) -> Result<Option<DataFrame>, JsValue> {
     if [400, 500].contains(&resp.status()) {
         return Err(JsFuture::from(resp.text()?).await?);
     }
-    let json = JsFuture::from(resp.json()?).await?;
-    let items: Value = serde_wasm_bindgen::from_value(json).unwrap();
-    Ok(serialize_into_df(&items))
+    serialize_into_df(resp).await
 }
 
-fn serialize_into_df(items: &(impl Serialize + ?Sized)) -> Option<DataFrame> {
-    let fields = arrow2::serialize_into_fields(
-        items,
-        TracingOptions::default()
-            .allow_null_fields(true)
-            .coerce_numbers(true),
-    )
-    .unwrap();
-    let arrays = arrow2::serialize_into_arrays(&fields, items).unwrap();
-    Some(
+async fn serialize_into_df(resp: Response) -> Result<Option<DataFrame>, JsValue> {
+    let buf = Uint8Array::new(&JsFuture::from(resp.array_buffer()?).await?).to_vec();
+    if buf.is_empty() {
+        return Ok(None);
+    }
+    let mut buf = Cursor::new(buf);
+    let metadata = arrow2::io::ipc::read::read_file_metadata(&mut buf).unwrap();
+    let fields = metadata.schema.fields.clone();
+    let mut reader = FileReader::new(buf, metadata, None, None);
+    let arrays = reader.next().unwrap().unwrap();
+    Ok(Some(
         DataFrame::new(
             fields
                 .into_iter()
-                .zip(arrays.into_iter())
-                .map(|(f, a)| Series::try_from((f.name.as_str(), a)).unwrap())
+                .zip(arrays.iter())
+                .map(|(f, a)| Series::try_from((f.name.as_str(), a.clone())).unwrap())
                 .collect(),
         )
         .unwrap(),
-    )
+    ))
 }
 
 async fn delete_items(ids: &[String]) -> Result<(), JsValue> {

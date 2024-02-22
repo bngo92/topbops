@@ -8,6 +8,7 @@ default-run = "zeroflops-web"
 
 [dependencies]
 anyhow = "1.0.71"
+arrow2 = { workspace = true, features = ["io_ipc"] }
 async-trait.workspace = true
 axum.workspace = true
 axum-login = "0.13.1"
@@ -23,6 +24,7 @@ password-auth = "1.0.0"
 rand = { version = "0.8.4", features = ["min_const_gen"] }
 rusqlite.workspace = true
 serde = { version = "1.0", features = ["derive"] }
+serde_arrow = { workspace = true, features = ["arrow2-0-17"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_rusqlite.workspace = true
 spotify = { path = "../spotify/" }

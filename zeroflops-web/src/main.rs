@@ -1,4 +1,9 @@
 use ::spotify::SpotifyClient;
+use arrow2::{
+    chunk::Chunk,
+    datatypes::{Field, Schema},
+    io::ipc::write::{FileWriter, WriteOptions},
+};
 use async_trait::async_trait;
 use axum::{
     body::Bytes,
@@ -13,6 +18,7 @@ use axum_login::{
     AuthManagerLayerBuilder,
 };
 use futures::{stream::FuturesUnordered, TryStreamExt};
+use serde_arrow::schema::{SchemaLike, TracingOptions};
 use serde_json::{Map, Value};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use time::Duration;
@@ -209,12 +215,48 @@ async fn query_list(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     auth: AuthContext,
-) -> Result<Json<Vec<Map<String, Value>>>, Response> {
+) -> Result<Vec<u8>, Response> {
     let user_id = get_user_or_demo_user(auth);
     let list = source::get_list(&state.sql_client, &user_id, &id).await?;
-    Ok(Json(
-        query::query_list(&state.sql_client, &user_id, list).await?,
-    ))
+    let records = query::query_list(&state.sql_client, &user_id, list).await?;
+    Ok(serialize_arrow(records)?)
+}
+
+fn serialize_arrow(mut records: Vec<Map<String, Value>>) -> Result<Vec<u8>, Error> {
+    records = records
+        .into_iter()
+        .map(|mut m| {
+            if let Some(Value::String(metadata)) = m.remove("metadata") {
+                let metadata = serde_json::from_str(&metadata)?;
+                if let Value::Object(mut metadata) = metadata {
+                    m.append(&mut metadata);
+                }
+            }
+            Ok(m)
+        })
+        .collect::<Result<_, Error>>()?;
+    let fields = match Vec::<Field>::from_samples(
+        &records,
+        TracingOptions::default()
+            .allow_null_fields(true)
+            .coerce_numbers(true),
+    ) {
+        Ok(fields) => fields,
+        Err(e) => {
+            if e.message() == "No records found to determine schema" {
+                return Ok(Vec::new());
+            }
+            return Err(Error::from(e));
+        }
+    };
+    let mut buf = Vec::new();
+    let arrays = serde_arrow::to_arrow2(&fields, &records)?;
+    let options = WriteOptions { compression: None };
+    let mut writer = FileWriter::new(&mut buf, Schema::from(fields), None, options);
+    writer.start()?;
+    writer.write(&Chunk::new(arrays), None)?;
+    writer.finish()?;
+    Ok(buf)
 }
 
 async fn create_list(
@@ -294,7 +336,7 @@ async fn find_items(
             eprintln!("{}: {:?}", query, e);
             e
         })?;
-    Ok(Json(values))
+    Ok(serialize_arrow(values)?)
 }
 
 async fn handle_action(
