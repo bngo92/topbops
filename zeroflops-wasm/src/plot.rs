@@ -221,7 +221,7 @@ fn df_coords(df: &DataFrame) -> Result<Vec<(f64, f64)>, Box<dyn std::error::Erro
     domain
         .f64()?
         .into_iter()
-        .zip(range.f64()?.into_iter())
+        .zip(range.f64()?)
         .map(|(o1, o2)| {
             Ok((
                 o1.ok_or(format!(

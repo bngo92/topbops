@@ -545,7 +545,7 @@ impl Tournament {
                                 i.name.clone(),
                                 fields.previous_ranks[&i.id]
                                     .map(|i| i.to_string())
-                                    .unwrap_or_else(String::new),
+                                    .unwrap_or_default(),
                                 i.score.to_string(),
                             ]),
                         )
