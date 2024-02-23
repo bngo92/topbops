@@ -334,10 +334,6 @@ function __wbg_get_imports() {
         const ret = getStringFromWasm0(arg0, arg1);
         return addHeapObject(ret);
     };
-    imports.wbg.__wbindgen_object_clone_ref = function(arg0) {
-        const ret = getObject(arg0);
-        return addHeapObject(ret);
-    };
     imports.wbg.__wbindgen_boolean_get = function(arg0) {
         const v = getObject(arg0);
         const ret = typeof(v) === 'boolean' ? (v ? 1 : 0) : 2;
@@ -385,6 +381,10 @@ function __wbg_get_imports() {
     imports.wbg.__wbindgen_is_undefined = function(arg0) {
         const ret = getObject(arg0) === undefined;
         return ret;
+    };
+    imports.wbg.__wbindgen_object_clone_ref = function(arg0) {
+        const ret = getObject(arg0);
+        return addHeapObject(ret);
     };
     imports.wbg.__wbindgen_cb_drop = function(arg0) {
         const obj = takeObject(arg0).original;
@@ -1139,16 +1139,16 @@ function __wbg_get_imports() {
         const ret = wasm.memory;
         return addHeapObject(ret);
     };
-    imports.wbg.__wbindgen_closure_wrapper3093 = function(arg0, arg1, arg2) {
-        const ret = makeMutClosure(arg0, arg1, 1776, __wbg_adapter_48);
+    imports.wbg.__wbindgen_closure_wrapper3084 = function(arg0, arg1, arg2) {
+        const ret = makeMutClosure(arg0, arg1, 1778, __wbg_adapter_48);
         return addHeapObject(ret);
     };
-    imports.wbg.__wbindgen_closure_wrapper3318 = function(arg0, arg1, arg2) {
-        const ret = makeMutClosure(arg0, arg1, 1845, __wbg_adapter_51);
+    imports.wbg.__wbindgen_closure_wrapper3309 = function(arg0, arg1, arg2) {
+        const ret = makeMutClosure(arg0, arg1, 1847, __wbg_adapter_51);
         return addHeapObject(ret);
     };
-    imports.wbg.__wbindgen_closure_wrapper4287 = function(arg0, arg1, arg2) {
-        const ret = makeMutClosure(arg0, arg1, 1865, __wbg_adapter_54);
+    imports.wbg.__wbindgen_closure_wrapper4278 = function(arg0, arg1, arg2) {
+        const ret = makeMutClosure(arg0, arg1, 1867, __wbg_adapter_54);
         return addHeapObject(ret);
     };
 

@@ -470,7 +470,7 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
             .await?
             .items
             .into_iter()
-            .map(|i| i.metadata.unwrap().id)
+            .map(|i| i.unwrap().id)
             .collect(),
         ListMode::View(_) => query::get_view_items(&state.sql_client, &list)
             .await?

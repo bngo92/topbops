@@ -8,7 +8,7 @@ use sqlparser::{
     dialect::MySqlDialect,
     parser::Parser,
 };
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use zeroflops::{
     storage::{CosmosParam, CosmosQuery, QueryDocumentsBuilder, SessionClient, SqlSessionClient},
     Error, ItemMetadata, Items, List, ListMode,
@@ -60,51 +60,35 @@ pub async fn get_list_items(
     } else {
         let (query, map, ids) = rewrite_list_query(&list, user_id)?;
         let mut items: Vec<_> = client
-            .query_documents(QueryDocumentsBuilder::new(
+            .query_documents::<Map<String, Value>>(QueryDocumentsBuilder::new(
                 "item",
                 CosmosQuery::new(query.to_string()),
             ))
             .await
-            .map_err(Error::from)?;
+            .map_err(Error::from)?
+            .into_iter()
+            .map(|r| r["id"].as_str().unwrap().to_owned())
+            .collect();
         // Use list item order if an ordering wasn't provided
         if query.order_by.is_empty() {
-            let mut item_metadata: HashMap<_, _> = items
-                .into_iter()
-                .map(|r: Map<String, Value>| (r["id"].to_string(), r))
-                .collect();
+            let item_metadata: HashSet<_> = items.into_iter().collect();
             items = ids
                 .into_iter()
-                .filter_map(|id| item_metadata.remove(&id))
+                .filter(|id| item_metadata.contains(id))
                 .collect();
         };
         Ok(Items {
             items: items
                 .into_iter()
-                .map(|r| {
-                    let mut iter = r.values();
-                    let metadata = if map.is_empty() {
+                .map(|id| {
+                    if map.is_empty() {
                         None
                     } else {
-                        Some(map[iter.next_back().unwrap().as_str().unwrap()].clone())
-                    };
-                    zeroflops::Item {
-                        values: iter.map(format_value).collect(),
-                        metadata,
+                        Some(map[&id].clone())
                     }
                 })
                 .collect(),
         })
-    }
-}
-
-fn format_value(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.to_owned(),
-        Value::Number(n) => n.to_string(),
-        Value::Null => Value::Null.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Array(a) => a.iter().map(format_value).collect::<Vec<_>>().join(", "),
-        _ => todo!(),
     }
 }
 
@@ -173,7 +157,11 @@ fn rewrite_list_query<'a>(
         }
         rewrite_query_impl(query.into_query()?, user_id, Some(id_filter(&ids)))?
     };
-    Ok((query, map, ids))
+    Ok((
+        query,
+        map,
+        list.items.iter().map(|i| i.id.to_owned()).collect(),
+    ))
 }
 
 fn id_filter(ids: &[String]) -> Expr {
@@ -355,7 +343,7 @@ pub mod test {
             CosmosQuery, CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter,
             GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
         },
-        Error, Item, ItemMetadata, Items, List, ListMode,
+        Error, ItemMetadata, Items, List, ListMode,
     };
 
     pub struct Mock<T, U> {
@@ -505,18 +493,15 @@ pub mod test {
                 .await
                 .unwrap(),
             Items {
-                items: vec![Item {
-                    values: vec!["test".to_owned(), "0".to_owned()],
-                    metadata: Some(ItemMetadata {
-                        id: "id".to_owned(),
-                        name: "".to_owned(),
-                        iframe: None,
-                        score: 0,
-                        wins: 0,
-                        losses: 0,
-                        rank: None
-                    })
-                }]
+                items: vec![Some(ItemMetadata {
+                    id: "id".to_owned(),
+                    name: "".to_owned(),
+                    iframe: None,
+                    score: 0,
+                    wins: 0,
+                    losses: 0,
+                    rank: None
+                })]
             }
         );
         assert_eq!(

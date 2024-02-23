@@ -68,7 +68,7 @@ pub struct MatchComponentProps {
 }
 
 pub struct Match {
-    random_queue: Vec<zeroflops::Item>,
+    random_queue: Vec<Option<zeroflops::ItemMetadata>>,
     data: Option<MatchData>,
 }
 
@@ -105,7 +105,7 @@ impl Component for Match {
             .iter()
             .zip(1..)
             .map(|(item, i)| {
-                item.metadata.as_ref().map(|m| {
+                item.as_ref().map(|m| {
                     (
                         i,
                         Cow::from(vec![
@@ -148,16 +148,16 @@ impl Component for Match {
                             _ => {}
                         }
                         (
-                            self.random_queue.pop().unwrap().metadata.unwrap(),
-                            self.random_queue.pop().unwrap().metadata.unwrap(),
+                            self.random_queue.pop().unwrap().unwrap(),
+                            self.random_queue.pop().unwrap().unwrap(),
                         )
                     }
                     Mode::Match => {
                         let mut queued_scores: Vec<_> = query.items.iter().collect();
                         queued_scores.shuffle(&mut rand::thread_rng());
                         (
-                            queued_scores.pop().unwrap().metadata.clone().unwrap(),
-                            queued_scores.pop().unwrap().metadata.clone().unwrap(),
+                            queued_scores.pop().unwrap().clone().unwrap(),
+                            queued_scores.pop().unwrap().clone().unwrap(),
                         )
                     }
                 };

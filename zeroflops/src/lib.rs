@@ -215,13 +215,7 @@ impl CosmosEntity for RawList {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Items {
-    pub items: Vec<Item>,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct Item {
-    pub values: Vec<String>,
-    pub metadata: Option<ItemMetadata>,
+    pub items: Vec<Option<ItemMetadata>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
