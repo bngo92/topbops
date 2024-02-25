@@ -2,8 +2,8 @@ use crate::{UserId, ITEM_FIELDS};
 use serde_json::{Map, Value};
 use sqlparser::{
     ast::{
-        BinaryOperator, Expr, FunctionArg, FunctionArgExpr, GroupByExpr, Ident, JsonOperator,
-        Query, SelectItem, SetExpr, Statement, TableFactor,
+        BinaryOperator, Expr, FunctionArg, FunctionArgExpr, Ident, JsonOperator, Query, SelectItem,
+        SetExpr, Statement, TableFactor,
     },
     dialect::MySqlDialect,
     parser::Parser,
@@ -23,21 +23,20 @@ pub async fn get_view_items(
         return Err(Error::client_error("Only SELECT queries are supported"));
     };
     // GROUP BY queries create schemas that don't produce items
-    let items = match &select.group_by {
-        GroupByExpr::Expressions(expr) if !expr.is_empty() => Vec::new(),
-        _ => {
-            select.projection = ["id", "name", "iframe"]
-                .into_iter()
-                .map(|s| SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(s))))
-                .collect();
-            let (query, _) = rewrite_query(query, &UserId(list.user_id.clone()))?;
-            client
-                .query_documents::<Map<String, Value>>(QueryDocumentsBuilder::new(
-                    "item",
-                    CosmosQuery::new(query.to_string()),
-                ))
-                .await?
-        }
+    let items = if select.group_by.is_empty() {
+        Vec::new()
+    } else {
+        select.projection = ["id", "name", "iframe"]
+            .into_iter()
+            .map(|s| SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(s))))
+            .collect();
+        let (query, _) = rewrite_query(query, &UserId(list.user_id.clone()))?;
+        client
+            .query_documents::<Map<String, Value>>(QueryDocumentsBuilder::new(
+                "item",
+                CosmosQuery::new(query.to_string()),
+            ))
+            .await?
     };
     Ok(items.into_iter().map(|item| ItemMetadata {
         id: item["id"].as_str().unwrap().to_owned(),
@@ -246,10 +245,8 @@ fn rewrite_query_impl(
     } else {
         Some(required_user_id)
     };
-    if let GroupByExpr::Expressions(expr) = &mut select.group_by {
-        for expr in expr {
-            rewrite_expr(expr);
-        }
+    for expr in &mut select.group_by {
+        rewrite_expr(expr);
     }
     for expr in &mut query.order_by {
         rewrite_expr(&mut expr.expr);

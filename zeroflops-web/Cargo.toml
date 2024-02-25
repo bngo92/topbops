@@ -24,7 +24,7 @@ serde_arrow = { workspace = true, features = ["arrow2-0-17"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_rusqlite.workspace = true
 spotify = { path = "../spotify/" }
-sqlparser = { version = "0", features = ["serde"] }
+sqlparser = { workspace = true, features = ["serde"] }
 time = { version = "0.3.21", features = ["formatting"] }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 tower-http = { version = "0.5.1", features = ["fs", "trace"] }

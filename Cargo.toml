@@ -15,4 +15,4 @@ serde = { version = "1.0", features = ["derive"] }
 serde_arrow = "0.10.0"
 serde_json = "1.0"
 serde_rusqlite = "0.34.0"
-sqlparser = "0"
+sqlparser = "0.36.1"
