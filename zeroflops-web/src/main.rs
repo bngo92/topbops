@@ -634,7 +634,7 @@ async fn delete_items(
     params["ids"]
         .split(',')
         .map(|id| async move {
-            match state
+            state
                 .sql_client
                 .write_document(DocumentWriter::<RawItem>::Delete(DeleteDocumentBuilder {
                     collection_name: "item",
@@ -642,16 +642,6 @@ async fn delete_items(
                     partition_key: user_id.0.clone(),
                 }))
                 .await
-            {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                    if let azure_core::StatusCode::NotFound = e.as_http_error().unwrap().status() {
-                        Ok(())
-                    } else {
-                        Err(Error::from(e))
-                    }
-                }
-            }
         })
         .collect::<FuturesUnordered<_>>()
         .try_collect()

@@ -11,8 +11,8 @@ arrow2 = { workspace = true, features = ["io_ipc"] }
 async-trait.workspace = true
 axum.workspace = true
 axum-login = "0.13.1"
-azure_core.workspace = true
-azure_data_cosmos.workspace = true
+azure_core = { workspace = true, optional = true }
+azure_data_cosmos = { workspace = true, optional = true }
 base64 = "0.21.0"
 futures.workspace = true
 hyper = "0.14"
@@ -36,3 +36,4 @@ zeroflops = { path = "../zeroflops/", features = ["full"] }
 
 [features]
 dev = []
+azure = ["azure_core", "azure_data_cosmos"]

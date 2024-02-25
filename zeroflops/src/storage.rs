@@ -1,5 +1,6 @@
 use crate::Error;
 use async_trait::async_trait;
+#[cfg(feature = "azure")]
 use azure_data_cosmos::{
     prelude::{self as cosmos, DatabaseClient, Param, Query},
     CosmosEntity,
@@ -29,6 +30,7 @@ impl CosmosQuery {
         }
     }
 
+    #[cfg(feature = "azure")]
     pub fn into_query(self) -> Query {
         Query::with_params(
             self.query,
@@ -75,6 +77,7 @@ impl GetDocumentBuilder {
         }
     }
 
+    #[cfg(feature = "azure")]
     pub fn into_cosmos<T: DeserializeOwned + Send + Sync>(
         self,
         db: &DatabaseClient,
@@ -104,6 +107,7 @@ impl QueryDocumentsBuilder {
         }
     }
 
+    #[cfg(feature = "azure")]
     pub fn into_cosmos(self, db: &DatabaseClient) -> Result<cosmos::QueryDocumentsBuilder, Error> {
         let mut builder = db
             .collection_client(self.collection_name)
@@ -130,12 +134,9 @@ pub trait SessionClient {
         T: DeserializeOwned + Send + Sync;
 
     /// CosmosDB creates new session tokens after writes
-    async fn write_document<T>(
-        &self,
-        builder: DocumentWriter<T>,
-    ) -> Result<(), azure_core::error::Error>
+    async fn write_document<T>(&self, builder: DocumentWriter<T>) -> Result<(), Error>
     where
-        T: Serialize + CosmosEntity + Send + 'static;
+        T: Serialize + Send + 'static;
 }
 
 pub struct SqlSessionClient {
@@ -186,12 +187,9 @@ impl SessionClient for SqlSessionClient {
     }
 
     /// CosmosDB creates new session tokens after writes
-    async fn write_document<T>(
-        &self,
-        builder: DocumentWriter<T>,
-    ) -> Result<(), azure_core::error::Error>
+    async fn write_document<T>(&self, builder: DocumentWriter<T>) -> Result<(), Error>
     where
-        T: Serialize + CosmosEntity + Send + 'static,
+        T: Serialize + Send + 'static,
     {
         let conn = Connection::open(self.path).unwrap();
         match builder {

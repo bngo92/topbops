@@ -1,18 +1,18 @@
-use std::{
-    fs,
-    sync::{Arc, RwLock},
-};
-
-use azure_data_cosmos::{clients::CosmosClient, resources::permission::AuthorizationToken};
-use cosmos::CosmosSessionClient;
-use zeroflops::{
-    storage::{CosmosQuery, QueryDocumentsBuilder, SessionClient},
-    List,
-};
-use zeroflops_web::Item;
-
+#[cfg(feature = "azure")]
 #[tokio::main]
 async fn main() {
+    use std::{
+        fs,
+        sync::{Arc, RwLock},
+    };
+
+    use azure_data_cosmos::{clients::CosmosClient, resources::permission::AuthorizationToken};
+    use cosmos::CosmosSessionClient;
+    use zeroflops::{
+        storage::{CosmosQuery, QueryDocumentsBuilder, SessionClient},
+        List,
+    };
+    use zeroflops_web::Item;
     let master_key =
         std::env::var("COSMOS_MASTER_KEY").expect("Set env variable COSMOS_MASTER_KEY first!");
     let account = std::env::var("COSMOS_ACCOUNT").expect("Set env variable COSMOS_ACCOUNT first!");
@@ -31,3 +31,5 @@ async fn main() {
     let lists: Vec<List> = client.query_documents(builder).await.unwrap();
     fs::write("lists.json", serde_json::to_string_pretty(&lists).unwrap()).unwrap();
 }
+#[cfg(not(feature = "azure"))]
+fn main() {}

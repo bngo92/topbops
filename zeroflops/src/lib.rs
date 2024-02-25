@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-#[cfg(feature = "full")]
+#[cfg(feature = "azure")]
 use azure_data_cosmos::prelude::CosmosEntity;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -204,7 +204,7 @@ pub struct Id {
     pub raw_id: String,
 }
 
-#[cfg(feature = "full")]
+#[cfg(feature = "azure")]
 impl CosmosEntity for RawList {
     type Entity = String;
 
@@ -257,7 +257,7 @@ pub enum InternalError {
     #[cfg(feature = "full")]
     RequestError(hyper::http::Error),
     JSONError(serde_json::Error),
-    #[cfg(feature = "full")]
+    #[cfg(feature = "azure")]
     CosmosError(azure_core::error::Error),
     IOError(std::io::Error),
     #[cfg(feature = "full")]
@@ -289,7 +289,7 @@ impl From<serde_json::Error> for Error {
     }
 }
 
-#[cfg(feature = "full")]
+#[cfg(feature = "azure")]
 impl From<azure_core::error::Error> for Error {
     fn from(e: azure_core::error::Error) -> Error {
         Error::InternalError(InternalError::CosmosError(e))

@@ -1,3 +1,4 @@
+#[cfg(feature = "azure")]
 use azure_data_cosmos::prelude::CosmosEntity;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -94,6 +95,7 @@ impl TryFrom<RawItem> for Item {
     }
 }
 
+#[cfg(feature = "azure")]
 impl CosmosEntity for RawItem {
     type Entity = String;
 

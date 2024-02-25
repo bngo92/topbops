@@ -334,7 +334,6 @@ pub mod test {
     use super::IntoQuery;
     use crate::UserId;
     use async_trait::async_trait;
-    use azure_data_cosmos::CosmosEntity;
     use serde::{de::DeserializeOwned, Serialize};
     use sqlparser::ast::Query;
     use std::sync::{Arc, Mutex};
@@ -401,12 +400,9 @@ pub mod test {
         }
 
         /// CosmosDB creates new session tokens after writes
-        async fn write_document<T>(
-            &self,
-            builder: DocumentWriter<T>,
-        ) -> Result<(), azure_core::error::Error>
+        async fn write_document<T>(&self, builder: DocumentWriter<T>) -> Result<(), Error>
         where
-            T: Serialize + CosmosEntity + Send + 'static,
+            T: Serialize + Send + 'static,
         {
             let builder = match builder {
                 DocumentWriter::Create(builder) => DocumentWriter::Create(CreateDocumentBuilder {

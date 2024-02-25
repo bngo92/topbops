@@ -166,23 +166,13 @@ pub async fn create_items(
     items
         .into_iter()
         .map(|item| async move {
-            match client
+            client
                 .write_document(DocumentWriter::Create(CreateDocumentBuilder {
                     collection_name: "item",
                     document: RawItem::from(item),
                     is_upsert,
                 }))
                 .await
-            {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                    if let azure_core::StatusCode::Conflict = e.as_http_error().unwrap().status() {
-                        Ok(())
-                    } else {
-                        Err(e)
-                    }
-                }
-            }
         })
         .collect::<FuturesUnordered<_>>()
         .try_collect()

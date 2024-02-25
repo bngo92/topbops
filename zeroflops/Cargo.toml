@@ -20,4 +20,5 @@ serde_rusqlite = { workspace = true, optional = true }
 sqlparser.workspace = true
 
 [features]
-full = ["dep:axum", "dep:azure_core", "dep:azure_data_cosmos", "dep:hyper", "dep:rusqlite", "dep:serde_rusqlite"]
+azure = ["dep:azure_core", "dep:azure_data_cosmos"]
+full = ["dep:axum", "dep:hyper", "dep:rusqlite", "dep:serde_rusqlite"]

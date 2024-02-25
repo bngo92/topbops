@@ -7,6 +7,7 @@ use axum_login::{
     },
     AuthUser, AuthnBackend,
 };
+#[cfg(feature = "azure")]
 use azure_data_cosmos::CosmosEntity;
 use base64::prelude::{Engine, BASE64_STANDARD};
 use hyper::{Body, Client, Method, Request, Uri};
@@ -89,6 +90,7 @@ pub struct GoogleUser {
     pub email: String,
 }
 
+#[cfg(feature = "azure")]
 impl CosmosEntity for RawUser {
     type Entity = String;
 
