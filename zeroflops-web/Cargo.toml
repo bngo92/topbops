@@ -7,7 +7,6 @@ default-run = "zeroflops-web"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.71"
 arrow2 = { workspace = true, features = ["io_ipc"] }
 async-trait.workspace = true
 axum.workspace = true
@@ -15,10 +14,8 @@ axum-login = "0.13.1"
 azure_core.workspace = true
 azure_data_cosmos.workspace = true
 base64 = "0.21.0"
-cosmos = { path = "../cosmos/" }
-eyre = "0.6.8"
 futures.workspace = true
-hyper = { version = "0.14", features = ["full"] }
+hyper = "0.14"
 hyper-tls = "0.5.0"
 password-auth = "1.0.0"
 rand = { version = "0.8.4", features = ["min_const_gen"] }
@@ -30,7 +27,7 @@ serde_rusqlite.workspace = true
 spotify = { path = "../spotify/" }
 sqlparser = { version = "0", features = ["serde"] }
 time = { version = "0.3.21", features = ["formatting"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
 tower-http = { version = "0.5.1", features = ["fs", "trace"] }
 tracing-subscriber = "0.3.17"
 urlencoding = "2.1.2"
