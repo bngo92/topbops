@@ -1,6 +1,5 @@
 use async_trait::async_trait;
-use hyper::{Body, Client, Method, Request, Uri};
-use hyper_tls::HttpsConnector;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use zeroflops::Error;
@@ -38,44 +37,33 @@ impl AuthClient for SpotifyClient {
     type Credentials = SpotifyCredentials;
 
     async fn get_credentials(&self, code: &str, origin: &str) -> Result<Self::Credentials, Error> {
-        let https = HttpsConnector::new();
-        let client = Client::builder().build::<_, hyper::Body>(https);
-        let uri: Uri = "https://accounts.spotify.com/api/token".parse().unwrap();
-        let resp = client
-            .request(
-                Request::builder()
-                    .method(Method::POST)
-                    .uri(uri)
-                    .header(
-                        "Authorization",
-                        &format!(
-                            "Basic {}",
-                            std::env::var("SPOTIFY_TOKEN").expect("SPOTIFY_TOKEN is missing")
-                        ),
-                    )
-                    .header("Content-Type", "application/x-www-form-urlencoded")
-                    .body(Body::from(format!(
-                        "grant_type=authorization_code&code={}&redirect_uri={}",
-                        code, origin
-                    )))?,
+        let client = Client::new();
+        let token: Token = client
+            .post("https://accounts.spotify.com/api/token")
+            .header(
+                "Authorization",
+                &format!(
+                    "Basic {}",
+                    std::env::var("SPOTIFY_TOKEN").expect("SPOTIFY_TOKEN is missing")
+                ),
             )
+            .form(&[
+                ("grant_type", "authorization_code"),
+                ("code", code),
+                ("redirect_uri", origin),
+            ])
+            .send()
+            .await?
+            .json()
             .await?;
-        let got = hyper::body::to_bytes(resp.into_body()).await?;
-        let token: Token = serde_json::from_slice(&got)?;
 
-        let https = HttpsConnector::new();
-        let client = Client::builder().build::<_, hyper::Body>(https);
-        let uri: Uri = "https://api.spotify.com/v1/me".parse().unwrap();
-        let resp = client
-            .request(
-                Request::builder()
-                    .uri(uri)
-                    .header("Authorization", format!("Bearer {}", token.access_token))
-                    .body(Body::empty())?,
-            )
+        let spotify_user: User = client
+            .get("https://api.spotify.com/v1/me")
+            .header("Authorization", format!("Bearer {}", token.access_token))
+            .send()
+            .await?
+            .json()
             .await?;
-        let got = hyper::body::to_bytes(resp.into_body()).await?;
-        let spotify_user: User = serde_json::from_slice(&got)?;
         Ok(SpotifyCredentials {
             user_id: spotify_user.id.clone(),
             url: spotify_user.external_urls["spotify"].clone(),

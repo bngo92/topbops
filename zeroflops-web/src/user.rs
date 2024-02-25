@@ -10,9 +10,8 @@ use axum_login::{
 #[cfg(feature = "azure")]
 use azure_data_cosmos::CosmosEntity;
 use base64::prelude::{Engine, BASE64_STANDARD};
-use hyper::{Body, Client, Method, Request, Uri};
-use hyper_tls::HttpsConnector;
 use rand::Rng;
+use reqwest::Client;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -261,41 +260,34 @@ impl AuthClient for GoogleClient {
     type Credentials = GoogleUser;
 
     async fn get_credentials(&self, code: &str, origin: &str) -> Result<Self::Credentials, Error> {
-        let https = HttpsConnector::new();
-        let client = Client::builder().build::<_, hyper::Body>(https);
-        let uri: Uri = "https://oauth2.googleapis.com/token".parse().unwrap();
-        let resp = client
-            .request(
-                Request::builder()
-                    .method(Method::POST)
-                    .uri(uri)
-                    .header("Content-Type", "application/x-www-form-urlencoded")
-                    .body(Body::from(format!(
-                        "code={}&client_id=1038220726403-n55jha2cvprd8kdb4akdfvo0uiok4p5u.apps.googleusercontent.com&client_secret={}&redirect_uri={}&grant_type=authorization_code",
-                        code,
-                        std::env::var("GOOGLE_SECRET").expect("GOOGLE_SECRET is missing"),
-                        origin
-                    )))?,
-            )
+        let client = Client::new();
+        let token: GoogleCredentials = client
+            .post("https://oauth2.googleapis.com/token")
+            .form(&[
+                ("code", code),
+                (
+                    "client_id",
+                    "1038220726403-n55jha2cvprd8kdb4akdfvo0uiok4p5u.apps.googleusercontent.com",
+                ),
+                (
+                    "client_secret",
+                    &std::env::var("GOOGLE_SECRET").expect("GOOGLE_SECRET is missing"),
+                ),
+                ("redirect_uri", origin),
+                ("grant_type", "authorization_code"),
+            ])
+            .send()
+            .await?
+            .json()
             .await?;
-        let got = hyper::body::to_bytes(resp.into_body()).await?;
-        let token: GoogleCredentials = serde_json::from_slice(&got)?;
 
-        let https = HttpsConnector::new();
-        let client = Client::builder().build::<_, hyper::Body>(https);
-        let uri: Uri = "https://openidconnect.googleapis.com/v1/userinfo"
-            .parse()
-            .unwrap();
-        let resp = client
-            .request(
-                Request::builder()
-                    .uri(uri)
-                    .header("Authorization", format!("Bearer {}", token.access_token))
-                    .body(Body::empty())?,
-            )
-            .await?;
-        let got = hyper::body::to_bytes(resp.into_body()).await?;
-        Ok(serde_json::from_slice(&got)?)
+        Ok(client
+            .get("https://openidconnect.googleapis.com/v1/userinfo")
+            .header("Authorization", format!("Bearer {}", token.access_token))
+            .send()
+            .await?
+            .json()
+            .await?)
     }
 }
 

@@ -253,9 +253,7 @@ impl std::error::Error for Error {}
 #[derive(Debug)]
 pub enum InternalError {
     #[cfg(feature = "full")]
-    HyperError(hyper::Error),
-    #[cfg(feature = "full")]
-    RequestError(hyper::http::Error),
+    RequestError(reqwest::Error),
     JSONError(serde_json::Error),
     #[cfg(feature = "azure")]
     CosmosError(azure_core::error::Error),
@@ -270,15 +268,8 @@ pub enum InternalError {
 }
 
 #[cfg(feature = "full")]
-impl From<hyper::Error> for Error {
-    fn from(e: hyper::Error) -> Error {
-        Error::InternalError(InternalError::HyperError(e))
-    }
-}
-
-#[cfg(feature = "full")]
-impl From<hyper::http::Error> for Error {
-    fn from(e: hyper::http::Error) -> Error {
+impl From<reqwest::Error> for Error {
+    fn from(e: reqwest::Error) -> Error {
         Error::InternalError(InternalError::RequestError(e))
     }
 }

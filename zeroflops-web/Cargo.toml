@@ -15,10 +15,9 @@ azure_core = { workspace = true, optional = true }
 azure_data_cosmos = { workspace = true, optional = true }
 base64 = "0.21.0"
 futures.workspace = true
-hyper = "0.14"
-hyper-tls = "0.5.0"
 password-auth = "1.0.0"
 rand = { version = "0.8.4", features = ["min_const_gen"] }
+reqwest.workspace = true
 rusqlite.workspace = true
 serde = { version = "1.0", features = ["derive"] }
 serde_arrow = { workspace = true, features = ["arrow2-0-17"] }

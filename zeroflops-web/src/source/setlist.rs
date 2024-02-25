@@ -1,7 +1,6 @@
 use crate::UserId;
 use futures::{StreamExt, TryStreamExt};
-use hyper::{Body, Client, Request, Uri};
-use hyper_tls::HttpsConnector;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use time::Date;
 use zeroflops::{Error, Id, Source, SourceType};
@@ -61,25 +60,16 @@ pub async fn get_setlist(user_id: &UserId, id: Id) -> Result<(Source, Vec<crate:
     let token = crate::source::spotify::get_token().await?;
     let token = &token;
 
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = format!("https://api.setlist.fm/rest/1.0/setlist/{}", id.id)
-        .parse()
-        .map_err(|_| Error::client_error(format!("Invalid id: {}", id.id)))?;
-    let resp = client
-        .request(
-            Request::builder()
-                .uri(uri)
-                .header("Accept", "application/json")
-                .header(
-                    "x-api-key",
-                    std::env::var("SETLIST_KEY").expect("SETLIST_KEY is missing"),
-                )
-                .body(Body::empty())?,
+    let setlist: Setlist = Client::new()
+        .get(format!("https://api.setlist.fm/rest/1.0/setlist/{}", id.id))
+        .header(
+            "x-api-key",
+            std::env::var("SETLIST_KEY").expect("SETLIST_KEY is missing"),
         )
+        .send()
+        .await?
+        .json()
         .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let setlist: Setlist = serde_json::from_slice(&got)?;
 
     let songs: Vec<_> = setlist
         .sets

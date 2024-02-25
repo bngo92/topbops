@@ -1,7 +1,6 @@
 use crate::UserId;
 use futures::{StreamExt, TryStreamExt};
-use hyper::{Body, Client, Method, Request, Uri};
-use hyper_tls::HttpsConnector;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -98,61 +97,42 @@ pub async fn get_playlist(
     playlist_id: Id,
 ) -> Result<(Source, Vec<crate::Item>), Error> {
     let token = get_token().await?;
+    let client = Client::new();
 
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = format!(
-        "https://api.spotify.com/v1/playlists/{}?limit=50",
-        playlist_id.id
-    )
-    .parse()
-    .unwrap();
-    let resp = client
-        .request(
-            Request::builder()
-                .uri(uri)
-                .header("Authorization", format!("Bearer {}", token.access_token))
-                .body(Body::empty())?,
-        )
+    let playlist: Playlist = client
+        .get(format!(
+            "https://api.spotify.com/v1/playlists/{}?limit=50",
+            playlist_id.id
+        ))
+        .header("Authorization", format!("Bearer {}", token.access_token))
+        .send()
+        .await?
+        .json()
         .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let playlist: Playlist = serde_json::from_slice(&got)?;
 
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = format!(
-        "https://api.spotify.com/v1/playlists/{}/tracks",
-        playlist_id.id
-    )
-    .parse()
-    .unwrap();
-    let resp = client
-        .request(
-            Request::builder()
-                .uri(uri)
-                .header("Authorization", format!("Bearer {}", token.access_token))
-                .body(Body::empty())?,
-        )
+    let mut playlist_items: PlaylistItems = client
+        .get(format!(
+            "https://api.spotify.com/v1/playlists/{}/tracks",
+            playlist_id.id
+        ))
+        .header("Authorization", format!("Bearer {}", token.access_token))
+        .send()
+        .await?
+        .json()
         .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let mut playlist_items: PlaylistItems = serde_json::from_slice(&got)?;
     let mut items: Vec<_> = playlist_items
         .items
         .into_iter()
         .map(|i| new_spotify_item(i.track, user_id))
         .collect();
     while let Some(uri) = playlist_items.next {
-        let uri: Uri = uri.parse().unwrap();
-        let resp = client
-            .request(
-                Request::builder()
-                    .uri(uri)
-                    .header("Authorization", format!("Bearer {}", token.access_token))
-                    .body(Body::empty())?,
-            )
+        playlist_items = client
+            .get(uri)
+            .header("Authorization", format!("Bearer {}", token.access_token))
+            .send()
+            .await?
+            .json()
             .await?;
-        let got = hyper::body::to_bytes(resp.into_body()).await?;
-        playlist_items = serde_json::from_slice(&got)?;
         items.extend(
             playlist_items
                 .items
@@ -197,60 +177,40 @@ pub async fn import_playlist(
 
 pub async fn get_album(user_id: &UserId, id: Id) -> Result<(Source, Vec<crate::Item>), Error> {
     let token = get_token().await?;
+    let client = Client::new();
+    let client = &client;
 
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = format!("https://api.spotify.com/v1/albums/{}", id.id)
-        .parse()
-        .unwrap();
-    let resp = client
-        .request(
-            Request::builder()
-                .uri(uri)
-                .header("Authorization", format!("Bearer {}", token.access_token))
-                .body(Body::empty())?,
-        )
+    let album: Album = client
+        .get(format!("https://api.spotify.com/v1/albums/{}", id.id))
+        .header("Authorization", format!("Bearer {}", token.access_token))
+        .send()
+        .await?
+        .json()
         .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let album: Album = serde_json::from_slice(&got)?;
 
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = format!(
-        "https://api.spotify.com/v1/albums/{}/tracks?limit=50",
-        id.id
-    )
-    .parse()
-    .unwrap();
-    let resp = client
-        .request(
-            Request::builder()
-                .uri(uri)
-                .header("Authorization", format!("Bearer {}", token.access_token))
-                .body(Body::empty())?,
-        )
+    let album_items: AlbumItems = client
+        .get(format!(
+            "https://api.spotify.com/v1/albums/{}/tracks?limit=50",
+            id.id
+        ))
+        .header("Authorization", format!("Bearer {}", token.access_token))
+        .send()
+        .await?
+        .json()
         .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let album_items: AlbumItems = serde_json::from_slice(&got)?;
     let items: Vec<_> = futures::stream::iter(
         album_items
             .items
             .into_iter()
             .map(|i| (i, token.access_token.clone()))
             .map(move |(item, access_token)| async move {
-                let https = HttpsConnector::new();
-                let client = Client::builder().build::<_, hyper::Body>(https);
-                let uri: Uri = item.href.parse().unwrap();
-                let resp = client
-                    .request(
-                        Request::builder()
-                            .uri(uri)
-                            .header("Authorization", format!("Bearer {}", access_token))
-                            .body(Body::empty())?,
-                    )
+                let track = client
+                    .get(item.href)
+                    .header("Authorization", format!("Bearer {}", access_token))
+                    .send()
+                    .await?
+                    .json()
                     .await?;
-                let got = hyper::body::to_bytes(resp.into_body()).await?;
-                let track = serde_json::from_slice(&got)?;
                 Ok::<_, Error>(new_spotify_item(track, user_id))
             }),
     )
@@ -292,21 +252,13 @@ pub async fn import_album(user_id: &UserId, id: String) -> Result<(List, Vec<cra
 pub async fn get_track(user_id: &UserId, id: Id) -> Result<(Source, Vec<crate::Item>), Error> {
     let token = get_token().await?;
 
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = format!("https://api.spotify.com/v1/tracks/{}", id.id)
-        .parse()
-        .unwrap();
-    let resp = client
-        .request(
-            Request::builder()
-                .uri(uri)
-                .header("Authorization", format!("Bearer {}", token.access_token))
-                .body(Body::empty())?,
-        )
+    let track: Track = Client::new()
+        .get(format!("https://api.spotify.com/v1/tracks/{}", id.id))
+        .header("Authorization", format!("Bearer {}", token.access_token))
+        .send()
+        .await?
+        .json()
         .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let track: Track = serde_json::from_slice(&got)?;
     Ok((
         Source {
             source_type: SourceType::Spotify(Spotify::Track(id)),
@@ -321,29 +273,21 @@ pub async fn create_playlist(
     user_id: &UserId,
     name: &str,
 ) -> Result<Playlist, Error> {
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = format!("https://api.spotify.com/v1/users/{}/playlists", user_id.0)
-        .parse()
-        .unwrap();
     // TODO: error handling
     let playlist = CreatePlaylist {
         name: name.to_owned(),
     };
-    let body = serde_json::to_string(&playlist)?;
-    let resp = client
-        .request(
-            Request::builder()
-                .method(Method::POST)
-                .uri(uri)
-                .header("Authorization", format!("Bearer {}", access_token))
-                .header("Content-Type", "application/json")
-                .header("Content-Length", body.len().to_string())
-                .body(Body::from(body))?,
-        )
-        .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    Ok(serde_json::from_slice(&got)?)
+    Ok(Client::new()
+        .post(format!(
+            "https://api.spotify.com/v1/users/{}/playlists",
+            user_id.0
+        ))
+        .header("Authorization", format!("Bearer {}", access_token))
+        .json(&playlist)
+        .send()
+        .await?
+        .json()
+        .await?)
 }
 
 pub async fn update_playlist(
@@ -351,26 +295,19 @@ pub async fn update_playlist(
     playlist_id: &str,
     name: &str,
 ) -> Result<(), Error> {
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = format!("https://api.spotify.com/v1/playlists/{playlist_id}")
-        .parse()
-        .unwrap();
     // TODO: error handling
     let playlist = UpdatePlaylist {
         name: name.to_owned(),
     };
-    let body = serde_json::to_string(&playlist)?;
-    client
-        .request(
-            Request::builder()
-                .method(Method::PUT)
-                .uri(uri)
-                .header("Authorization", format!("Bearer {}", access_token))
-                .header("Content-Type", "application/json")
-                .header("Content-Length", body.len().to_string())
-                .body(Body::from(body))?,
-        )
+    Client::new()
+        .put(format!(
+            "https://api.spotify.com/v1/playlists/{playlist_id}"
+        ))
+        .header("Authorization", format!("Bearer {}", access_token))
+        .json(&playlist)
+        .send()
+        .await?
+        .json()
         .await?;
     Ok(())
 }
@@ -380,61 +317,42 @@ pub async fn update_list(
     playlist_id: &str,
     ids: &[String],
 ) -> Result<(), Error> {
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
+    let client = Client::new();
     let mut chunks = ids.chunks(100);
-    let uri: Uri = format!(
+    let uri = format!(
         "https://api.spotify.com/v1/playlists/{}/tracks?uris={}",
         playlist_id,
         // Clear playlist if empty
         chunks.next().unwrap_or(&[]).join(",")
-    )
-    .parse()
-    .unwrap();
+    );
     // TODO: error handling
     let resp = client
-        .request(
-            Request::builder()
-                .method(Method::PUT)
-                .uri(uri)
-                .header("Authorization", format!("Bearer {}", access_token))
-                .header("Content-Length", "0")
-                .body(Body::empty())?,
-        )
+        .put(uri)
+        .header("Authorization", format!("Bearer {}", access_token))
+        .send()
         .await?;
     if resp.status().is_client_error() || resp.status().is_server_error() {
-        let got = hyper::body::to_bytes(resp.into_body()).await?;
         let error = format!(
             "Spotify update playlist items error: {}",
-            String::from_utf8(got.to_vec())
-                .unwrap_or_else(|_| "Spotify response should be ASCII".to_owned())
+            resp.text().await?
         );
         return Err(Error::internal_error(error));
     }
     for ids in chunks {
-        let uri: Uri = format!(
+        let uri = format!(
             "https://api.spotify.com/v1/playlists/{}/tracks?uris={}",
             playlist_id,
             ids.join(",")
-        )
-        .parse()
-        .unwrap();
+        );
         let resp = client
-            .request(
-                Request::builder()
-                    .method(Method::POST)
-                    .uri(uri)
-                    .header("Authorization", format!("Bearer {}", access_token))
-                    .header("Content-Length", "0")
-                    .body(Body::empty())?,
-            )
+            .post(uri)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .send()
             .await?;
         if resp.status().is_client_error() || resp.status().is_server_error() {
-            let got = hyper::body::to_bytes(resp.into_body()).await?;
             let error = format!(
                 "Spotify update playlist items error: {}",
-                String::from_utf8(got.to_vec())
-                    .unwrap_or_else(|_| "Spotify response should be ASCII".to_owned())
+                resp.text().await?
             );
             return Err(Error::internal_error(error));
         }
@@ -443,27 +361,20 @@ pub async fn update_list(
 }
 
 pub async fn get_token() -> Result<crate::Token, Error> {
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = "https://accounts.spotify.com/api/token".parse().unwrap();
-    let resp = client
-        .request(
-            Request::builder()
-                .method(Method::POST)
-                .uri(uri)
-                .header(
-                    "Authorization",
-                    &format!(
-                        "Basic {}",
-                        std::env::var("SPOTIFY_TOKEN").expect("SPOTIFY_TOKEN is missing")
-                    ),
-                )
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .body(Body::from("grant_type=client_credentials"))?,
+    Ok(Client::new()
+        .post("https://accounts.spotify.com/api/token")
+        .header(
+            "Authorization",
+            &format!(
+                "Basic {}",
+                std::env::var("SPOTIFY_TOKEN").expect("SPOTIFY_TOKEN is missing")
+            ),
         )
-        .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    serde_json::from_slice(&got).map_err(Error::from)
+        .form(&[("grant_type", "client_credentials")])
+        .send()
+        .await?
+        .json()
+        .await?)
 }
 
 pub async fn get_access_token<'a>(
@@ -488,30 +399,23 @@ pub async fn get_access_token<'a>(
 }
 
 async fn get_user_token(refresh_token: &str) -> Result<crate::Token, Error> {
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = "https://accounts.spotify.com/api/token".parse().unwrap();
-    let resp = client
-        .request(
-            Request::builder()
-                .method(Method::POST)
-                .uri(uri)
-                .header(
-                    "Authorization",
-                    &format!(
-                        "Basic {}",
-                        std::env::var("SPOTIFY_TOKEN").expect("SPOTIFY_TOKEN is missing")
-                    ),
-                )
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .body(Body::from(format!(
-                    "grant_type=refresh_token&refresh_token={}",
-                    refresh_token
-                )))?,
+    Ok(Client::new()
+        .post("https://accounts.spotify.com/api/token")
+        .header(
+            "Authorization",
+            &format!(
+                "Basic {}",
+                std::env::var("SPOTIFY_TOKEN").expect("SPOTIFY_TOKEN is missing")
+            ),
         )
-        .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    serde_json::from_slice(&got).map_err(Error::from)
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+        ])
+        .send()
+        .await?
+        .json()
+        .await?)
 }
 
 fn new_spotify_item(track: Track, user_id: &UserId) -> crate::Item {
@@ -566,34 +470,25 @@ pub async fn search_song(
     artist: Option<String>,
     user_id: &UserId,
 ) -> Result<crate::Item, Error> {
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = if let Some(artist) = artist {
+    let uri = if let Some(artist) = artist {
         format!(
             "https://api.spotify.com/v1/search?q=track:{}%20artist:{}&type=track",
             urlencoding::encode(&name),
             urlencoding::encode(&artist)
         )
-        .parse()
-        .map_err(|e| Error::internal_error(format!("Invalid track or artist from setlist.fm: {e}")))
     } else {
         format!(
             "https://api.spotify.com/v1/search?q=track:{}&type=track",
             urlencoding::encode(&name),
         )
-        .parse()
-        .map_err(|e| Error::internal_error(format!("Invalid track from setlist.fm: {e}")))
-    }?;
-    let resp = client
-        .request(
-            Request::builder()
-                .uri(uri)
-                .header("Authorization", format!("Bearer {}", token.access_token))
-                .body(Body::empty())?,
-        )
+    };
+    let result: Search = Client::new()
+        .get(&uri)
+        .header("Authorization", format!("Bearer {}", token.access_token))
+        .send()
+        .await?
+        .json()
         .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let result: Search = serde_json::from_slice(&got)?;
     Ok(new_spotify_item(
         result
             .tracks
@@ -610,21 +505,13 @@ pub async fn get_recent_tracks(
     user_id: &UserId,
     access_token: &str,
 ) -> Result<zeroflops::spotify::RecentTracks, Error> {
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = "https://api.spotify.com/v1/me/player/recently-played?limit=50"
-        .parse()
-        .unwrap();
-    let resp = client
-        .request(
-            Request::builder()
-                .uri(uri)
-                .header("Authorization", format!("Bearer {}", access_token))
-                .body(Body::empty())?,
-        )
+    let recent_tracks: RecentTracks = Client::new()
+        .get("https://api.spotify.com/v1/me/player/recently-played?limit=50")
+        .header("Authorization", format!("Bearer {}", access_token))
+        .send()
+        .await?
+        .json()
         .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    let recent_tracks: RecentTracks = serde_json::from_slice(&got)?;
     let ids: Vec<_> = recent_tracks
         .items
         .iter()
@@ -690,17 +577,11 @@ pub async fn get_recent_tracks(
 }
 
 pub async fn get_playlists(access_token: &str) -> Result<Playlists, Error> {
-    let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
-    let uri: Uri = "https://api.spotify.com/v1/me/playlists".parse().unwrap();
-    let resp = client
-        .request(
-            Request::builder()
-                .uri(uri)
-                .header("Authorization", format!("Bearer {}", access_token))
-                .body(Body::empty())?,
-        )
-        .await?;
-    let got = hyper::body::to_bytes(resp.into_body()).await?;
-    Ok(serde_json::from_slice(&got)?)
+    Ok(Client::new()
+        .get("https://api.spotify.com/v1/me/playlists")
+        .header("Authorization", format!("Bearer {}", access_token))
+        .send()
+        .await?
+        .json()
+        .await?)
 }
