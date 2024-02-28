@@ -264,6 +264,7 @@ pub enum InternalError {
     SerdeError(serde_rusqlite::Error),
     ArrowError(arrow2::error::Error),
     SerdeArrowError(serde_arrow::Error),
+    QueryError(serde_qs::Error),
     Error(String),
 }
 
@@ -343,5 +344,11 @@ impl From<arrow2::error::Error> for Error {
 impl From<serde_arrow::Error> for Error {
     fn from(e: serde_arrow::Error) -> Error {
         Error::InternalError(InternalError::SerdeArrowError(e))
+    }
+}
+
+impl From<serde_qs::Error> for Error {
+    fn from(e: serde_qs::Error) -> Error {
+        Error::InternalError(InternalError::QueryError(e))
     }
 }

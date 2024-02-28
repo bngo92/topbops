@@ -7,7 +7,7 @@ use arrow2::{
 use async_trait::async_trait;
 use axum::{
     body::Bytes,
-    extract::{Host, OriginalUri, Path, Query, State},
+    extract::{Host, OriginalUri, Path, Query, RawQuery, State},
     http::StatusCode,
     response::{IntoResponse, Json, Redirect, Response},
     routing::{get, post},
@@ -214,11 +214,18 @@ async fn get_list_items(
 async fn query_list(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
+    RawQuery(params): RawQuery,
     auth: AuthContext,
 ) -> Result<Vec<u8>, Response> {
     let user_id = get_user_or_demo_user(auth);
     let list = source::get_list(&state.sql_client, &user_id, &id).await?;
-    let records = query::query_list(&state.sql_client, &user_id, list).await?;
+    let params: HashMap<String, Vec<String>> = if let Some(params) = params {
+        serde_qs::from_str(&params).map_err(Error::from)?
+    } else {
+        HashMap::new()
+    };
+    let records =
+        query::query_list(&state.sql_client, &user_id, list, params.get("fields")).await?;
     Ok(serialize_arrow(records)?)
 }
 

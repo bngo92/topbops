@@ -562,7 +562,7 @@ impl Component for Widget {
                 // TODO: add the ability to refresh
                 if self.query.is_none() {
                     ctx.link().send_future(async move {
-                        WidgetMsg::Success(query_list(&list).await.unwrap())
+                        WidgetMsg::Success(query_list(&list, &[]).await.unwrap())
                     });
                     false
                 } else {
@@ -605,8 +605,9 @@ impl Component for ListView {
 
     fn create(ctx: &Context<Self>) -> Self {
         let list = ctx.props().list.clone();
-        ctx.link()
-            .send_future(async move { ListViewMsg::Success(query_list(&list).await.unwrap()) });
+        ctx.link().send_future(async move {
+            ListViewMsg::Success(query_list(&list, &[]).await.unwrap())
+        });
         Self {
             data: None,
             select_ref: NodeRef::default(),
@@ -1023,9 +1024,18 @@ async fn delete_list(id: &str) -> Result<(), JsValue> {
     Ok(())
 }
 
-async fn query_list(list: &List) -> Result<Option<DataFrame>, JsValue> {
+async fn query_list(list: &List, fields: &[&str]) -> Result<Option<DataFrame>, JsValue> {
     let window = window();
-    let request = query(&format!("/api/lists/{}/query", list.id), "GET").unwrap();
+    let url = if fields.is_empty() {
+        format!("/api/lists/{}/query", list.id)
+    } else {
+        format!(
+            "/api/lists/{}/query?{}",
+            list.id,
+            serde_qs::to_string(&HashMap::from([("fields", fields)])).unwrap()
+        )
+    };
+    let request = query(&url, "GET").unwrap();
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
     Ok(serialize_into_df(resp).await?.map(|mut items| {

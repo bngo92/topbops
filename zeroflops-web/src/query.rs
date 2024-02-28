@@ -95,6 +95,7 @@ pub async fn query_list(
     client: &SqlSessionClient,
     user_id: &UserId,
     list: List,
+    fields: Option<&Vec<String>>,
 ) -> Result<Vec<Map<String, Value>>, Error> {
     let query = if let ListMode::View(_) = &list.mode {
         let query = list.query.into_query()?;
@@ -102,9 +103,15 @@ pub async fn query_list(
     } else if list.items.is_empty() {
         return Ok(Vec::new());
     } else {
+        let fields = if let Some(fields) = fields {
+            fields.join(", ")
+        } else {
+            "id, type, name, rating, user_score, user_wins, user_losses, hidden, metadata".to_owned()
+        };
         CosmosQuery::with_params(
             format!(
-                "SELECT id, type, name, rating, user_score, user_wins, user_losses, hidden, metadata FROM item WHERE user_id = ?1 AND id IN ({})",
+                "SELECT {} FROM item WHERE user_id = ?1 AND id IN ({})",
+                fields,
                 &"?,".repeat(list.items.len())[..list.items.len() * 2 - 1],
             ),
             std::iter::once(CosmosParam::new(
@@ -667,10 +674,7 @@ pub mod test {
     fn test_errors() {
         for (input, expected) in [
             ("", "No query was provided"),
-            (
-                "S",
-                "Expected an SQL statement, found: S at Line: 1, Column 1",
-            ),
+            ("S", "Expected an SQL statement, found: S"),
             ("SELECT", "Expected an expression:, found: EOF"),
             ("SELECT name", "FROM clause is omitted"),
             ("SELECT name FROM", "Expected identifier, found: EOF"),

@@ -64,8 +64,13 @@ impl Component for ListItems {
     fn create(ctx: &Context<Self>) -> Self {
         let list = ctx.props().list.clone();
         if !matches!(list.mode, ListMode::View(_)) {
-            ctx.link()
-                .send_future(async move { Msg::Load(crate::query_list(&list).await.unwrap()) });
+            ctx.link().send_future(async move {
+                Msg::Load(
+                    crate::query_list(&list, &["id", "rating", "hidden"])
+                        .await
+                        .unwrap(),
+                )
+            });
         }
         ListItems {
             state: ctx
