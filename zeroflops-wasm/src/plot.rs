@@ -1,11 +1,18 @@
+use arrow::{
+    array::AsArray,
+    compute,
+    datatypes::{DataType, Float64Type, UInt32Type},
+    util::display,
+};
 use plotters::prelude::{
     ChartBuilder, Circle, Color, Histogram, IntoDrawingArea, IntoSegmentedCoord, LineSeries, BLACK,
     RED, WHITE,
 };
 use plotters_canvas::CanvasBackend;
-use polars::prelude::{DataFrame, DataType};
 use std::collections::HashMap;
 use yew::{html, Html};
+
+use crate::dataframe::DataFrame;
 
 pub enum DataView {
     Table,
@@ -45,12 +52,12 @@ pub fn df_table_view(df: &DataFrame) -> Html {
                 <thead>
                     <tr>
                         <th>{"#"}</th>
-                        {for df.fields().iter().map(|f| html! {
+                        {for df.schema.fields.iter().map(|f| html! {
                             <th>{&f.name()}</th>
                         })}
                     </tr>
                 </thead>
-                <tbody>{for (0..df.height()).map(|i| df_item_view(df, i))}</tbody>
+                <tbody>{for (0..df.arrays[0].len()).map(|i| df_item_view(df, i))}</tbody>
             </table>
         </div>
     }
@@ -60,8 +67,8 @@ fn df_item_view(df: &DataFrame, i: usize) -> Html {
     html! {
         <tr>
             <th>{i + 1}</th>
-            {for df.iter().map(|item| html! {
-                <td class="text-truncate max-width">{item.str_value(i).unwrap()}</td>
+            {for df.arrays.iter().map(|item| html! {
+                <td class="text-truncate max-width">{display::array_value_to_string(item, i).unwrap()}</td>
             })}
         </tr>
     }
@@ -78,24 +85,17 @@ fn draw_column_graph(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
         .x_label_area_size(35)
         .y_label_area_size(40)
         .margin(5);
-    let range = df[1].cast(&DataType::Float64)?;
-    match df[0].dtype() {
+    let range = compute::cast(&df.arrays[1], &DataType::Float64).unwrap();
+    let range = range.as_primitive::<Float64Type>();
+    match df.arrays[0].data_type() {
         DataType::Int64 | DataType::UInt64 => {
+            let domain = compute::cast(&df.arrays[0], &DataType::UInt32).unwrap();
+            let domain = domain.as_primitive::<UInt32Type>();
             let mut data = HashMap::new();
-            match df[0].dtype() {
-                DataType::Int64 => {
-                    for (i, f) in df[0].i64()?.into_iter().zip(range.f64()?.into_iter()) {
-                        *data.entry(i.unwrap() as u32).or_insert(0f64) += f.unwrap();
-                    }
-                }
-                DataType::UInt64 => {
-                    for (i, f) in df[0].u64()?.into_iter().zip(range.f64()?.into_iter()) {
-                        *data.entry(i.unwrap() as u32).or_insert(0f64) += f.unwrap();
-                    }
-                }
-                _ => unreachable!(),
+            for (i, f) in domain.iter().zip(range) {
+                *data.entry(i.unwrap()).or_insert(0f64) += f.unwrap();
             }
-            let domain = 0u32..df[0].max().unwrap();
+            let domain = 0u32..compute::max(domain).unwrap();
             let mut chart = builder.build_cartesian_2d(
                 domain.into_segmented(),
                 0f64..*data.values().max_by(|a, b| a.total_cmp(b)).unwrap(),
@@ -104,8 +104,8 @@ fn draw_column_graph(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
                 .configure_mesh()
                 .disable_x_mesh()
                 .bold_line_style(WHITE.mix(0.3))
-                .y_desc(&*df.fields()[1].name)
-                .x_desc(&*df.fields()[0].name)
+                .y_desc(df.schema.fields[1].name())
+                .x_desc(df.schema.fields[0].name())
                 .axis_desc_style(("sans-serif", 15))
                 .draw()?;
             chart.draw_series(
@@ -114,9 +114,13 @@ fn draw_column_graph(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
                     .data(data.into_iter()),
             )?;
         }
-        DataType::Utf8 => {
-            let domain: Vec<_> = df[0].utf8()?.into_iter().map(Option::unwrap).collect();
-            let range: Vec<_> = range.f64()?.into_iter().map(Option::unwrap).collect();
+        DataType::LargeUtf8 => {
+            let domain: Vec<_> = df.arrays[0]
+                .as_string::<i64>()
+                .into_iter()
+                .map(Option::unwrap)
+                .collect();
+            let range: Vec<_> = range.into_iter().map(Option::unwrap).collect();
             let mut chart = builder.build_cartesian_2d(
                 domain.into_segmented(),
                 0f64..*range.iter().max_by(|a, b| a.total_cmp(b)).unwrap(),
@@ -125,8 +129,8 @@ fn draw_column_graph(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
                 .configure_mesh()
                 .disable_x_mesh()
                 .bold_line_style(WHITE.mix(0.3))
-                .y_desc(&*df.fields()[1].name)
-                .x_desc(&*df.fields()[0].name)
+                .y_desc(df.schema.fields[1].name())
+                .x_desc(df.schema.fields[0].name())
                 .axis_desc_style(("sans-serif", 15))
                 .draw()?;
             chart.draw_series(
@@ -152,8 +156,20 @@ fn draw_line_graph(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
         .y_label_area_size(40)
         .margin(5);
     let data = df_coords(df)?;
-    let mut chart =
-        builder.build_cartesian_2d(0f64..df[0].max().unwrap(), 0f64..df[1].max().unwrap())?;
+    let mut chart = builder.build_cartesian_2d(
+        0f64..compute::max(
+            compute::cast(&df.arrays[0], &DataType::Float64)
+                .unwrap()
+                .as_primitive::<Float64Type>(),
+        )
+        .unwrap(),
+        0f64..compute::max(
+            compute::cast(&df.arrays[1], &DataType::Float64)
+                .unwrap()
+                .as_primitive::<Float64Type>(),
+        )
+        .unwrap(),
+    )?;
     chart.configure_mesh().draw()?;
     chart.draw_series(LineSeries::new(data, BLACK))?;
     Ok(())
@@ -171,8 +187,20 @@ fn draw_scatter_plot(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
         .y_label_area_size(40)
         .margin(5);
     let data = df_coords(df)?;
-    let mut chart =
-        builder.build_cartesian_2d(0f64..df[0].max().unwrap(), 0f64..df[1].max().unwrap())?;
+    let mut chart = builder.build_cartesian_2d(
+        0f64..compute::max(
+            compute::cast(&df.arrays[0], &DataType::Float64)
+                .unwrap()
+                .as_primitive::<Float64Type>(),
+        )
+        .unwrap(),
+        0f64..compute::max(
+            compute::cast(&df.arrays[1], &DataType::Float64)
+                .unwrap()
+                .as_primitive::<Float64Type>(),
+        )
+        .unwrap(),
+    )?;
     chart
         .configure_mesh()
         .disable_x_mesh()
@@ -210,27 +238,22 @@ fn draw_cum_line_graph(df: &DataFrame) -> Result<(), Box<dyn std::error::Error>>
 }
 
 fn df_coords(df: &DataFrame) -> Result<Vec<(f64, f64)>, Box<dyn std::error::Error>> {
-    let domain = df
-        .select_at_idx(0)
-        .ok_or("query should return 2 columns")?
-        .cast(&DataType::Float64)?;
-    let range = df
-        .select_at_idx(1)
-        .ok_or("query should return 2 columns")?
-        .cast(&DataType::Float64)?;
+    let domain = compute::cast(&df.arrays[0], &DataType::Float64).unwrap();
+    let domain = domain.as_primitive::<Float64Type>();
+    let range = compute::cast(&df.arrays[1], &DataType::Float64).unwrap();
+    let range = range.as_primitive::<Float64Type>();
     domain
-        .f64()?
         .into_iter()
-        .zip(range.f64()?)
+        .zip(range)
         .map(|(o1, o2)| {
             Ok((
                 o1.ok_or(format!(
-                    "unsupported data type for line graph: {}",
-                    df[0].dtype()
+                    "unsupported data type for line graph: {:?}",
+                    df.arrays[0].data_type()
                 ))?,
                 o2.ok_or(format!(
-                    "unsupported data type for line graph: {}",
-                    df[1].dtype()
+                    "unsupported data type for line graph: {:?}",
+                    df.arrays[1].data_type()
                 ))?,
             ))
         })

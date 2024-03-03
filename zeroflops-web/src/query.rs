@@ -106,7 +106,8 @@ pub async fn query_list(
         let fields = if let Some(fields) = fields {
             fields.join(", ")
         } else {
-            "id, type, name, rating, user_score, user_wins, user_losses, hidden, metadata".to_owned()
+            "id, type, name, rating, user_score, user_wins, user_losses, hidden, metadata"
+                .to_owned()
         };
         CosmosQuery::with_params(
             format!(

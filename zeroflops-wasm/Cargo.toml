@@ -10,7 +10,7 @@ edition = "2021"
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-arrow2 = { version = "0.17.0", features = ["io_ipc"] }
+arrow = "50.0.0"
 futures = "0"
 js-sys = "0.3.64"
 plotters = { git = "https://github.com/plotters-rs/plotters", default-features = false, features = ["histogram", "line_series"] }
@@ -39,12 +39,3 @@ features = [
   'RequestMode',
   'Response',
 ]
-
-[dependencies.polars]
-features = [
-  "dtype-struct",
-  "lazy",
-  "sql",
-]
-default-features = false
-git = "https://github.com/bngo92/polars"

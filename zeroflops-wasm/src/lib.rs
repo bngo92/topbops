@@ -2,6 +2,7 @@
 use crate::{
     base::Input,
     bootstrap::{Accordion, Collapse, Modal},
+    dataframe::DataFrame,
     edit::Edit,
     integrations::spotify::SpotifyIntegration,
     list::item::ListItems,
@@ -10,14 +11,14 @@ use crate::{
     search::Search,
     tournament::{RandomTournamentLoader, TournamentLoader},
 };
-use arrow2::io::ipc::read::FileReader;
+use arrow::array::AsArray;
 use js_sys::Uint8Array;
-use polars::{
-    prelude::{col, df, DataFrame, IntoLazy, NamedFrom, Series},
-    sql::SQLContext,
-};
 use regex::Regex;
-use std::{collections::HashMap, io::Cursor, rc::Rc};
+use std::{
+    collections::{HashMap, HashSet},
+    io::Cursor,
+    rc::Rc,
+};
 use wasm_bindgen::{prelude::*, JsCast};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlSelectElement, MouseEvent, Request, RequestInit, RequestMode, Response, Window};
@@ -31,6 +32,7 @@ use zeroflops::{Id, Items, List, ListMode, Lists, Spotify, User};
 
 mod base;
 mod bootstrap;
+mod dataframe;
 mod docs;
 mod edit;
 mod integrations;
@@ -646,13 +648,11 @@ impl Component for ListView {
                 let Some(data) = data else {
                     return false;
                 };
-                self.data = Some(
-                    data.clone()
-                        .lazy()
-                        .select(&[col("*").exclude(["id"])])
-                        .collect()
-                        .unwrap(),
-                );
+                self.data = {
+                    let mut data = data.clone();
+                    data.drop_in_place("id");
+                    Some(data)
+                };
                 if let ListMode::View(_) = ctx.props().list.mode {
                     self.df = Some(data);
                 } else {
@@ -696,7 +696,7 @@ impl Component for ListView {
 }
 
 fn update_list_view(list_view: &mut ListView, query: String) {
-    let data = list_view.data.clone().unwrap().lazy();
+    /*let data = list_view.data.clone().unwrap().lazy();
     let mut ctx = SQLContext::new();
     ctx.register("c", data);
     let lf = match ctx.execute(&query) {
@@ -712,7 +712,8 @@ fn update_list_view(list_view: &mut ListView, query: String) {
             list_view.df = Some(df);
         }
         Err(e) => list_view.error = Some(e.to_string()),
-    }
+    }*/
+    list_view.df = list_view.data.clone();
 }
 
 #[derive(Eq, PartialEq, Properties)]
@@ -1039,18 +1040,16 @@ async fn query_list(list: &List, fields: &[&str]) -> Result<Option<DataFrame>, J
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
     Ok(serialize_into_df(resp).await?.map(|mut items| {
-        if items.column("id").is_ok() {
-            items = items
-                .lazy()
-                .inner_join(
-                    df!("id" => &list.items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>())
-                        .unwrap()
-                        .lazy(),
-                    col("id"),
-                    col("id"),
-                )
-                .collect()
-                .unwrap();
+        if let Some(id_col) = items.column("id") {
+            let ids: HashSet<_> = list.items.iter().map(|i| i.id.as_str()).collect();
+            // inner join
+            items.remove(
+                id_col
+                    .as_string::<i64>()
+                    .iter()
+                    .map(|id| ids.contains(id.unwrap()))
+                    .collect(),
+            );
         }
         items
     }))
@@ -1112,20 +1111,7 @@ async fn serialize_into_df(resp: Response) -> Result<Option<DataFrame>, JsValue>
         return Ok(None);
     }
     let mut buf = Cursor::new(buf);
-    let metadata = arrow2::io::ipc::read::read_file_metadata(&mut buf).unwrap();
-    let fields = metadata.schema.fields.clone();
-    let mut reader = FileReader::new(buf, metadata, None, None);
-    let arrays = reader.next().unwrap().unwrap();
-    Ok(Some(
-        DataFrame::new(
-            fields
-                .into_iter()
-                .zip(arrays.iter())
-                .map(|(f, a)| Series::try_from((f.name.as_str(), a.clone())).unwrap())
-                .collect(),
-        )
-        .unwrap(),
-    ))
+    Ok(Some(DataFrame::from(&mut buf)))
 }
 
 async fn delete_items(ids: &[String]) -> Result<(), JsValue> {

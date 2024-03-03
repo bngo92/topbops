@@ -1,11 +1,15 @@
 use crate::{
     bootstrap::{Alert, Modal},
+    dataframe::DataFrame,
     ListsRoute,
 };
+use arrow::{array::AsArray, datatypes::UInt64Type};
 use js_sys::Error;
-use polars::prelude::{col, df, DataFrame, IntoLazy, NamedFrom, TakeRandom};
 use serde_json::Value;
-use std::{collections::HashMap, rc::Rc};
+use std::{
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{
@@ -275,30 +279,33 @@ impl Component for ListItems {
         match msg {
             Msg::None => false,
             Msg::Load(query) => {
-                let Some(query) = query else {
+                let Some(mut query) = query else {
                     return false;
                 };
-                let ids = self
-                    .state
+                let ids: HashSet<_> = self.state.iter().map(|i| i.item.id.as_str()).collect();
+                let index = query
+                    .column("id")
+                    .unwrap()
+                    .as_string::<i64>()
                     .iter()
-                    .map(|i| i.item.id.as_str())
-                    .collect::<Vec<_>>();
-                let df = query
-                    .lazy()
-                    .inner_join(df!("id" => ids).unwrap().lazy(), col("id"), col("id"))
-                    .collect()
-                    .unwrap();
+                    .map(|id| ids.contains(&id.unwrap()))
+                    .collect();
+                query.remove(index);
+                let df = query;
                 // polars requires that at least one row is not null
-                let ratings = df.column("rating").and_then(|s| s.u64());
-                let hidden = df["hidden"].bool().unwrap();
-                if let Ok(ratings) = ratings {
-                    for i in 0..df.height() {
+                let ratings = df
+                    .column("rating")
+                    .unwrap()
+                    .as_primitive_opt::<UInt64Type>();
+                let hidden = df.column("hidden").unwrap().as_boolean();
+                if let Some(ratings) = ratings {
+                    for i in 0..df.arrays[0].len() {
                         self.state[i].rating_hidden =
-                            Some((ratings.get(i), hidden.get(i).unwrap()));
+                            Some((ratings.values().get(i).copied(), hidden.value(i)));
                     }
                 } else {
-                    for i in 0..df.height() {
-                        self.state[i].rating_hidden = Some((None, hidden.get(i).unwrap()));
+                    for i in 0..df.arrays[0].len() {
+                        self.state[i].rating_hidden = Some((None, hidden.value(i)));
                     }
                 }
                 true

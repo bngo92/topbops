@@ -1,6 +1,6 @@
-use crate::{base::Input, bootstrap::Collapse, plot::DataView};
-use polars::prelude::{CsvWriter, DataFrame, SerWriter};
-use std::collections::HashMap;
+use crate::{base::Input, bootstrap::Collapse, dataframe::DataFrame, plot::DataView};
+use arrow::{array::RecordBatch, csv::writer::Writer};
+use std::{collections::HashMap, sync::Arc};
 use web_sys::{HtmlSelectElement, KeyboardEvent};
 use yew::{html, Component, Context, Html, NodeRef, Properties};
 use yew_router::scope_ext::RouterScopeExt;
@@ -247,11 +247,10 @@ impl Component for SearchPane {
 }
 
 fn write_csv(df: &DataFrame) -> String {
-    let mut buffer = Vec::new();
-    let mut df = df.clone();
-    CsvWriter::new(&mut buffer)
-        .has_header(false)
-        .finish(&mut df)
+    let output = Vec::new();
+    let mut writer = Writer::new(output);
+    writer
+        .write(&RecordBatch::try_new(Arc::clone(&df.schema), df.arrays.clone()).unwrap())
         .unwrap();
-    String::from_utf8(buffer).unwrap()
+    String::from_utf8(writer.into_inner()).unwrap()
 }
