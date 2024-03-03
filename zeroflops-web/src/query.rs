@@ -352,29 +352,33 @@ pub mod test {
 
     pub struct Mock<T, U> {
         pub call_args: Arc<Mutex<Vec<T>>>,
-        side_effect: Vec<U>,
+        side_effect: Arc<Mutex<Vec<Option<U>>>>,
     }
 
     impl<T, U> Mock<T, U> {
         pub fn new(side_effect: Vec<U>) -> Mock<T, U> {
             Mock {
                 call_args: Arc::new(Mutex::new(Vec::new())),
-                side_effect,
+                side_effect: Arc::new(Mutex::new(
+                    side_effect.into_iter().map(Option::Some).collect(),
+                )),
             }
         }
 
         pub fn empty() -> Mock<T, U> {
             Mock {
                 call_args: Arc::new(Mutex::new(Vec::new())),
-                side_effect: Vec::new(),
+                side_effect: Arc::new(Mutex::new(Vec::new())),
             }
         }
     }
 
-    impl<T, U: Clone> Mock<T, U> {
+    impl<T, U> Mock<T, U> {
         pub fn call(&self, arg: T) -> U {
             let mut call_args = self.call_args.lock().unwrap();
-            let value = self.side_effect[call_args.len()].clone();
+            let value = self.side_effect.lock().unwrap()[call_args.len()]
+                .take()
+                .unwrap();
             call_args.push(arg);
             value
         }
