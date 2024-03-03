@@ -12,17 +12,10 @@ use azure_data_cosmos::CosmosEntity;
 use base64::prelude::{Engine, BASE64_STANDARD};
 use rand::Rng;
 use reqwest::Client;
-use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use rusqlite::{Connection, OptionalExtension, Params, Row};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use uuid::Uuid;
-use zeroflops::{
-    storage::{
-        CosmosParam, CosmosQuery, CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder,
-        QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
-    },
-    Error,
-};
+use zeroflops::Error;
 
 #[async_trait]
 pub trait Auth {
@@ -99,7 +92,7 @@ impl CosmosEntity for RawUser {
 }
 
 pub async fn spotify_login(
-    session_client: &impl SessionClient,
+    conn: impl SqlConnection,
     spotify: impl AuthClient<Credentials = SpotifyCredentials>,
     auth: &mut impl Auth,
     code: &str,
@@ -109,52 +102,29 @@ pub async fn spotify_login(
 
     // Add Spotify identity to user if a session already exists
     if let Some(user) = &auth.current_user() {
-        let mut user = user.clone();
-        user.spotify_credentials = Some(spotify_credentials);
-        session_client
-            .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
-                collection_name: "user",
-                document_name: user.id.clone(),
-                partition_key: user.id.clone(),
-                document: RawUser::from(user.clone()),
-            }))
-            .await?;
+        conn.execute(
+            "UPDATE user SET spotify_credentials = ?1 WHERE id = ?2",
+            Param::Positional::<()>(&[&serde_json::to_string(&spotify_credentials)?, &user.id]),
+        )?;
         return Ok(());
     }
 
-    let query = CosmosQuery::with_params(
-        String::from("SELECT id, secret FROM user WHERE spotify_credentials->'user_id' = ?1"),
-        [CosmosParam::new(
-            String::from("@user_id"),
-            spotify_credentials.user_id.clone(),
-        )],
-    );
-    let mut results: Vec<HashMap<String, String>> = session_client
-        .query_documents({
-            let mut builder = QueryDocumentsBuilder::new("user", query);
-            builder.query_cross_partition = true;
-            builder.parallelize_cross_partition_query = true;
-            builder
-        })
-        .await?;
-    let user = if let Some(map) = results.pop() {
-        let id = &map["id"];
-        let mut user: User = session_client
-            .get_document(GetDocumentBuilder::new("user", id.clone(), id.clone()))
-            .await?
-            .ok_or(Error::internal_error(format!(
-                "User doesn't exist for {id}"
-            )))?;
+    let user = if let Some(user) = conn
+        .query_row(
+            "SELECT * FROM user WHERE spotify_credentials->'user_id' = ?1",
+            [&spotify_credentials.user_id],
+            |row| Ok(serde_rusqlite::from_row::<RawUser>(row)),
+        )
+        .optional()?
+        .transpose()?
+    {
+        let mut user = User::try_from(user)?;
         // Refresh tokens
+        conn.execute(
+            "UPDATE user SET spotify_credentials = ?1 WHERE id = ?2",
+            Param::Positional::<()>(&[&serde_json::to_string(&spotify_credentials)?, &user.id]),
+        )?;
         user.spotify_credentials = Some(spotify_credentials);
-        session_client
-            .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
-                collection_name: "user",
-                document_name: user.id.clone(),
-                partition_key: user.id.clone(),
-                document: RawUser::from(user.clone()),
-            }))
-            .await?;
         user
     } else {
         let user = User {
@@ -164,13 +134,10 @@ pub async fn spotify_login(
             google_email: None,
             spotify_credentials: Some(spotify_credentials),
         };
-        session_client
-            .write_document(DocumentWriter::Create(CreateDocumentBuilder {
-                collection_name: "user",
-                document: RawUser::from(user.clone()),
-                is_upsert: false,
-            }))
-            .await?;
+        conn.execute(
+                "INSERT INTO user (id, user_id, secret, spotify_credentials, google_email) VALUES (:id, :user_id, :secret, :spotify_credentials, :google_email)",
+                Param::Named(RawUser::from(user.clone())),
+            )?;
         user
     };
     auth.login(&user).await.unwrap();
@@ -178,7 +145,7 @@ pub async fn spotify_login(
 }
 
 pub async fn google_login(
-    session_client: &impl SessionClient,
+    conn: impl SqlConnection,
     auth_client: impl AuthClient<Credentials = GoogleUser>,
     auth: &mut impl Auth,
     code: &str,
@@ -188,42 +155,23 @@ pub async fn google_login(
 
     // Add Google identity to user if a session already exists
     if let Some(user) = &auth.current_user() {
-        let mut user = user.clone();
-        user.google_email = Some(google_user.email);
-        session_client
-            .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
-                collection_name: "user",
-                document_name: user.id.clone(),
-                partition_key: user.id.clone(),
-                document: RawUser::from(user.clone()),
-            }))
-            .await?;
+        conn.execute(
+            "UPDATE user SET google_email = ?1 WHERE id = ?2",
+            Param::Positional::<()>(&[&google_user.email, &user.id]),
+        )?;
         return Ok(());
     }
 
-    let query = CosmosQuery::with_params(
-        String::from("SELECT id FROM user WHERE google_email = ?1"),
-        [CosmosParam::new(
-            String::from("@google_email"),
-            google_user.email.clone(),
-        )],
-    );
-    let mut results: Vec<HashMap<String, String>> = session_client
-        .query_documents({
-            let mut builder = QueryDocumentsBuilder::new("user", query);
-            builder.query_cross_partition = true;
-            builder.parallelize_cross_partition_query = true;
-            builder
-        })
-        .await?;
-    let user = if let Some(map) = results.pop() {
-        let id = &map["id"];
-        session_client
-            .get_document(GetDocumentBuilder::new("user", id.clone(), id.clone()))
-            .await?
-            .ok_or(Error::internal_error(format!(
-                "User doesn't exist for {id}"
-            )))?
+    let user = if let Some(user) = conn
+        .query_row(
+            "SELECT * FROM user WHERE google_email = ?1",
+            [&google_user.email],
+            |row| Ok(serde_rusqlite::from_row::<RawUser>(row)),
+        )
+        .optional()?
+        .transpose()?
+    {
+        User::try_from(user)?
     } else {
         let user = User {
             id: Uuid::new_v4().to_hyphenated().to_string(),
@@ -240,17 +188,63 @@ pub async fn google_login(
             google_email: Some(google_user.email),
             spotify_credentials: None,
         };
-        session_client
-            .write_document(DocumentWriter::Create(CreateDocumentBuilder {
-                collection_name: "user",
-                document: RawUser::from(user.clone()),
-                is_upsert: false,
-            }))
-            .await?;
+        conn.execute(
+                "INSERT INTO user (id, user_id, secret, spotify_credentials, google_email) VALUES (:id, :user_id, :secret, :spotify_credentials, :google_email)",
+                Param::Named(RawUser::from(user.clone()))
+            )?;
         user
     };
     auth.login(&user).await.unwrap();
     Ok(())
+}
+
+pub trait SqlConnection {
+    fn execute<T: Serialize>(&self, sql: &str, params: Param<'_, T>) -> Result<usize, Error>;
+    fn query_row<T, P, F>(
+        &self,
+        sql: &str,
+        params: P,
+        f: F,
+    ) -> rusqlite::Result<Result<T, serde_rusqlite::Error>>
+    where
+        T: DeserializeOwned + Send + Sync,
+        P: Params + std::fmt::Debug,
+        F: FnOnce(&Row<'_>) -> rusqlite::Result<Result<T, serde_rusqlite::Error>>;
+}
+
+impl SqlConnection for Connection {
+    fn execute<T: Serialize>(&self, sql: &str, params: Param<'_, T>) -> Result<usize, Error> {
+        match params {
+            Param::Positional(params) => self.execute(sql, params).map_err(Error::from),
+            Param::Named(params) => self
+                .execute(
+                    sql,
+                    serde_rusqlite::to_params_named(params)?
+                        .to_slice()
+                        .as_slice(),
+                )
+                .map_err(Error::from),
+        }
+    }
+
+    fn query_row<T, P, F>(
+        &self,
+        sql: &str,
+        params: P,
+        f: F,
+    ) -> rusqlite::Result<Result<T, serde_rusqlite::Error>>
+    where
+        T: DeserializeOwned + Send + Sync,
+        P: Params + std::fmt::Debug,
+        F: FnOnce(&Row<'_>) -> rusqlite::Result<Result<T, serde_rusqlite::Error>>,
+    {
+        self.query_row(sql, params, f)
+    }
+}
+
+pub enum Param<'a, T> {
+    Positional(&'a [&'a str; 2]),
+    Named(T),
 }
 
 pub struct GoogleClient;
@@ -399,18 +393,14 @@ pub fn generate_secret() -> String {
 
 #[cfg(test)]
 mod test {
-    use super::{Auth, GoogleUser, RawUser, User};
-    use crate::query::test::{Mock, TestSessionClient};
+    use super::{Auth, GoogleUser, Param, RawUser, SqlConnection, User};
+    use crate::query::test::Mock;
     use async_trait::async_trait;
+    use rusqlite::{Params, Row};
+    use serde::{de::DeserializeOwned, Serialize};
     use spotify::{AuthClient, SpotifyCredentials};
     use std::sync::{Arc, Mutex};
-    use zeroflops::{
-        storage::{
-            CosmosParam, CosmosQuery, CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder,
-            QueryDocumentsBuilder, ReplaceDocumentBuilder,
-        },
-        Error,
-    };
+    use zeroflops::Error;
 
     struct TestAuth {
         current_user: Option<User>,
@@ -471,16 +461,54 @@ mod test {
         }
     }
 
+    struct TestConnection {
+        execute_mock: Mock<(String, String), usize>,
+        query_row_mock: Mock<(String, String), Result<&'static str, rusqlite::Error>>,
+    }
+
+    impl SqlConnection for Arc<Mutex<TestConnection>> {
+        fn execute<T: Serialize>(&self, sql: &str, params: Param<'_, T>) -> Result<usize, Error> {
+            Ok(self.lock().unwrap().execute_mock.call((
+                sql.to_owned(),
+                match params {
+                    Param::Positional(params) => format!("{params:?}"),
+                    Param::Named(params) => serde_json::to_string(&params).unwrap(),
+                },
+            )))
+        }
+
+        fn query_row<T, P, F>(
+            &self,
+            sql: &str,
+            params: P,
+            _: F,
+        ) -> rusqlite::Result<Result<T, serde_rusqlite::Error>>
+        where
+            T: DeserializeOwned + Send + Sync,
+            P: Params + std::fmt::Debug,
+            F: FnOnce(&Row<'_>) -> rusqlite::Result<Result<T, serde_rusqlite::Error>>,
+        {
+            match self
+                .lock()
+                .unwrap()
+                .query_row_mock
+                .call((sql.to_owned(), format!("{params:?}")))
+            {
+                Ok(s) => Ok(Ok(serde_json::from_str(s).unwrap())),
+                Err(e) => Err(e),
+            }
+        }
+    }
+
     #[tokio::test]
     async fn test_spotify_login_new_user() {
-        let client = TestSessionClient {
-            get_mock: Mock::empty(),
-            query_mock: Mock::new(vec!["[]"]),
-            write_mock: Mock::new(vec![()]),
-        };
+        let conn = Arc::new(Mutex::new(TestConnection {
+            execute_mock: Mock::new(vec![1]),
+            query_row_mock: Mock::new(vec![Err(rusqlite::Error::QueryReturnedNoRows)]),
+        }));
         let mut auth = TestAuth::new(None);
         super::spotify_login(
-            &client,
+            Arc::clone(&conn),
             TestSpotify {
                 code: "test".to_owned(),
             },
@@ -490,34 +518,18 @@ mod test {
         )
         .await
         .unwrap();
-        assert_eq!(
-            *client.query_mock.call_args.lock().unwrap(),
-            [QueryDocumentsBuilder {
-                collection_name: "user",
-                query: CosmosQuery::with_params(
-                    "SELECT id, secret FROM user WHERE spotify_credentials->'user_id' = ?1"
-                        .to_owned(),
-                    vec![CosmosParam::new("@user_id".to_owned(), "user".to_owned())],
-                ),
-                query_cross_partition: true,
-                parallelize_cross_partition_query: true,
-            }]
-        );
+        let conn = Mutex::into_inner(Arc::into_inner(conn).unwrap()).unwrap();
         let write_mock =
-            Mutex::into_inner(Arc::into_inner(client.write_mock.call_args).unwrap()).unwrap();
-        let DocumentWriter::Create(builder) = &write_mock[0] else {
-            unreachable!()
-        };
-        let RawUser { id, secret, .. } = serde_json::de::from_str(&builder.document).unwrap();
+            Mutex::into_inner(Arc::into_inner(conn.execute_mock.call_args).unwrap()).unwrap();
+        let RawUser { id, secret, .. } = serde_json::de::from_str(&write_mock[0].1).unwrap();
         assert_eq!(
             write_mock,
-            [DocumentWriter::Create(CreateDocumentBuilder {
-                collection_name: "user",
-                document: format!(
+            [(
+                "INSERT INTO user (id, user_id, secret, spotify_credentials, google_email) VALUES (:id, :user_id, :secret, :spotify_credentials, :google_email)".to_owned(),
+                format!(
                     r#"{{"id":"{id}","user_id":"user","secret":"{secret}","spotify_credentials":"{{\"user_id\":\"user\",\"url\":\"\",\"access_token\":\"test\",\"refresh_token\":\"\"}}","google_email":null}}"#
                 ),
-                is_upsert: false,
-            })]
+            )]
         );
         assert_eq!(
             auth.expected_user,
@@ -537,14 +549,15 @@ mod test {
 
     #[tokio::test]
     async fn test_spotify_login_existing_user() {
-        let client = TestSessionClient {
-            get_mock: Mock::new(vec![r#"{"id":"","user_id":"","secret":""}"#]),
-            query_mock: Mock::new(vec![r#"[{"id":"user"}]"#]),
-            write_mock: Mock::new(vec![()]),
-        };
+        let conn = Arc::new(Mutex::new(TestConnection {
+            execute_mock: Mock::new(vec![1]),
+            query_row_mock: Mock::new(vec![Ok(
+                r#"{"id":"","user_id":"","secret":"","spotify_credentials":null,"google_email":null}"#,
+            )]),
+        }));
         let mut auth = TestAuth::new(None);
         super::spotify_login(
-            &client,
+            Arc::clone(&conn),
             TestSpotify {
                 code: "test".to_owned(),
             },
@@ -554,35 +567,20 @@ mod test {
         )
         .await
         .unwrap();
+        let conn = Mutex::into_inner(Arc::into_inner(conn).unwrap()).unwrap();
         assert_eq!(
-            *client.get_mock.call_args.lock().unwrap(),
-            [GetDocumentBuilder {
-                collection_name: "user",
-                document_name: "user".to_owned(),
-                partition_key: "user".to_owned(),
-            }],
+            *conn.query_row_mock.call_args.lock().unwrap(),
+            [(
+                "SELECT * FROM user WHERE spotify_credentials->'user_id' = ?1".to_owned(),
+                "[\"user\"]".to_owned()
+            )]
         );
         assert_eq!(
-            *client.query_mock.call_args.lock().unwrap(),
-            [QueryDocumentsBuilder {
-                collection_name: "user",
-                query: CosmosQuery::with_params(
-                    "SELECT id, secret FROM user WHERE spotify_credentials->'user_id' = ?1"
-                        .to_owned(),
-                    vec![CosmosParam::new("@user_id".to_owned(), "user".to_owned())],
-                ),
-                query_cross_partition: true,
-                parallelize_cross_partition_query: true,
-            }]
-        );
-        assert_eq!(
-            *client.write_mock.call_args.lock().unwrap(),
-            [DocumentWriter::Replace(ReplaceDocumentBuilder {
-                collection_name: "user",
-                document_name: "".to_owned(),
-                partition_key: "".to_owned(),
-                document: r#"{"id":"","user_id":"","secret":"","spotify_credentials":"{\"user_id\":\"user\",\"url\":\"\",\"access_token\":\"test\",\"refresh_token\":\"\"}","google_email":null}"#.to_owned(),
-            })]
+            *conn.execute_mock.call_args.lock().unwrap(),
+            [(
+                "UPDATE user SET spotify_credentials = ?1 WHERE id = ?2".to_owned(),
+                r#"["{\"user_id\":\"user\",\"url\":\"\",\"access_token\":\"test\",\"refresh_token\":\"\"}", ""]"#.to_owned()
+            )]
         );
         assert_eq!(
             auth.expected_user,
@@ -603,17 +601,16 @@ mod test {
 
     #[tokio::test]
     async fn test_login_add_spotify_credentials() {
-        let client = TestSessionClient {
-            get_mock: Mock::empty(),
-            query_mock: Mock::empty(),
-            write_mock: Mock::new(vec![()]),
-        };
+        let conn = Arc::new(Mutex::new(TestConnection {
+            execute_mock: Mock::new(vec![1]),
+            query_row_mock: Mock::empty(),
+        }));
         let mut auth = TestAuth {
             current_user: Some(User::default()),
             expected_user: None,
         };
         super::spotify_login(
-            &client,
+            Arc::clone(&conn),
             TestSpotify {
                 code: "test".to_owned(),
             },
@@ -623,14 +620,13 @@ mod test {
         )
         .await
         .unwrap();
+        let conn = Mutex::into_inner(Arc::into_inner(conn).unwrap()).unwrap();
         assert_eq!(
-            *client.write_mock.call_args.lock().unwrap(),
-            [DocumentWriter::Replace(ReplaceDocumentBuilder {
-                collection_name: "user",
-                document_name: "".to_owned(),
-                partition_key: "".to_owned(),
-                document: r#"{"id":"","user_id":"","secret":"","spotify_credentials":"{\"user_id\":\"user\",\"url\":\"\",\"access_token\":\"test\",\"refresh_token\":\"\"}","google_email":null}"#.to_owned(),
-            })]
+            *conn.execute_mock.call_args.lock().unwrap(),
+            [(
+                "UPDATE user SET spotify_credentials = ?1 WHERE id = ?2".to_owned(),
+                r#"["{\"user_id\":\"user\",\"url\":\"\",\"access_token\":\"test\",\"refresh_token\":\"\"}", ""]"#.to_owned()
+            )]
         );
         assert!(auth.expected_user.is_none());
     }
@@ -653,17 +649,16 @@ mod test {
 
     #[tokio::test]
     async fn test_google_login_new_user() {
-        let client = TestSessionClient {
-            get_mock: Mock::empty(),
-            query_mock: Mock::new(vec!["[]"]),
-            write_mock: Mock::new(vec![()]),
-        };
+        let conn = Arc::new(Mutex::new(TestConnection {
+            execute_mock: Mock::new(vec![1]),
+            query_row_mock: Mock::new(vec![Err(rusqlite::Error::QueryReturnedNoRows)]),
+        }));
         let mut auth = TestAuth {
             current_user: None,
             expected_user: Some(User::default()),
         };
         super::google_login(
-            &client,
+            Arc::clone(&conn),
             TestGoogle {
                 code: "test".to_owned(),
             },
@@ -673,36 +668,18 @@ mod test {
         )
         .await
         .unwrap();
-        assert_eq!(
-            *client.query_mock.call_args.lock().unwrap(),
-            [QueryDocumentsBuilder {
-                collection_name: "user",
-                query: CosmosQuery::with_params(
-                    "SELECT id FROM user WHERE google_email = ?1".to_owned(),
-                    vec![CosmosParam::new(
-                        "@google_email".to_owned(),
-                        "user@gmail.com".to_owned()
-                    )],
-                ),
-                query_cross_partition: true,
-                parallelize_cross_partition_query: true,
-            }]
-        );
+        let conn = Mutex::into_inner(Arc::into_inner(conn).unwrap()).unwrap();
         let write_mock =
-            Mutex::into_inner(Arc::into_inner(client.write_mock.call_args).unwrap()).unwrap();
-        let DocumentWriter::Create(builder) = &write_mock[0] else {
-            unreachable!()
-        };
-        let User { id, secret, .. } = serde_json::de::from_str(&builder.document).unwrap();
+            Mutex::into_inner(Arc::into_inner(conn.execute_mock.call_args).unwrap()).unwrap();
+        let RawUser { id, secret, .. } = serde_json::de::from_str(&write_mock[0].1).unwrap();
         assert_eq!(
             write_mock,
-            [DocumentWriter::Create(CreateDocumentBuilder {
-                collection_name: "user",
-                document: format!(
+            [(
+                "INSERT INTO user (id, user_id, secret, spotify_credentials, google_email) VALUES (:id, :user_id, :secret, :spotify_credentials, :google_email)".to_owned(),
+                format!(
                     r#"{{"id":"{id}","user_id":"user","secret":"{secret}","spotify_credentials":null,"google_email":"user@gmail.com"}}"#
                 ),
-                is_upsert: false,
-            })]
+            )]
         );
         assert_eq!(
             auth.expected_user,
@@ -717,17 +694,18 @@ mod test {
 
     #[tokio::test]
     async fn test_google_login_existing_user() {
-        let client = TestSessionClient {
-            get_mock: Mock::new(vec![r#"{"id":"","user_id":"","secret":""}"#]),
-            query_mock: Mock::new(vec![r#"[{"id":"user"}]"#]),
-            write_mock: Mock::empty(),
-        };
+        let conn = Arc::new(Mutex::new(TestConnection {
+            execute_mock: Mock::empty(),
+            query_row_mock: Mock::new(vec![Ok(
+                r#"{"id":"","user_id":"","secret":"","spotify_credentials":null,"google_email":null}"#,
+            )]),
+        }));
         let mut auth = TestAuth {
             current_user: None,
             expected_user: Some(User::default()),
         };
         super::google_login(
-            &client,
+            Arc::clone(&conn),
             TestGoogle {
                 code: "test".to_owned(),
             },
@@ -737,39 +715,23 @@ mod test {
         )
         .await
         .unwrap();
+        let conn = Mutex::into_inner(Arc::into_inner(conn).unwrap()).unwrap();
         assert_eq!(
-            *client.get_mock.call_args.lock().unwrap(),
-            [GetDocumentBuilder {
-                collection_name: "user",
-                document_name: "user".to_owned(),
-                partition_key: "user".to_owned(),
-            }],
-        );
-        assert_eq!(
-            *client.query_mock.call_args.lock().unwrap(),
-            [QueryDocumentsBuilder {
-                collection_name: "user",
-                query: CosmosQuery::with_params(
-                    "SELECT id FROM user WHERE google_email = ?1".to_owned(),
-                    vec![CosmosParam::new(
-                        "@google_email".to_owned(),
-                        "user@gmail.com".to_owned()
-                    )],
-                ),
-                query_cross_partition: true,
-                parallelize_cross_partition_query: true,
-            }]
+            *conn.query_row_mock.call_args.lock().unwrap(),
+            [(
+                "SELECT * FROM user WHERE google_email = ?1".to_owned(),
+                "[\"user@gmail.com\"]".to_owned()
+            )]
         );
         assert_eq!(auth.expected_user, Some(User::default()));
     }
 
     #[tokio::test]
     async fn test_login_add_google_credentials() {
-        let client = TestSessionClient {
-            get_mock: Mock::empty(),
-            query_mock: Mock::empty(),
-            write_mock: Mock::new(vec![()]),
-        };
+        let conn = Arc::new(Mutex::new(TestConnection {
+            execute_mock: Mock::new(vec![1]),
+            query_row_mock: Mock::empty(),
+        }));
         let mut auth = TestAuth {
             current_user: Some(User {
                 user_id: String::new(),
@@ -781,7 +743,7 @@ mod test {
             expected_user: None,
         };
         super::google_login(
-            &client,
+            Arc::clone(&conn),
             TestGoogle {
                 code: "test".to_owned(),
             },
@@ -791,14 +753,13 @@ mod test {
         )
         .await
         .unwrap();
+        let conn = Mutex::into_inner(Arc::into_inner(conn).unwrap()).unwrap();
         assert_eq!(
-            *client.write_mock.call_args.lock().unwrap(),
-            [DocumentWriter::Replace(ReplaceDocumentBuilder {
-                collection_name: "user",
-                document_name: "".to_owned(),
-                partition_key: "".to_owned(),
-                document: r#"{"id":"","user_id":"","secret":"","spotify_credentials":null,"google_email":"user@gmail.com"}"#.to_owned(),
-            })]
+            *conn.execute_mock.call_args.lock().unwrap(),
+            [(
+                "UPDATE user SET google_email = ?1 WHERE id = ?2".to_owned(),
+                r#"["user@gmail.com", ""]"#.to_owned()
+            )]
         );
         assert!(auth.expected_user.is_none());
     }

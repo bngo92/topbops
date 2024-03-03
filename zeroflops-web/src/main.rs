@@ -18,6 +18,7 @@ use axum_login::{
     AuthManagerLayerBuilder,
 };
 use futures::{stream::FuturesUnordered, TryStreamExt};
+use rusqlite::Connection;
 use serde_arrow::schema::{SchemaLike, TracingOptions};
 use serde_json::{Map, Value};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
@@ -38,7 +39,7 @@ use zeroflops::{
 use zeroflops_web::{
     query,
     source::{self, spotify},
-    user::{self, Auth, GoogleClient, RawUser, SqlStore, User},
+    user::{self, Auth, GoogleClient, SqlStore, User},
     Item, RawItem, UserId,
 };
 
@@ -80,7 +81,7 @@ async fn login_handler(
         origin = format!("https://{}{}", host, original_uri.path());
     }
     user::spotify_login(
-        &state.sql_client,
+        Connection::open(state.sql_store.path).map_err(Error::from)?,
         SpotifyClient,
         &mut AuthWrapper(auth),
         &params["code"],
@@ -98,15 +99,12 @@ async fn logout_handler(
     if let Some(user) = &mut auth.user {
         // Log out of all sessions with axum-login by changing the user secret
         user.secret = zeroflops_web::user::generate_secret();
-        state
-            .sql_client
-            .write_document(DocumentWriter::Create(CreateDocumentBuilder {
-                collection_name: "user",
-                document: RawUser::from(user.clone()),
-                is_upsert: true,
-            }))
-            .await
-            .expect("Couldn't reset password");
+        let conn = Connection::open(state.sql_store.path).expect("Couldn't reset password");
+        conn.execute(
+            "UPDATE user SET secret = ?1 WHERE id = ?2",
+            [&user.secret, &user.id],
+        )
+        .expect("Couldn't reset password");
         auth.logout().await.unwrap();
     }
     Redirect::to("/")
@@ -129,7 +127,7 @@ async fn google_login_handler(
         origin = format!("https://{}{}", host, original_uri.path());
     }
     user::google_login(
-        &state.sql_client,
+        Connection::open(state.sql_store.path).map_err(Error::from)?,
         GoogleClient,
         &mut AuthWrapper(auth),
         &params["code"],
@@ -694,6 +692,7 @@ async fn get_spotify_playlists(
 }
 
 struct AppState {
+    sql_store: SqlStore,
     sql_client: SqlSessionClient,
 }
 
@@ -706,8 +705,10 @@ async fn main() {
 
     // A `Service` is needed for every connection, so this
     // creates one from our `hello_world` function.
+    let session_store = SqlStore { path: "zeroflops" };
     let shared_state = Arc::new(AppState {
-        sql_client: SqlSessionClient { path: "zeroflops" },
+        sql_store: session_store.clone(),
+        sql_client: SqlSessionClient { path: "data" },
     });
 
     // Reset demo user data during startup in production
@@ -760,7 +761,6 @@ async fn main() {
         println!("Demo lists were created");
     }
 
-    let session_store = SqlStore { path: "zeroflops" };
     let session_layer = SessionManagerLayer::new(session_store.clone())
         .with_secure(false)
         .with_expiry(Expiry::OnInactivity(Duration::seconds(31536000)));
