@@ -92,15 +92,21 @@ impl GetDocumentBuilder {
 #[derive(Debug, PartialEq)]
 pub struct QueryDocumentsBuilder {
     pub collection_name: &'static str,
+    pub partition_key: View,
     pub query: CosmosQuery,
     pub query_cross_partition: bool,
     pub parallelize_cross_partition_query: bool,
 }
 
 impl QueryDocumentsBuilder {
-    pub fn new(collection_name: &'static str, query: CosmosQuery) -> QueryDocumentsBuilder {
+    pub fn new(
+        collection_name: &'static str,
+        partition_key: View,
+        query: CosmosQuery,
+    ) -> QueryDocumentsBuilder {
         QueryDocumentsBuilder {
             collection_name,
+            partition_key,
             query,
             query_cross_partition: false,
             parallelize_cross_partition_query: false,
@@ -120,6 +126,11 @@ impl QueryDocumentsBuilder {
         }
         Ok(builder)
     }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum View {
+    User(String),
 }
 
 #[async_trait]
@@ -150,11 +161,20 @@ impl SessionClient for SqlSessionClient {
         T: DeserializeOwned + Send + Sync,
     {
         let conn = Connection::open(self.path)?;
+        let user_id = builder.partition_key;
+        conn.execute(
+            &format!("CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{user_id}'"),
+            [],
+        )?;
+        conn.execute(
+            &format!("CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{user_id}'"),
+            [],
+        )?;
         let mut stmt = conn.prepare(&format!(
-            "SELECT * FROM {} WHERE id = ?1 AND user_id = ?2",
+            "SELECT * FROM {} WHERE id = ?1",
             builder.collection_name
         ))?;
-        stmt.query_row([&builder.document_name, &builder.partition_key], |row| {
+        stmt.query_row([&builder.document_name], |row| {
             Ok(serde_rusqlite::from_row(row))
         })
         .optional()?
@@ -166,6 +186,13 @@ impl SessionClient for SqlSessionClient {
     where
         T: DeserializeOwned + Send + Sync,
     {
+        let query = builder.query.query;
+        if query.contains("_list") {
+            return Err(Error::client_error("Parse error: no such table: _list"));
+        }
+        if query.contains("_item") {
+            return Err(Error::client_error("Parse error: no such table: _item"));
+        }
         let params: Vec<_> = builder
             .query
             .parameters
@@ -179,7 +206,17 @@ impl SessionClient for SqlSessionClient {
             })
             .collect();
         let conn = Connection::open(self.path)?;
-        let mut stmt = conn.prepare(&builder.query.query)?;
+        // Emulate partitions with views
+        let View::User(user_id) = &builder.partition_key;
+        conn.execute(
+            &format!("CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{user_id}'"),
+            [],
+        )?;
+        conn.execute(
+            &format!("CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{user_id}'"),
+            [],
+        )?;
+        let mut stmt = conn.prepare(&query)?;
         let query = stmt.query(rusqlite::params_from_iter(params))?;
         serde_rusqlite::from_rows(query)
             .collect::<Result<_, _>>()
@@ -216,7 +253,7 @@ impl SessionClient for SqlSessionClient {
             }
             DocumentWriter::Delete(builder) => {
                 conn.execute(
-                    &format!("DELETE FROM {} WHERE id = ?1", builder.collection_name),
+                    &format!("DELETE FROM _{} WHERE id = ?1", builder.collection_name),
                     [builder.document_name],
                 )
                 .unwrap();
@@ -228,18 +265,18 @@ impl SessionClient for SqlSessionClient {
 
 fn get_insert_stmt(collection_name: &str, is_upsert: bool) -> &str {
     match (collection_name, is_upsert) {
-        ("item", false) => "INSERT INTO item (id, user_id, type, name, iframe, rating, user_score, user_wins, user_losses, metadata, hidden) VALUES (:id, :user_id, :type, :name, :iframe, :rating, :user_score, :user_wins, :user_losses, :metadata, :hidden)",
-        ("item", true) => "INSERT INTO item (id, user_id, type, name, iframe, rating, user_score, user_wins, user_losses, metadata, hidden) VALUES (:id, :user_id, :type, :name, :iframe, :rating, :user_score, :user_wins, :user_losses, :metadata, :hidden) ON CONFLICT(id, user_id) DO UPDATE SET rating=excluded.rating, user_score=excluded.user_score, user_wins=excluded.user_wins, user_losses=excluded.user_losses",
-        ("list", false) => "INSERT INTO list (id, user_id, mode, name, sources, iframe, items, favorite, query) VALUES (:id, :user_id, :mode, :name, :sources, :iframe, :items, :favorite, :query)",
-        ("list", true) => "INSERT INTO list (id, user_id, mode, name, sources, iframe, items, favorite, query) VALUES (:id, :user_id, :mode, :name, :sources, :iframe, :items, :favorite, :query) ON CONFLICT(id, user_id) DO UPDATE SET items=excluded.items, query=excluded.query",
+        ("item", false) => "INSERT INTO _item (id, user_id, type, name, iframe, rating, user_score, user_wins, user_losses, metadata, hidden) VALUES (:id, :user_id, :type, :name, :iframe, :rating, :user_score, :user_wins, :user_losses, :metadata, :hidden)",
+        ("item", true) => "INSERT INTO _item (id, user_id, type, name, iframe, rating, user_score, user_wins, user_losses, metadata, hidden) VALUES (:id, :user_id, :type, :name, :iframe, :rating, :user_score, :user_wins, :user_losses, :metadata, :hidden) ON CONFLICT(id, user_id) DO UPDATE SET rating=excluded.rating, user_score=excluded.user_score, user_wins=excluded.user_wins, user_losses=excluded.user_losses",
+        ("list", false) => "INSERT INTO _list (id, user_id, mode, name, sources, iframe, items, favorite, query) VALUES (:id, :user_id, :mode, :name, :sources, :iframe, :items, :favorite, :query)",
+        ("list", true) => "INSERT INTO _list (id, user_id, mode, name, sources, iframe, items, favorite, query) VALUES (:id, :user_id, :mode, :name, :sources, :iframe, :items, :favorite, :query) ON CONFLICT(id, user_id) DO UPDATE SET items=excluded.items, query=excluded.query",
         _ => unreachable!()
     }
 }
 
 fn get_update_stmt(collection_name: &str) -> (&str, &[&str]) {
     match collection_name {
-        "item" => ("UPDATE item SET rating = :rating, user_score = :user_score, user_wins = :user_wins, user_losses = :user_losses WHERE id = :id AND user_id = :user_id", &["id", "user_id", "rating", "user_score", "user_wins", "user_losses"]),
-        "list" => ("UPDATE list SET name = :name, sources = :sources, items = :items, favorite = :favorite, query = :query WHERE id = :id AND user_id = :user_id", &["id", "user_id", "name", "sources", "items", "favorite", "query"]),
+        "item" => ("UPDATE _item SET rating = :rating, user_score = :user_score, user_wins = :user_wins, user_losses = :user_losses WHERE id = :id AND user_id = :user_id", &["id", "user_id", "rating", "user_score", "user_wins", "user_losses"]),
+        "list" => ("UPDATE _list SET name = :name, sources = :sources, items = :items, favorite = :favorite, query = :query WHERE id = :id AND user_id = :user_id", &["id", "user_id", "name", "sources", "items", "favorite", "query"]),
         _ => unreachable!()
     }
 }

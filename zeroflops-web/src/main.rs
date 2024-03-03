@@ -30,9 +30,9 @@ use uuid::Uuid;
 use zeroflops::{
     spotify::{Playlists, RecentTracks},
     storage::{
-        CosmosParam, CosmosQuery, CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter,
+        CosmosQuery, CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter,
         GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
-        SqlSessionClient,
+        SqlSessionClient, View,
     },
     Error, Id, Items, List, ListMode, Lists, RawList,
 };
@@ -160,19 +160,17 @@ async fn get_lists(
 ) -> Result<Json<Lists>, Response> {
     let user_id = get_user_or_demo_user(auth);
     let query = if let Some("true") = params.get("favorite").map(String::as_ref) {
-        "SELECT * FROM list WHERE user_id = ?1 AND favorite = true"
+        "SELECT * FROM list WHERE favorite = true"
     } else {
-        "SELECT * FROM list WHERE user_id = ?1"
+        "SELECT * FROM list"
     };
     Ok(Json(Lists {
         lists: state
             .sql_client
             .query_documents::<RawList>(QueryDocumentsBuilder::new(
                 "list",
-                CosmosQuery::with_params(
-                    String::from(query),
-                    [CosmosParam::new(String::from("@user_id"), user_id.0)],
-                ),
+                View::User(user_id.0.clone()),
+                CosmosQuery::new(query.to_owned()),
             ))
             .await
             .map_err(Error::from)?
@@ -190,7 +188,7 @@ async fn get_list(
     let user_id = get_user_or_demo_user(auth);
     let mut list = source::get_list(&state.sql_client, &user_id, &id).await?;
     if let ListMode::View(_) = list.mode {
-        list.items = query::get_view_items(&state.sql_client, &list)
+        list.items = query::get_view_items(&state.sql_client, &user_id, &list)
             .await?
             .collect();
     }
@@ -329,11 +327,12 @@ async fn find_items(
         return Err(Error::client_error("invalid finder").into());
     };
 
-    let (query, _) = query::rewrite_query(query, &user_id)?;
+    let (query, _) = query::rewrite_query(query)?;
     let values: Vec<Map<String, Value>> = state
         .sql_client
         .query_documents(QueryDocumentsBuilder::new(
             "item",
+            View::User(user_id.0.clone()),
             CosmosQuery::new(query.to_string()),
         ))
         .await
@@ -477,7 +476,7 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
             .into_iter()
             .map(|i| i.unwrap().id)
             .collect(),
-        ListMode::View(_) => query::get_view_items(&state.sql_client, &list)
+        ListMode::View(_) => query::get_view_items(&state.sql_client, &user_id, &list)
             .await?
             .map(|i| i.id)
             .collect(),
