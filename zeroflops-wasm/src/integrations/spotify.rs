@@ -1,4 +1,4 @@
-use crate::bootstrap::Accordion;
+use crate::{bootstrap::Accordion, UserProps};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{HtmlSelectElement, Response};
@@ -24,13 +24,15 @@ pub struct SpotifyIntegration {
 
 impl Component for SpotifyIntegration {
     type Message = Msg;
-    type Properties = ();
+    type Properties = UserProps;
 
     fn create(ctx: &Context<Self>) -> Self {
-        ctx.link()
-            .send_future(async { Msg::LoadRecentTracks(get_recent_tracks().await.unwrap()) });
-        ctx.link()
-            .send_future(async { Msg::LoadPlaylists(get_playlists().await.unwrap()) });
+        if ctx.props().logged_in {
+            ctx.link()
+                .send_future(async { Msg::LoadRecentTracks(get_recent_tracks().await.unwrap()) });
+            ctx.link()
+                .send_future(async { Msg::LoadPlaylists(get_playlists().await.unwrap()) });
+        }
         SpotifyIntegration {
             import_ref: NodeRef::default(),
             recent_tracks: None,
@@ -70,16 +72,24 @@ impl Component for SpotifyIntegration {
             <div>
                 <h1>{"Spotify"}</h1>
                 <Accordion header={"Recent Tracks"} collapsed={false}>
-                    <div class="row">
-                        <div class="col"></div>
-                        <div class="col-1"><strong>{"Rating"}</strong></div>
-                        <div class="col-1"><strong>{"User Score"}</strong></div>
-                    </div>
-                    {for track_html}
+                    if ctx.props().logged_in {
+                        <div class="row">
+                            <div class="col"></div>
+                            <div class="col-1"><strong>{"Rating"}</strong></div>
+                            <div class="col-1"><strong>{"User Score"}</strong></div>
+                        </div>
+                        {for track_html}
+                    } else {
+                        <p>{"Create an account to view and import tracks that were recently played in Spotify"}</p>
+                    }
                 </Accordion>
                 <Accordion header={"Saved Playlists"} collapsed={false}>
-                    if let Some(playlists) = &self.playlists {
-                        {for playlists.items.iter().map(|i| html! {<div><a href={i.external_urls["spotify"].clone()}>{&i.name}</a></div>})}
+                    if ctx.props().logged_in {
+                        if let Some(playlists) = &self.playlists {
+                            {for playlists.items.iter().map(|i| html! {<div><a href={i.external_urls["spotify"].clone()}>{&i.name}</a></div>})}
+                        }
+                    } else {
+                        <p>{"Create an account to import playlists from Spotify"}</p>
                     }
                 </Accordion>
                 <h2>{"Import from Spotify link"}</h2>
@@ -89,7 +99,7 @@ impl Component for SpotifyIntegration {
                             <input ref={self.import_ref.clone()} type="text" class="w-100 h-100" value={default_import}/>
                         </div>
                         <div class="col-2 col-lg-1 pe-2">
-                            <button type="button" class="btn btn-success" onclick={import}>{"Import"}</button>
+                            <button type="button" class="btn btn-success" onclick={import} disabled={!ctx.props().logged_in}>{"Import"}</button>
                         </div>
                     </div>
                 </form>

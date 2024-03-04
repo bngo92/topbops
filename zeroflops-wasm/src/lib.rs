@@ -108,7 +108,7 @@ fn switch(
                 <Redirect<Route> to={Route::Home}/>
             }
         },
-        Route::Spotify => html! { <SpotifyIntegration/> },
+        Route::Spotify => html! { <SpotifyIntegration {logged_in}/> },
     };
     html! {
         <div class="container-lg my-md-4">

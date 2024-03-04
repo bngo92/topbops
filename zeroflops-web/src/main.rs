@@ -349,30 +349,30 @@ async fn handle_action(
     auth: AuthContext,
     body: Bytes,
 ) -> Result<StatusCode, Response> {
-    let user = auth.user.clone();
-    let user_id = get_user_or_demo_user(auth);
     match params.get("action").map(String::as_ref) {
         Some("update") => {
             if let (Some(id), Some(win), Some(lose)) =
                 (params.get("list"), params.get("win"), params.get("lose"))
             {
+                let user_id = get_user_or_demo_user(auth);
                 return Ok(handle_stats_update(state, user_id, id, win, lose).await?);
             }
         }
         Some("push") => {
             if let Some(id) = params.get("list") {
-                let Some(mut user) = user else {
-                    return Err(StatusCode::UNAUTHORIZED.into_response());
-                };
+                let mut user = require_user(auth)?;
                 return Ok(push_list(state, &mut user, id).await?);
             }
         }
         Some("import") => {
             if let (Some(source), Some(id)) = (params.remove("source"), params.remove("id")) {
+                let user = require_user(auth)?;
+                let user_id = UserId(user.user_id.clone());
                 return Ok(import_list(state, user_id, &source, id, false).await?);
             }
         }
         Some("updateItems") => {
+            let user_id = get_user_or_demo_user(auth);
             return Ok(update_items(state, user_id, body).await?);
         }
         _ => {}
