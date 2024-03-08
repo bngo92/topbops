@@ -7,7 +7,7 @@ use arrow2::{
 use async_trait::async_trait;
 use axum::{
     body::Bytes,
-    extract::{Host, OriginalUri, Path, Query, RawQuery, State},
+    extract::{Host, OriginalUri, Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Json, Redirect, Response},
     routing::{get, post},
@@ -210,18 +210,12 @@ async fn get_list_items(
 async fn query_list(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    RawQuery(params): RawQuery,
+    Query(params): Query<HashMap<String, String>>,
     auth: AuthContext,
 ) -> Result<Vec<u8>, Response> {
     let user_id = get_user_or_demo_user(auth);
     let list = source::get_list(&state.sql_client, &user_id, &id).await?;
-    let params: HashMap<String, Vec<String>> = if let Some(params) = params {
-        serde_qs::from_str(&params).map_err(Error::from)?
-    } else {
-        HashMap::new()
-    };
-    let records =
-        query::query_list(&state.sql_client, &user_id, list, params.get("fields")).await?;
+    let records = query::query_list(&state.sql_client, &user_id, list, params.get("query")).await?;
     Ok(serialize_arrow(records)?)
 }
 
@@ -276,7 +270,7 @@ async fn create_list(
         iframe: None,
         items: Vec::new(),
         favorite: false,
-        query: String::from("SELECT name, user_score FROM c"),
+        query: String::from("SELECT name, user_score FROM item"),
     };
     create_list_doc(&state.sql_client, list.clone(), false).await?;
     Ok((StatusCode::CREATED, Json(list)))

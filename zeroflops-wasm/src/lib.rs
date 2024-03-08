@@ -564,7 +564,7 @@ impl Component for Widget {
                 // TODO: add the ability to refresh
                 if self.query.is_none() {
                     ctx.link().send_future(async move {
-                        WidgetMsg::Success(query_list(&list, &[]).await.unwrap())
+                        WidgetMsg::Success(query_list(&list, None).await.unwrap())
                     });
                     false
                 } else {
@@ -583,6 +583,7 @@ impl Component for Widget {
 
 enum ListViewMsg {
     Success(Option<DataFrame>),
+    Failed(String),
     Select,
     Query,
 }
@@ -596,7 +597,6 @@ struct ListView {
     data: Option<DataFrame>,
     select_ref: NodeRef,
     view: DataView,
-    df: Option<DataFrame>,
     query_ref: NodeRef,
     error: Option<String>,
 }
@@ -608,13 +608,15 @@ impl Component for ListView {
     fn create(ctx: &Context<Self>) -> Self {
         let list = ctx.props().list.clone();
         ctx.link().send_future(async move {
-            ListViewMsg::Success(query_list(&list, &[]).await.unwrap())
+            match query_list(&list, None).await {
+                Ok(data) => ListViewMsg::Success(data),
+                Err(e) => ListViewMsg::Failed(e.as_string().unwrap()),
+            }
         });
         Self {
             data: None,
             select_ref: NodeRef::default(),
             view: DataView::Table,
-            df: None,
             query_ref: NodeRef::default(),
             error: None,
         }
@@ -635,8 +637,8 @@ impl Component for ListView {
                     </select>
                 </div>
                 <Input input_ref={self.query_ref.clone()} onclick={query.clone()} error={self.error.clone()} disabled={matches!(ctx.props().list.mode, ListMode::View(_))}/>
-                if let Some(df) = &self.df {
-                    {self.view.render(df)}
+                if let Some(data) = &self.data {
+                    {self.view.render(data)}
                 }
             </div>
         }
@@ -653,11 +655,10 @@ impl Component for ListView {
                     data.drop_in_place("id");
                     Some(data)
                 };
-                if let ListMode::View(_) = ctx.props().list.mode {
-                    self.df = Some(data);
-                } else {
-                    update_list_view(self, ctx.props().list.query.clone());
-                }
+                self.error = None;
+            }
+            ListViewMsg::Failed(e) => {
+                self.error = Some(e);
             }
             ListViewMsg::Select => {
                 let view = self.select_ref.cast::<HtmlSelectElement>().unwrap().value();
@@ -672,15 +673,17 @@ impl Component for ListView {
             }
             ListViewMsg::Query => {
                 let query = self.query_ref.cast::<HtmlSelectElement>().unwrap().value();
-                if query.is_empty() {
-                    self.df = self.data.clone();
-                } else {
-                    update_list_view(self, query);
-                }
+                let list = ctx.props().list.clone();
+                ctx.link().send_future(async move {
+                    match query_list(&list, Some(query)).await {
+                        Ok(data) => ListViewMsg::Success(data),
+                        Err(e) => ListViewMsg::Failed(e.as_string().unwrap()),
+                    }
+                });
             }
         }
-        if let Some(df) = &self.df {
-            if let Err(e) = self.view.draw(df) {
+        if let Some(data) = &self.data {
+            if let Err(e) = self.view.draw(data) {
                 self.error = Some(e.to_string());
             }
         }
@@ -693,27 +696,6 @@ impl Component for ListView {
             query.set_value(&ctx.props().list.query);
         }
     }
-}
-
-fn update_list_view(list_view: &mut ListView, query: String) {
-    /*let data = list_view.data.clone().unwrap().lazy();
-    let mut ctx = SQLContext::new();
-    ctx.register("c", data);
-    let lf = match ctx.execute(&query) {
-        Ok(lf) => lf,
-        Err(e) => {
-            list_view.error = Some(e.to_string());
-            return;
-        }
-    };
-    match lf.collect() {
-        Ok(df) => {
-            list_view.error = None;
-            list_view.df = Some(df);
-        }
-        Err(e) => list_view.error = Some(e.to_string()),
-    }*/
-    list_view.df = list_view.data.clone();
 }
 
 #[derive(Eq, PartialEq, Properties)]
@@ -1025,20 +1007,19 @@ async fn delete_list(id: &str) -> Result<(), JsValue> {
     Ok(())
 }
 
-async fn query_list(list: &List, fields: &[&str]) -> Result<Option<DataFrame>, JsValue> {
+async fn query_list(list: &List, qs: Option<String>) -> Result<Option<DataFrame>, JsValue> {
     let window = window();
-    let url = if fields.is_empty() {
-        format!("/api/lists/{}/query", list.id)
+    let url = if let Some(qs) = qs {
+        format!("/api/lists/{}/query?query={}", list.id, qs)
     } else {
-        format!(
-            "/api/lists/{}/query?{}",
-            list.id,
-            serde_qs::to_string(&HashMap::from([("fields", fields)])).unwrap()
-        )
+        format!("/api/lists/{}/query", list.id)
     };
     let request = query(&url, "GET").unwrap();
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
+    if [400, 500].contains(&resp.status()) {
+        return Err(JsFuture::from(resp.text()?).await?);
+    }
     Ok(serialize_into_df(resp).await?.map(|mut items| {
         if let Some(id_col) = items.column("id") {
             let ids: HashSet<_> = list.items.iter().map(|i| i.id.as_str()).collect();

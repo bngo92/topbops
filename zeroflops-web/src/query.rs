@@ -10,10 +10,8 @@ use sqlparser::{
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use zeroflops::{
-    storage::{
-        CosmosParam, CosmosQuery, QueryDocumentsBuilder, SessionClient, SqlSessionClient, View,
-    },
-    Error, ItemMetadata, Items, List, ListMode,
+    storage::{CosmosQuery, QueryDocumentsBuilder, SessionClient, SqlSessionClient, View},
+    Error, InternalError, ItemMetadata, Items, List, ListMode,
 };
 
 pub async fn get_view_items(
@@ -100,7 +98,7 @@ pub async fn query_list(
     client: &SqlSessionClient,
     user_id: &UserId,
     list: List,
-    fields: Option<&Vec<String>>,
+    query: Option<&String>,
 ) -> Result<Vec<Map<String, Value>>, Error> {
     let (query, view) = if let ListMode::View(_) = &list.mode {
         let query = list.query.into_query()?;
@@ -111,31 +109,25 @@ pub async fn query_list(
     } else if list.items.is_empty() {
         return Ok(Vec::new());
     } else {
-        let fields = if let Some(fields) = fields {
-            fields.join(", ")
-        } else {
-            "id, type, name, rating, user_score, user_wins, user_losses, hidden, metadata"
-                .to_owned()
-        };
         (
-            CosmosQuery::with_params(
-                format!(
-                    "SELECT {} FROM item WHERE id IN ({})",
-                    fields,
-                    &"?,".repeat(list.items.len())[..list.items.len() * 2 - 1],
-                ),
-                list.items
-                    .iter()
-                    .map(|i| CosmosParam::new(String::from("@ids"), i.id.clone()))
-                    .collect::<Vec<_>>(),
+            CosmosQuery::new(if let Some(query) = query {
+                query.clone()
+            } else {
+                list.query.into_query()?.to_string()
+            }),
+            View::List(
+                user_id.0.clone(),
+                list.items.into_iter().map(|i| i.id).collect(),
             ),
-            View::User(user_id.0.clone()),
         )
     };
     Ok(client
         .query_documents::<Map<String, Value>>(QueryDocumentsBuilder::new("item", view, query))
         .await
-        .map_err(Error::from)?
+        .map_err(|e| match e {
+            Error::InternalError(InternalError::SqlError(e)) => Error::client_error(e.to_string()),
+            e => e,
+        })?
         .into_iter()
         // Cast hidden to bool
         .map(|mut m| {

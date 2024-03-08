@@ -172,7 +172,7 @@ pub async fn import_playlist(
         iframe: Some(id.raw_id),
         items: crate::convert_items(&items),
         favorite: false,
-        query: String::from("SELECT name, user_score FROM c"),
+        query: String::from("SELECT name, user_score FROM item"),
     };
     Ok((list, items))
 }
@@ -246,7 +246,7 @@ pub async fn import_album(user_id: &UserId, id: String) -> Result<(List, Vec<cra
         iframe: Some(id.raw_id),
         items: crate::convert_items(&items),
         favorite: false,
-        query: String::from("SELECT name, user_score FROM c"),
+        query: String::from("SELECT name, user_score FROM item"),
     };
     Ok((list, items))
 }

@@ -55,15 +55,15 @@ impl Component for Search {
                             All queries should run against the \"c\" table."}</p>
                         <p><strong>{"Example Queries"}</strong></p>
                         <p>{"Get names of songs that have more tournament and match wins than losses:"}</p>
-                        <code>{"SELECT name, user_wins, user_losses FROM c WHERE type='track' AND user_wins > user_losses"}</code>
+                        <code>{"SELECT name, user_wins, user_losses FROM item WHERE type='track' AND user_wins > user_losses"}</code>
                         <p>{"Get names of songs ordered by your scores:"}</p>
-                        <code>{"SELECT name, user_score FROM c WHERE type='track' ORDER BY user_score DESC"}</code>
+                        <code>{"SELECT name, user_score FROM item WHERE type='track' ORDER BY user_score DESC"}</code>
                         <p>{"Count how many songs were performed by each distinct group of artists:"}</p>
-                        <code>{"SELECT artists, COUNT(1) FROM c WHERE type='track' GROUP BY artists"}</code>
+                        <code>{"SELECT artists, COUNT(1) FROM item WHERE type='track' GROUP BY artists"}</code>
                         <p>{"Get songs performed by Troy:"}</p>
-                        <code>{"SELECT name, artists FROM c, json_each(metadata->'artists') WHERE json_each.value='Troy'"}</code>
+                        <code>{"SELECT name, artists FROM item, json_each(metadata->'artists') WHERE json_each.value='Troy'"}</code>
                         <p>{"Get your average score for each group of artists:"}</p>
-                        <code>{"SELECT artists, AVG(user_score) FROM c WHERE type='track' GROUP BY artists"}</code>
+                        <code>{"SELECT artists, AVG(user_score) FROM item WHERE type='track' GROUP BY artists"}</code>
                         <p><strong>{"Fields"}</strong></p>
                         <p>{"The fields you can query on are listed below.
                             Here is the list of fields that are available for all items:"}</p>
@@ -164,7 +164,7 @@ impl Component for SearchPane {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let default_search = Some("SELECT name, user_score FROM c");
+        let default_search = Some("SELECT name, user_score FROM item");
         let onchange = ctx.link().callback(|_| Msg::Select);
         let search = ctx.link().callback(|_| Msg::Fetching);
         let onkeydown = ctx.link().batch_callback(|event: KeyboardEvent| {

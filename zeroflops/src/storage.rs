@@ -131,6 +131,7 @@ impl QueryDocumentsBuilder {
 #[derive(Debug, PartialEq)]
 pub enum View {
     User(String),
+    List(String, Vec<String>),
 }
 
 #[async_trait]
@@ -188,10 +189,10 @@ impl SessionClient for SqlSessionClient {
     {
         let query = builder.query.query;
         if query.contains("_list") {
-            return Err(Error::client_error("Parse error: no such table: _list"));
+            return Err(Error::client_error("no such table: _list"));
         }
         if query.contains("_item") {
-            return Err(Error::client_error("Parse error: no such table: _item"));
+            return Err(Error::client_error("no such table: _item"));
         }
         let params: Vec<_> = builder
             .query
@@ -207,15 +208,40 @@ impl SessionClient for SqlSessionClient {
             .collect();
         let conn = Connection::open(self.path)?;
         // Emulate partitions with views
-        let View::User(user_id) = &builder.partition_key;
-        conn.execute(
-            &format!("CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{user_id}'"),
-            [],
-        )?;
-        conn.execute(
-            &format!("CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{user_id}'"),
-            [],
-        )?;
+        match builder.partition_key {
+            View::User(user_id) => {
+                conn.execute(
+                    &format!(
+                        "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{user_id}'"
+                    ),
+                    [],
+                )?;
+                conn.execute(
+                    &format!(
+                        "CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{user_id}'"
+                    ),
+                    [],
+                )?;
+            }
+            View::List(user_id, ids) => {
+                conn.execute(
+                    &format!(
+                        "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{user_id}'"
+                    ),
+                    [],
+                )?;
+                conn.execute(
+                    &format!(
+                        "CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{user_id}' AND id IN ({})",
+                        ids.iter()
+                            .map(|id| format!("'{id}'"))
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    ),
+                    [],
+                )?;
+            }
+        }
         let mut stmt = conn.prepare(&query)?;
         let query = stmt.query(rusqlite::params_from_iter(params))?;
         serde_rusqlite::from_rows(query)

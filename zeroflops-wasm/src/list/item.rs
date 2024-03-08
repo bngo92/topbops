@@ -70,9 +70,12 @@ impl Component for ListItems {
         if !matches!(list.mode, ListMode::View(_)) {
             ctx.link().send_future(async move {
                 Msg::Load(
-                    crate::query_list(&list, &["id", "rating", "hidden"])
-                        .await
-                        .unwrap(),
+                    crate::query_list(
+                        &list,
+                        Some("SELECT id, rating, hidden FROM item".to_owned()),
+                    )
+                    .await
+                    .unwrap(),
                 )
             });
         }
