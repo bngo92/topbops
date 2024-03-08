@@ -3,7 +3,7 @@ use serde_json::{Map, Value};
 use sqlparser::{
     ast::{
         BinaryOperator, Expr, FunctionArg, FunctionArgExpr, Ident, JsonOperator, Query, SelectItem,
-        SetExpr, Statement, TableFactor,
+        SetExpr, Statement,
     },
     dialect::MySqlDialect,
     parser::Parser,
@@ -190,20 +190,10 @@ fn rewrite_query_impl(
         return Err(Error::client_error("Only SELECT queries are supported"));
     };
 
-    // TODO: do we still need this
     // TODO: support having via subquery
-    let Some(from) = select.from.get_mut(0) else {
+    if select.from.is_empty() {
         return Err(Error::client_error("FROM clause is omitted"));
-    };
-    if let TableFactor::Table { name, alias, .. } = &mut from.relation {
-        if alias.is_some() {
-            return Err(Error::client_error("alias is not supported"));
-        }
-        name.0[0].value = String::from("item");
-    } else {
-        todo!();
-    };
-
+    }
     let column_names = select.projection.iter().map(ToString::to_string).collect();
     for expr in &mut select.projection {
         match expr {
@@ -427,7 +417,7 @@ pub mod test {
             iframe: None,
             items: Vec::new(),
             favorite: false,
-            query: String::from("SELECT name, user_score FROM c"),
+            query: String::from("SELECT name, user_score FROM item"),
         };
         assert_eq!(
             super::get_list_items(
@@ -464,7 +454,7 @@ pub mod test {
                 rank: None,
             }],
             favorite: false,
-            query: String::from("SELECT name, user_score FROM c"),
+            query: String::from("SELECT name, user_score FROM item"),
         };
         let client = TestSessionClient {
             get_mock: Mock::empty(),
@@ -518,7 +508,7 @@ pub mod test {
                 rank: None,
             }],
             favorite: false,
-            query: String::from("SELECT name, user_score FROM c"),
+            query: String::from("SELECT name, user_score FROM item"),
         };
         let client = TestSessionClient {
             get_mock: Mock::empty(),
@@ -553,7 +543,7 @@ pub mod test {
     #[test]
     fn test_select() {
         let (query, column_names) =
-            super::rewrite_query("SELECT name, user_score FROM tracks").unwrap();
+            super::rewrite_query("SELECT name, user_score FROM item").unwrap();
         assert_eq!(query.to_string(), "SELECT name, user_score FROM item");
         assert_eq!(column_names, vec!["name", "user_score"]);
     }
@@ -561,15 +551,15 @@ pub mod test {
     #[test]
     fn test_where() {
         for (input, expected) in [
-            ("SELECT name, user_score FROM tracks WHERE user_score >= 1500",
+            ("SELECT name, user_score FROM item WHERE user_score >= 1500",
              "SELECT name, user_score FROM item WHERE user_score >= 1500"),
-            ("SELECT name, user_score FROM tracks WHERE user_score IN (1500)",
+            ("SELECT name, user_score FROM item WHERE user_score IN (1500)",
              "SELECT name, user_score FROM item WHERE user_score IN (1500)"),
-            ("SELECT name, user_score FROM tracks WHERE album = 'foo'",
+            ("SELECT name, user_score FROM item WHERE album = 'foo'",
              "SELECT name, user_score FROM item WHERE metadata -> 'album' = 'foo'"),
-            ("SELECT name, user_score FROM tracks WHERE album = \"foo\"",
+            ("SELECT name, user_score FROM item WHERE album = \"foo\"",
              "SELECT name, user_score FROM item WHERE metadata -> 'album' = \"foo\""),
-            ("SELECT name, user_score FROM tracks WHERE ARRAY_CONTAINS(artists, \"foo\")",
+            ("SELECT name, user_score FROM item WHERE ARRAY_CONTAINS(artists, \"foo\")",
              "SELECT name, user_score FROM item WHERE ARRAY_CONTAINS(metadata -> 'artists', \"foo\")"),
         ] {
             let (query, column_names) = super::rewrite_query(input).unwrap();
@@ -581,9 +571,9 @@ pub mod test {
     #[test]
     fn test_id_filter() {
         for (input, expected) in [
-            ("SELECT name, user_score FROM tracks WHERE user_score >= 1500",
+            ("SELECT name, user_score FROM item WHERE user_score >= 1500",
              "SELECT name, user_score FROM item WHERE id IN (\"1\", \"2\", \"3\") AND user_score >= 1500"),
-            ("SELECT name, user_score FROM tracks WHERE user_score IN (1500)",
+            ("SELECT name, user_score FROM item WHERE user_score IN (1500)",
              "SELECT name, user_score FROM item WHERE id IN (\"1\", \"2\", \"3\") AND user_score IN (1500)"),
         ] {
             let (query, column_names) = rewrite_query_with_id_filter(input, &["\"1\"".into(), "\"2\"".into(), "\"3\"".into()]).unwrap();
@@ -595,7 +585,7 @@ pub mod test {
     #[test]
     fn test_group_by() {
         let (query, column_names) =
-            super::rewrite_query("SELECT artists, AVG(user_score) FROM tracks GROUP BY artists")
+            super::rewrite_query("SELECT artists, AVG(user_score) FROM item GROUP BY artists")
                 .unwrap();
         assert_eq!(query.to_string(), "SELECT metadata -> 'artists', AVG(user_score) FROM item GROUP BY metadata -> 'artists'");
         assert_eq!(column_names, vec!["artists", "AVG(user_score)"]);
@@ -604,8 +594,7 @@ pub mod test {
     #[test]
     fn test_order_by() {
         let (query, column_names) =
-            super::rewrite_query("SELECT name, user_score FROM tracks ORDER BY user_score")
-                .unwrap();
+            super::rewrite_query("SELECT name, user_score FROM item ORDER BY user_score").unwrap();
         assert_eq!(
             query.to_string(),
             "SELECT name, user_score FROM item ORDER BY user_score"
@@ -615,7 +604,7 @@ pub mod test {
 
     #[test]
     fn test_count() {
-        let (query, column_names) = super::rewrite_query("SELECT COUNT(1) FROM tracks").unwrap();
+        let (query, column_names) = super::rewrite_query("SELECT COUNT(1) FROM item").unwrap();
         assert_eq!(query.to_string(), "SELECT COUNT(1) FROM item");
         assert_eq!(column_names, vec!["COUNT(1)"]);
     }
@@ -623,8 +612,7 @@ pub mod test {
     #[test]
     fn test_hidden_false() {
         let (query, column_names) =
-            super::rewrite_query("SELECT name, user_score FROM tracks WHERE hidden = false")
-                .unwrap();
+            super::rewrite_query("SELECT name, user_score FROM item WHERE hidden = false").unwrap();
         assert_eq!(
             query.to_string(),
             "SELECT name, user_score FROM item WHERE hidden = false"
@@ -635,8 +623,7 @@ pub mod test {
     #[test]
     fn test_hidden_true() {
         let (query, column_names) =
-            super::rewrite_query("SELECT name, user_score FROM tracks WHERE hidden = true")
-                .unwrap();
+            super::rewrite_query("SELECT name, user_score FROM item WHERE hidden = true").unwrap();
         assert_eq!(
             query.to_string(),
             "SELECT name, user_score FROM item WHERE hidden = true"
@@ -653,15 +640,15 @@ pub mod test {
             ("SELECT name", "FROM clause is omitted"),
             ("SELECT name FROM", "Expected identifier, found: EOF"),
             (
-                "SELECT name FROM tracks WHERE",
+                "SELECT name FROM item WHERE",
                 "Expected an expression:, found: EOF",
             ),
             (
-                "SELECT name, user_score FROM tracks WHERE user_score IN (",
+                "SELECT name, user_score FROM item WHERE user_score IN (",
                 "Expected an expression:, found: EOF",
             ),
             (
-                "SELECT name, user_score FROM tracks WHERE user_score IN (1500",
+                "SELECT name, user_score FROM item WHERE user_score IN (1500",
                 "Expected ), found: EOF",
             ),
         ] {
