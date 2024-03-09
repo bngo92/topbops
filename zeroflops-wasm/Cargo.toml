@@ -11,6 +11,7 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 arrow = "50.0.0"
+getrandom = { version = "0.2.12", features = ["js"] }
 js-sys = "0.3.64"
 plotters = { git = "https://github.com/plotters-rs/plotters", default-features = false, features = ["histogram", "line_series"] }
 plotters-canvas = { git = "https://github.com/AE1020/plotters-canvas", rev = "aacc00b" }

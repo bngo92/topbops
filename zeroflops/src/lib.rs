@@ -262,6 +262,7 @@ pub enum InternalError {
     SqlError(rusqlite::Error),
     #[cfg(feature = "full")]
     SerdeError(serde_rusqlite::Error),
+    #[cfg(feature = "full")]
     ArrowError(arrow2::error::Error),
     #[cfg(feature = "full")]
     SerdeArrowError(serde_arrow::Error),
