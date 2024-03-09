@@ -263,6 +263,7 @@ pub enum InternalError {
     #[cfg(feature = "full")]
     SerdeError(serde_rusqlite::Error),
     ArrowError(arrow2::error::Error),
+    #[cfg(feature = "full")]
     SerdeArrowError(serde_arrow::Error),
     Error(String),
 }
@@ -293,6 +294,7 @@ impl From<std::io::Error> for Error {
     }
 }
 
+#[cfg(feature = "full")]
 impl From<sqlparser::parser::ParserError> for Error {
     fn from(e: sqlparser::parser::ParserError) -> Error {
         Error::ClientError(match e {
