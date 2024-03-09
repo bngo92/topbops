@@ -8,22 +8,23 @@ use azure_data_cosmos::{
 use rusqlite::{Connection, OptionalExtension, ToSql};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
+use sqlparser::ast::Query;
 
 #[derive(Debug, PartialEq)]
 pub struct CosmosQuery {
-    query: String,
+    pub query: Query,
     parameters: Vec<CosmosParam>,
 }
 
 impl CosmosQuery {
-    pub fn new(query: String) -> CosmosQuery {
+    pub fn new(query: Query) -> CosmosQuery {
         CosmosQuery {
             query,
             parameters: Vec::new(),
         }
     }
 
-    pub fn with_params<T: Into<Vec<CosmosParam>>>(query: String, parameters: T) -> CosmosQuery {
+    pub fn with_params<T: Into<Vec<CosmosParam>>>(query: Query, parameters: T) -> CosmosQuery {
         CosmosQuery {
             query,
             parameters: parameters.into(),
@@ -187,7 +188,7 @@ impl SessionClient for SqlSessionClient {
     where
         T: DeserializeOwned + Send + Sync,
     {
-        let query = builder.query.query;
+        let query = builder.query.query.to_string();
         if query.contains("_list") {
             return Err(Error::client_error("no such table: _list"));
         }

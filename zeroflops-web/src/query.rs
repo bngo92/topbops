@@ -36,7 +36,7 @@ pub async fn get_view_items(
             .query_documents::<Map<String, Value>>(QueryDocumentsBuilder::new(
                 "item",
                 View::User(user_id.0.clone()),
-                CosmosQuery::new(query.to_string()),
+                CosmosQuery::new(query),
             ))
             .await?
     };
@@ -64,7 +64,7 @@ pub async fn get_list_items(
             .query_documents::<Map<String, Value>>(QueryDocumentsBuilder::new(
                 "item",
                 View::User(user_id.0.clone()),
-                CosmosQuery::new(query.to_string()),
+                CosmosQuery::new(query.clone()),
             ))
             .await
             .map_err(Error::from)?
@@ -103,7 +103,7 @@ pub async fn query_list(
     let (query, view) = if let ListMode::View(_) = &list.mode {
         let query = list.query.into_query()?;
         (
-            CosmosQuery::with_params(rewrite_query(query)?.0.to_string(), Vec::new()),
+            CosmosQuery::with_params(rewrite_query(query)?.0, Vec::new()),
             View::User(user_id.0.clone()),
         )
     } else if list.items.is_empty() {
@@ -111,9 +111,9 @@ pub async fn query_list(
     } else {
         (
             CosmosQuery::new(if let Some(query) = query {
-                query.clone()
+                query.into_query()?
             } else {
-                list.query.into_query()?.to_string()
+                list.query.into_query()?
             }),
             View::List(
                 user_id.0.clone(),
@@ -312,8 +312,8 @@ pub mod test {
     use std::sync::{Arc, Mutex};
     use zeroflops::{
         storage::{
-            CosmosQuery, CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter,
-            GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient, View,
+            CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter, GetDocumentBuilder,
+            QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
         },
         Error, ItemMetadata, Items, List, ListMode,
     };
@@ -478,14 +478,11 @@ pub mod test {
             }
         );
         assert_eq!(
-            *client.query_mock.call_args.lock().unwrap(),
-            [QueryDocumentsBuilder::new(
-                "item",
-                View::User(String::new()),
-                CosmosQuery::new(
-                    "SELECT name, user_score, id FROM item WHERE id IN (\"id\")".to_owned()
-                )
-            )]
+            client.query_mock.call_args.lock().unwrap()[0]
+                .query
+                .query
+                .to_string(),
+            "SELECT name, user_score, id FROM item WHERE id IN (\"id\")"
         );
     }
 
@@ -522,14 +519,11 @@ pub mod test {
             Items { items: Vec::new() }
         );
         assert_eq!(
-            *client.query_mock.call_args.lock().unwrap(),
-            [QueryDocumentsBuilder::new(
-                "item",
-                View::User(String::new()),
-                CosmosQuery::new(
-                    "SELECT name, user_score, id FROM item WHERE id IN (\"\")".to_owned()
-                )
-            )]
+            client.query_mock.call_args.lock().unwrap()[0]
+                .query
+                .query
+                .to_string(),
+            "SELECT name, user_score, id FROM item WHERE id IN (\"\")"
         );
     }
 

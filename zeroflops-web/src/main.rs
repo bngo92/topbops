@@ -37,7 +37,7 @@ use zeroflops::{
     Error, Id, Items, List, ListMode, Lists, RawList,
 };
 use zeroflops_web::{
-    query,
+    query::{self, IntoQuery},
     source::{self, spotify},
     user::{self, Auth, GoogleClient, SqlStore, User},
     Item, RawItem, UserId,
@@ -170,7 +170,7 @@ async fn get_lists(
             .query_documents::<RawList>(QueryDocumentsBuilder::new(
                 "list",
                 View::User(user_id.0.clone()),
-                CosmosQuery::new(query.to_owned()),
+                CosmosQuery::new(query.into_query()?),
             ))
             .await
             .map_err(Error::from)?
@@ -327,7 +327,7 @@ async fn find_items(
         .query_documents(QueryDocumentsBuilder::new(
             "item",
             View::User(user_id.0.clone()),
-            CosmosQuery::new(query.to_string()),
+            CosmosQuery::new(query.clone()),
         ))
         .await
         .map_err(|e| {

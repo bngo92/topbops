@@ -1,4 +1,4 @@
-use crate::UserId;
+use crate::{query::IntoQuery, UserId};
 use futures::{StreamExt, TryStreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -528,7 +528,7 @@ pub async fn get_recent_tracks(
             "item",
             View::User(user_id.0.clone()),
             CosmosQuery::with_params(
-                query,
+                query.into_query()?,
                 ids.into_iter()
                     .map(|i| CosmosParam::new(String::from("@ids"), i))
                     .collect::<Vec<_>>(),
