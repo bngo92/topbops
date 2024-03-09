@@ -13,6 +13,9 @@ pub mod spotify;
 #[cfg(feature = "full")]
 pub mod storage;
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct UserId(pub String);
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Lists {
     pub lists: Vec<List>,

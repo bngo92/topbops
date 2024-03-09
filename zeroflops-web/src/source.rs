@@ -1,4 +1,4 @@
-use crate::{RawItem, UserId};
+use crate::RawItem;
 use futures::{stream::FuturesUnordered, StreamExt, TryStreamExt};
 use serde_json::{Map, Value};
 use zeroflops::{
@@ -6,7 +6,7 @@ use zeroflops::{
         CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder, ReplaceDocumentBuilder,
         SessionClient,
     },
-    Error, ItemMetadata, List, RawList, Source, SourceType, Spotify,
+    Error, ItemMetadata, List, RawList, Source, SourceType, Spotify, UserId,
 };
 
 pub mod setlist;
@@ -61,7 +61,7 @@ pub async fn update_list(
         .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
             collection_name: "list",
             document_name: list.id.clone(),
-            partition_key: user_id.0.clone(),
+            partition_key: user_id.clone(),
             document: RawList::from(list),
         }))
         .await
@@ -148,7 +148,7 @@ pub async fn get_list(
         .get_document::<RawList>(GetDocumentBuilder::new(
             "list",
             id.to_owned(),
-            user_id.0.clone(),
+            user_id.clone(),
         ))
         .await?
     {
@@ -182,13 +182,10 @@ pub async fn create_items(
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        query::test::{Mock, TestSessionClient},
-        UserId,
-    };
+    use crate::query::test::{Mock, TestSessionClient};
     use zeroflops::{
         storage::{DocumentWriter, ReplaceDocumentBuilder},
-        List, ListMode, Source, SourceType,
+        List, ListMode, Source, SourceType, UserId,
     };
 
     #[tokio::test]
@@ -222,7 +219,7 @@ mod test {
             vec![DocumentWriter::Replace(ReplaceDocumentBuilder {
                 collection_name: "list",
                 document_name: "".to_owned(),
-                partition_key: "".to_owned(),
+                partition_key: UserId("".to_owned()),
                 document: r#"{"id":"","user_id":"","mode":"{\"User\":null}","name":"New List","sources":"[]","iframe":null,"items":"[]","favorite":false,"query":"SELECT name, user_score FROM c"}"#.to_owned(),
             })]
         );
@@ -263,7 +260,7 @@ mod test {
             vec![DocumentWriter::Replace(ReplaceDocumentBuilder {
                 collection_name: "list",
                 document_name: "".to_owned(),
-                partition_key: "".to_owned(),
+                partition_key: UserId("".to_owned()),
                 document: r#"{"id":"","user_id":"","mode":"{\"User\":null}","name":"New List","sources":"[{\"source_type\":{\"ListItems\":\"\"},\"name\":\"source\"}]","iframe":null,"items":"[]","favorite":false,"query":"SELECT name, user_score FROM c"}"#.to_owned(),
             })]
         );
@@ -304,7 +301,7 @@ mod test {
             vec![DocumentWriter::Replace(ReplaceDocumentBuilder {
                 collection_name: "list",
                 document_name: "".to_owned(),
-                partition_key: "".to_owned(),
+                partition_key: UserId("".to_owned()),
                 document: r#"{"id":"","user_id":"","mode":"{\"User\":null}","name":"New List","sources":"[{\"source_type\":{\"ListItems\":\"\"},\"name\":\"source\"}]","iframe":null,"items":"[{\"id\":\"\",\"name\":\"item\",\"iframe\":null,\"score\":0,\"wins\":0,\"losses\":0,\"rank\":null}]","favorite":false,"query":"SELECT name, user_score FROM c"}"#.to_owned(),
             })]
         );

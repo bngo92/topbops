@@ -1,4 +1,4 @@
-use crate::{UserId, ITEM_FIELDS};
+use crate::ITEM_FIELDS;
 use serde_json::{Map, Value};
 use sqlparser::{
     ast::{
@@ -11,7 +11,7 @@ use sqlparser::{
 use std::collections::{HashMap, HashSet, VecDeque};
 use zeroflops::{
     storage::{CosmosQuery, QueryDocumentsBuilder, SessionClient, SqlSessionClient, View},
-    Error, InternalError, ItemMetadata, Items, List, ListMode,
+    Error, InternalError, ItemMetadata, Items, List, ListMode, UserId,
 };
 
 pub async fn get_view_items(
@@ -35,7 +35,7 @@ pub async fn get_view_items(
         client
             .query_documents::<Map<String, Value>>(QueryDocumentsBuilder::new(
                 "item",
-                View::User(user_id.0.clone()),
+                View::User(user_id.clone()),
                 CosmosQuery::new(query),
             ))
             .await?
@@ -63,7 +63,7 @@ pub async fn get_list_items(
         let mut items: Vec<_> = client
             .query_documents::<Map<String, Value>>(QueryDocumentsBuilder::new(
                 "item",
-                View::User(user_id.0.clone()),
+                View::User(user_id.clone()),
                 CosmosQuery::new(query.clone()),
             ))
             .await
@@ -104,7 +104,7 @@ pub async fn query_list(
         let query = list.query.into_query()?;
         (
             CosmosQuery::with_params(rewrite_query(query)?.0, Vec::new()),
-            View::User(user_id.0.clone()),
+            View::User(user_id.clone()),
         )
     } else if list.items.is_empty() {
         return Ok(Vec::new());
@@ -116,7 +116,7 @@ pub async fn query_list(
                 list.query.into_query()?
             }),
             View::List(
-                user_id.0.clone(),
+                user_id.clone(),
                 list.items.into_iter().map(|i| i.id).collect(),
             ),
         )
@@ -305,7 +305,6 @@ fn rewrite_identifier(id: Ident) -> Expr {
 #[cfg(test)]
 pub mod test {
     use super::IntoQuery;
-    use crate::UserId;
     use async_trait::async_trait;
     use serde::{de::DeserializeOwned, Serialize};
     use sqlparser::ast::Query;
@@ -315,7 +314,7 @@ pub mod test {
             CreateDocumentBuilder, DeleteDocumentBuilder, DocumentWriter, GetDocumentBuilder,
             QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
         },
-        Error, ItemMetadata, Items, List, ListMode,
+        Error, ItemMetadata, Items, List, ListMode, UserId,
     };
 
     pub struct Mock<T, U> {

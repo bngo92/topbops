@@ -1,9 +1,8 @@
-use crate::UserId;
 use futures::{StreamExt, TryStreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use time::Date;
-use zeroflops::{Error, Id, Source, SourceType};
+use zeroflops::{Error, Id, Source, SourceType, UserId};
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

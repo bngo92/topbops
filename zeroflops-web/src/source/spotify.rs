@@ -1,4 +1,4 @@
-use crate::{query::IntoQuery, UserId};
+use crate::query::IntoQuery;
 use futures::{StreamExt, TryStreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,7 @@ use zeroflops::{
     storage::{
         CosmosParam, CosmosQuery, QueryDocumentsBuilder, SessionClient, SqlSessionClient, View,
     },
-    Error, Id, List, ListMode, Source, SourceType, Spotify,
+    Error, Id, List, ListMode, Source, SourceType, Spotify, UserId,
 };
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -526,7 +526,7 @@ pub async fn get_recent_tracks(
     let items = cosmos_client
         .query_documents(QueryDocumentsBuilder::new(
             "item",
-            View::User(user_id.0.clone()),
+            View::User(user_id.clone()),
             CosmosQuery::with_params(
                 query.into_query()?,
                 ids.into_iter()

@@ -34,13 +34,13 @@ use zeroflops::{
         GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
         SqlSessionClient, View,
     },
-    Error, Id, Items, List, ListMode, Lists, RawList,
+    Error, Id, Items, List, ListMode, Lists, RawList, UserId,
 };
 use zeroflops_web::{
     query::{self, IntoQuery},
     source::{self, spotify},
     user::{self, Auth, GoogleClient, SqlStore, User},
-    Item, RawItem, UserId,
+    Item, RawItem,
 };
 
 type AuthContext = axum_login::AuthSession<SqlStore>;
@@ -169,7 +169,7 @@ async fn get_lists(
             .sql_client
             .query_documents::<RawList>(QueryDocumentsBuilder::new(
                 "list",
-                View::User(user_id.0.clone()),
+                View::User(user_id.clone()),
                 CosmosQuery::new(query.into_query()?),
             ))
             .await
@@ -304,7 +304,7 @@ async fn delete_list(
         .write_document(DocumentWriter::<RawList>::Delete(DeleteDocumentBuilder {
             collection_name: "list",
             document_name: id,
-            partition_key: user_id.0,
+            partition_key: user_id,
         }))
         .await
         .map_err(Error::from)?;
@@ -326,7 +326,7 @@ async fn find_items(
         .sql_client
         .query_documents(QueryDocumentsBuilder::new(
             "item",
-            View::User(user_id.0.clone()),
+            View::User(user_id.clone()),
             CosmosQuery::new(query.clone()),
         ))
         .await
@@ -421,19 +421,19 @@ async fn handle_stats_update(
         client.write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
             collection_name: "list",
             document_name: id.to_owned(),
-            partition_key: user_id.0.clone(),
+            partition_key: user_id.clone(),
             document: RawList::from(list),
         })),
         client.write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
             collection_name: "item",
             document_name: win_item.id.clone(),
-            partition_key: user_id.0.clone(),
+            partition_key: user_id.clone(),
             document: RawItem::from(win_item),
         })),
         client.write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
             collection_name: "item",
             document_name: lose_item.id.clone(),
-            partition_key: user_id.0.clone(),
+            partition_key: user_id.clone(),
             document: RawItem::from(lose_item),
         })),
     )
@@ -543,7 +543,7 @@ async fn get_item_doc(
         .get_document::<RawItem>(GetDocumentBuilder::new(
             "item",
             id.to_owned(),
-            user_id.0.clone(),
+            user_id.clone(),
         ))
         .await?
     {
@@ -608,7 +608,7 @@ async fn update_items(
                 .write_document(DocumentWriter::Replace(ReplaceDocumentBuilder {
                     collection_name: "item",
                     document_name: id,
-                    partition_key: user_id.0.clone(),
+                    partition_key: user_id.clone(),
                     document: RawItem::from(item),
                 }))
                 .await
@@ -637,7 +637,7 @@ async fn delete_items(
                 .write_document(DocumentWriter::<RawItem>::Delete(DeleteDocumentBuilder {
                     collection_name: "item",
                     document_name: id.to_owned(),
-                    partition_key: user_id.0.clone(),
+                    partition_key: user_id.clone(),
                 }))
                 .await
         })

@@ -1,4 +1,4 @@
-use crate::Error;
+use crate::{Error, UserId};
 use async_trait::async_trait;
 #[cfg(feature = "azure")]
 use azure_data_cosmos::{
@@ -62,14 +62,14 @@ impl CosmosParam {
 pub struct GetDocumentBuilder {
     pub collection_name: &'static str,
     pub document_name: String,
-    pub partition_key: String,
+    pub partition_key: UserId,
 }
 
 impl GetDocumentBuilder {
     pub fn new(
         collection_name: &'static str,
         document_name: String,
-        partition_key: String,
+        partition_key: UserId,
     ) -> GetDocumentBuilder {
         GetDocumentBuilder {
             collection_name,
@@ -131,8 +131,8 @@ impl QueryDocumentsBuilder {
 
 #[derive(Debug, PartialEq)]
 pub enum View {
-    User(String),
-    List(String, Vec<String>),
+    User(UserId),
+    List(UserId, Vec<String>),
 }
 
 #[async_trait]
@@ -165,11 +165,17 @@ impl SessionClient for SqlSessionClient {
         let conn = Connection::open(self.path)?;
         let user_id = builder.partition_key;
         conn.execute(
-            &format!("CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{user_id}'"),
+            &format!(
+                "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{}'",
+                user_id.0
+            ),
             [],
         )?;
         conn.execute(
-            &format!("CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{user_id}'"),
+            &format!(
+                "CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{}'",
+                user_id.0
+            ),
             [],
         )?;
         let mut stmt = conn.prepare(&format!(
@@ -213,13 +219,15 @@ impl SessionClient for SqlSessionClient {
             View::User(user_id) => {
                 conn.execute(
                     &format!(
-                        "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{user_id}'"
+                        "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{}'",
+                        user_id.0
                     ),
                     [],
                 )?;
                 conn.execute(
                     &format!(
-                        "CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{user_id}'"
+                        "CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{}'",
+                        user_id.0
                     ),
                     [],
                 )?;
@@ -227,13 +235,15 @@ impl SessionClient for SqlSessionClient {
             View::List(user_id, ids) => {
                 conn.execute(
                     &format!(
-                        "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{user_id}'"
+                        "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{}'",
+                        user_id.0
                     ),
                     [],
                 )?;
                 conn.execute(
                     &format!(
-                        "CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{user_id}' AND id IN ({})",
+                        "CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{}' AND id IN ({})",
+                        user_id.0,
                         ids.iter()
                             .map(|id| format!("'{id}'"))
                             .collect::<Vec<_>>()
@@ -326,7 +336,7 @@ pub struct CreateDocumentBuilder<T> {
 pub struct ReplaceDocumentBuilder<T> {
     pub collection_name: &'static str,
     pub document_name: String,
-    pub partition_key: String,
+    pub partition_key: UserId,
     pub document: T,
 }
 
@@ -334,5 +344,5 @@ pub struct ReplaceDocumentBuilder<T> {
 pub struct DeleteDocumentBuilder {
     pub collection_name: &'static str,
     pub document_name: String,
-    pub partition_key: String,
+    pub partition_key: UserId,
 }

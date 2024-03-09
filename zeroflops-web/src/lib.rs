@@ -8,8 +8,6 @@ pub mod query;
 pub mod source;
 pub mod user;
 
-#[derive(Clone)]
-pub struct UserId(pub String);
 pub const ITEM_FIELDS: [&str; 9] = [
     "id",
     "type",
