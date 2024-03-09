@@ -17,7 +17,7 @@ pub mod storage;
 #[derive(Clone, Debug, PartialEq)]
 pub struct UserId(pub String);
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Lists {
     pub lists: Vec<List>,
 }
