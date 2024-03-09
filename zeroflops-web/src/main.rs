@@ -1,8 +1,8 @@
 use ::spotify::SpotifyClient;
-use arrow2::{
-    chunk::Chunk,
+use arrow::{
+    array::RecordBatch,
     datatypes::{Field, Schema},
-    io::ipc::write::{FileWriter, WriteOptions},
+    ipc::writer::FileWriter,
 };
 use async_trait::async_trait;
 use axum::{
@@ -238,7 +238,7 @@ fn serialize_arrow(mut records: Vec<Map<String, Value>>) -> Result<Vec<u8>, Erro
             .allow_null_fields(true)
             .coerce_numbers(true),
     ) {
-        Ok(fields) => fields,
+        Ok(fields) => fields.to_vec(),
         Err(e) => {
             if e.message() == "No records found to determine schema" {
                 return Ok(Vec::new());
@@ -246,14 +246,16 @@ fn serialize_arrow(mut records: Vec<Map<String, Value>>) -> Result<Vec<u8>, Erro
             return Err(Error::from(e));
         }
     };
-    let mut buf = Vec::new();
-    let arrays = serde_arrow::to_arrow2(&fields, &records)?;
-    let options = WriteOptions { compression: None };
-    let mut writer = FileWriter::new(&mut buf, Schema::from(fields), None, options);
-    writer.start()?;
-    writer.write(&Chunk::new(arrays), None)?;
+    let buf = Vec::new();
+    let schema = Schema::new(fields.clone());
+    let arrays = RecordBatch::try_new(
+        Arc::new(schema.clone()),
+        serde_arrow::to_arrow(&fields, &records)?,
+    )?;
+    let mut writer = FileWriter::try_new(buf, &schema)?;
+    writer.write(&arrays)?;
     writer.finish()?;
-    Ok(buf)
+    writer.into_inner().map_err(Error::from)
 }
 
 async fn create_list(

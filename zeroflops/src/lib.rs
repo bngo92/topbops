@@ -1,3 +1,4 @@
+use arrow::error::ArrowError;
 #[cfg(feature = "full")]
 use axum::{
     body::Body,
@@ -266,7 +267,7 @@ pub enum InternalError {
     #[cfg(feature = "full")]
     SerdeError(serde_rusqlite::Error),
     #[cfg(feature = "full")]
-    ArrowError(arrow2::error::Error),
+    ArrowError(ArrowError),
     #[cfg(feature = "full")]
     SerdeArrowError(serde_arrow::Error),
     Error(String),
@@ -339,8 +340,8 @@ impl From<serde_rusqlite::Error> for Error {
 }
 
 #[cfg(feature = "full")]
-impl From<arrow2::error::Error> for Error {
-    fn from(e: arrow2::error::Error) -> Error {
+impl From<ArrowError> for Error {
+    fn from(e: ArrowError) -> Error {
         Error::InternalError(InternalError::ArrowError(e))
     }
 }
