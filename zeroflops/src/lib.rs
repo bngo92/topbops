@@ -1,3 +1,4 @@
+#[cfg(feature = "full")]
 use arrow_schema::ArrowError;
 #[cfg(feature = "full")]
 use axum::{

@@ -7,7 +7,7 @@ use arrow::{array::AsArray, datatypes::UInt64Type};
 use js_sys::Error;
 use serde_json::Value;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap},
     rc::Rc,
 };
 use wasm_bindgen::{JsCast, JsValue};
@@ -282,34 +282,20 @@ impl Component for ListItems {
         match msg {
             Msg::None => false,
             Msg::Load(query) => {
-                let Some(mut query) = query else {
+                let Some(query) = query else {
                     return false;
                 };
-                let ids: HashSet<_> = self.state.iter().map(|i| i.item.id.as_str()).collect();
-                let index = query
-                    .column("id")
-                    .unwrap()
-                    .as_string::<i64>()
+                let index: HashMap<_, _> = self
+                    .state
                     .iter()
-                    .map(|id| ids.contains(&id.unwrap()))
+                    .enumerate()
+                    .map(|(i, item)| (item.item.id.as_str().to_owned(), i))
                     .collect();
-                query.remove(index);
-                let df = query;
-                // polars requires that at least one row is not null
-                let ratings = df
-                    .column("rating")
-                    .unwrap()
-                    .as_primitive_opt::<UInt64Type>();
-                let hidden = df.column("hidden").unwrap().as_boolean();
-                if let Some(ratings) = ratings {
-                    for i in 0..df.arrays[0].len() {
-                        self.state[i].rating_hidden =
-                            Some((ratings.values().get(i).copied(), hidden.value(i)));
-                    }
-                } else {
-                    for i in 0..df.arrays[0].len() {
-                        self.state[i].rating_hidden = Some((None, hidden.value(i)));
-                    }
+                let ids = query.column("id").unwrap().as_string::<i64>();
+                let ratings = query.column("rating").unwrap().as_primitive::<UInt64Type>();
+                let hidden = query.column("hidden").unwrap().as_boolean();
+                for ((id, rating), hidden) in ids.iter().zip(ratings.iter()).zip(hidden.iter()) {
+                    self.state[index[id.unwrap()]].rating_hidden = Some((rating, hidden.unwrap()));
                 }
                 true
             }
