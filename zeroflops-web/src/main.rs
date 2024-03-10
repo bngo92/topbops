@@ -335,7 +335,9 @@ async fn find_items(
         .map_err(|e| {
             eprintln!("{}: {:?}", query, e);
             match e {
-                Error::InternalError(InternalError::SqlError(e)) => Error::client_error(e.to_string()),
+                Error::InternalError(InternalError::SqlError(e)) => {
+                    Error::client_error(e.to_string())
+                }
                 e => e,
             }
         })?;

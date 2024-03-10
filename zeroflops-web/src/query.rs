@@ -2,8 +2,8 @@ use crate::ITEM_FIELDS;
 use serde_json::{Map, Value};
 use sqlparser::{
     ast::{
-        BinaryOperator, Expr, FunctionArg, FunctionArgExpr, Ident, JsonOperator, Query, SelectItem,
-        SetExpr, Statement,
+        Expr, FunctionArg, FunctionArgExpr, Ident, JsonOperator, Query, SelectItem, SetExpr,
+        Statement,
     },
     dialect::MySqlDialect,
     parser::Parser,
@@ -51,6 +51,7 @@ pub async fn get_view_items(
     }))
 }
 
+/// Filter list items with the query set for the list
 pub async fn get_list_items(
     client: &impl SessionClient,
     user_id: &UserId,
@@ -59,11 +60,20 @@ pub async fn get_list_items(
     if list.items.is_empty() {
         Ok(Items { items: Vec::new() })
     } else {
-        let (query, map, ids) = rewrite_list_query(&list)?;
+        if let ListMode::View(_) = list.mode {
+            return Err(Error::client_error("unimplemented"));
+        }
+        let mut query = list.query.into_query()?;
+        if let SetExpr::Select(ref mut select) = *query.body {
+            select.projection = vec![SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("id")))];
+        }
         let mut items: Vec<_> = client
             .query_documents::<Map<String, Value>>(QueryDocumentsBuilder::new(
                 "item",
-                View::User(user_id.clone()),
+                View::List(
+                    user_id.clone(),
+                    list.items.iter().map(|i| i.id.clone()).collect(),
+                ),
                 CosmosQuery::new(query.clone()),
             ))
             .await
@@ -74,11 +84,22 @@ pub async fn get_list_items(
         // Use list item order if an ordering wasn't provided
         if query.order_by.is_empty() {
             let item_metadata: HashSet<_> = items.into_iter().collect();
-            items = ids
-                .into_iter()
-                .filter(|id| item_metadata.contains(id))
+            items = list
+                .items
+                .iter()
+                .filter_map(|i| {
+                    if item_metadata.contains(&i.id) {
+                        Some(i.id.to_owned())
+                    } else {
+                        None
+                    }
+                })
                 .collect();
         };
+        let mut map = HashMap::new();
+        for i in &list.items {
+            map.insert(i.id.clone(), i);
+        }
         Ok(Items {
             items: items
                 .into_iter()
@@ -139,53 +160,11 @@ pub async fn query_list(
         .collect())
 }
 
-fn rewrite_list_query(
-    list: &List,
-) -> Result<(Query, HashMap<String, &ItemMetadata>, Vec<String>), Error> {
-    let mut map = HashMap::new();
-    // TODO: update AST directly
-    let ids = list
-        .items
-        .iter()
-        .map(|i| format!("\"{}\"", i.id))
-        .collect::<Vec<_>>();
-    let (query, _) = if let ListMode::View(_) = list.mode {
-        rewrite_query(&list.query)?
-    } else {
-        let mut query = list.query.clone();
-        let i = query.find("FROM").unwrap();
-        query.insert_str(i - 1, ", id ");
-        for i in &list.items {
-            map.insert(i.id.clone(), i);
-        }
-        rewrite_query_impl(query.into_query()?, Some(id_filter(&ids)))?
-    };
-    Ok((
-        query,
-        map,
-        list.items.iter().map(|i| i.id.to_owned()).collect(),
-    ))
-}
-
-fn id_filter(ids: &[String]) -> Expr {
-    Expr::InList {
-        expr: Box::new(Expr::CompoundIdentifier(vec![Ident::new("id")])),
-        list: ids
-            .iter()
-            .map(|id| Expr::Identifier(Ident::new(id)))
-            .collect(),
-        negated: false,
-    }
-}
-
 pub fn rewrite_query(query: impl IntoQuery) -> Result<(Query, Vec<String>), Error> {
-    rewrite_query_impl(query.into_query()?, None)
+    rewrite_query_impl(query.into_query()?)
 }
 
-fn rewrite_query_impl(
-    mut query: Query,
-    filter: Option<Expr>,
-) -> Result<(Query, Vec<String>), Error> {
+fn rewrite_query_impl(mut query: Query) -> Result<(Query, Vec<String>), Error> {
     let SetExpr::Select(select) = &mut *query.body else {
         return Err(Error::client_error("Only SELECT queries are supported"));
     };
@@ -211,16 +190,7 @@ fn rewrite_query_impl(
     if let Some(selection) = &mut sanitized_select {
         rewrite_expr(selection);
     }
-    select.selection = match (filter, sanitized_select) {
-        (None, None) => None,
-        (None, Some(sanitized_select)) => Some(sanitized_select),
-        (Some(filter), None) => Some(filter),
-        (Some(filter), Some(sanitized_select)) => Some(Expr::BinaryOp {
-            left: Box::new(filter),
-            op: BinaryOperator::And,
-            right: Box::new(sanitized_select),
-        }),
-    };
+    select.selection = sanitized_select;
     for expr in &mut select.group_by {
         rewrite_expr(expr);
     }
@@ -304,10 +274,8 @@ fn rewrite_identifier(id: Ident) -> Expr {
 
 #[cfg(test)]
 pub mod test {
-    use super::IntoQuery;
     use async_trait::async_trait;
     use serde::{de::DeserializeOwned, Serialize};
-    use sqlparser::ast::Query;
     use std::sync::{Arc, Mutex};
     use zeroflops::{
         storage::{
@@ -481,7 +449,7 @@ pub mod test {
                 .query
                 .query
                 .to_string(),
-            "SELECT name, user_score, id FROM item WHERE id IN (\"id\")"
+            "SELECT id FROM item"
         );
     }
 
@@ -522,15 +490,8 @@ pub mod test {
                 .query
                 .query
                 .to_string(),
-            "SELECT name, user_score, id FROM item WHERE id IN (\"\")"
+            "SELECT id FROM item"
         );
-    }
-
-    fn rewrite_query_with_id_filter(
-        query: &str,
-        ids: &[String],
-    ) -> Result<(Query, Vec<String>), Error> {
-        super::rewrite_query_impl(query.into_query()?, Some(super::id_filter(ids)))
     }
 
     #[test]
@@ -556,20 +517,6 @@ pub mod test {
              "SELECT name, user_score FROM item WHERE ARRAY_CONTAINS(metadata -> 'artists', \"foo\")"),
         ] {
             let (query, column_names) = super::rewrite_query(input).unwrap();
-            assert_eq!(query.to_string(), expected);
-            assert_eq!(column_names, vec!["name", "user_score"]);
-        }
-    }
-
-    #[test]
-    fn test_id_filter() {
-        for (input, expected) in [
-            ("SELECT name, user_score FROM item WHERE user_score >= 1500",
-             "SELECT name, user_score FROM item WHERE id IN (\"1\", \"2\", \"3\") AND user_score >= 1500"),
-            ("SELECT name, user_score FROM item WHERE user_score IN (1500)",
-             "SELECT name, user_score FROM item WHERE id IN (\"1\", \"2\", \"3\") AND user_score IN (1500)"),
-        ] {
-            let (query, column_names) = rewrite_query_with_id_filter(input, &["\"1\"".into(), "\"2\"".into(), "\"3\"".into()]).unwrap();
             assert_eq!(query.to_string(), expected);
             assert_eq!(column_names, vec!["name", "user_score"]);
         }
