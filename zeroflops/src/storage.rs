@@ -231,7 +231,6 @@ impl SessionClient for SqlSessionClient {
         conn.set_limit(Limit::SQLITE_LIMIT_FUNCTION_ARG, 8);
         conn.set_limit(Limit::SQLITE_LIMIT_ATTACHED, 0);
         conn.set_limit(Limit::SQLITE_LIMIT_LIKE_PATTERN_LENGTH, 50);
-        conn.set_limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER, 10);
         conn.set_limit(Limit::SQLITE_LIMIT_TRIGGER_DEPTH, 10);
         // Emulate partitions with views
         match builder.partition_key {
