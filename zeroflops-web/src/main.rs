@@ -34,7 +34,7 @@ use zeroflops::{
         GetDocumentBuilder, QueryDocumentsBuilder, ReplaceDocumentBuilder, SessionClient,
         SqlSessionClient, View,
     },
-    Error, Id, Items, List, ListMode, Lists, RawList, UserId,
+    Error, Id, InternalError, Items, List, ListMode, Lists, RawList, UserId,
 };
 use zeroflops_web::{
     query::{self, IntoQuery},
@@ -334,7 +334,10 @@ async fn find_items(
         .await
         .map_err(|e| {
             eprintln!("{}: {:?}", query, e);
-            e
+            match e {
+                Error::InternalError(InternalError::SqlError(e)) => Error::client_error(e.to_string()),
+                e => e,
+            }
         })?;
     Ok(serialize_arrow(values)?)
 }

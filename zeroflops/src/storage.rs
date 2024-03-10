@@ -195,6 +195,12 @@ impl SessionClient for SqlSessionClient {
         T: DeserializeOwned + Send + Sync,
     {
         let query = builder.query.query.to_string();
+        if query.contains("sqlite_schema") {
+            return Err(Error::client_error("no such table: sqlite_schema"));
+        }
+        if query.contains("sqlite_master") {
+            return Err(Error::client_error("no such table: sqlite_master"));
+        }
         if query.contains("_list") {
             return Err(Error::client_error("no such table: _list"));
         }
