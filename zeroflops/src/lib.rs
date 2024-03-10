@@ -1,4 +1,4 @@
-use arrow::error::ArrowError;
+use arrow_schema::ArrowError;
 #[cfg(feature = "full")]
 use axum::{
     body::Body,

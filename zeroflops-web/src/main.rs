@@ -1,9 +1,7 @@
 use ::spotify::SpotifyClient;
-use arrow::{
-    array::RecordBatch,
-    datatypes::{Field, Schema},
-    ipc::writer::FileWriter,
-};
+use arrow_array::RecordBatch;
+use arrow_ipc::writer::FileWriter;
+use arrow_schema::{Field, Schema};
 use async_trait::async_trait;
 use axum::{
     body::Bytes,

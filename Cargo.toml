@@ -3,7 +3,7 @@ members = ["zeroflops-web"]
 exclude = ["zeroflops-wasm"]
 
 [workspace.dependencies]
-arrow = "50.0.0"
+arrow-schema = "50.0.0"
 async-trait = "0.1.68"
 axum = "0.7.4"
 azure_core = "0.4.0"

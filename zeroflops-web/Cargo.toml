@@ -7,7 +7,9 @@ default-run = "zeroflops-web"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-arrow.workspace = true
+arrow-array = "50.0.0"
+arrow-ipc = "50.0.0"
+arrow-schema.workspace = true
 async-trait.workspace = true
 axum.workspace = true
 axum-login = "0.13.1"
