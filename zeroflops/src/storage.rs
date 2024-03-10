@@ -283,35 +283,30 @@ impl SessionClient for SqlSessionClient {
     where
         T: Serialize + Send + 'static,
     {
-        let conn = Connection::open(self.path).unwrap();
+        let conn = Connection::open(self.path)?;
         match builder {
             DocumentWriter::Create(builder) => {
                 conn.execute(
                     get_insert_stmt(builder.collection_name, builder.is_upsert),
-                    serde_rusqlite::to_params_named(&builder.document)
-                        .unwrap()
+                    serde_rusqlite::to_params_named(&builder.document)?
                         .to_slice()
                         .as_slice(),
-                )
-                .unwrap();
+                )?;
             }
             DocumentWriter::Replace(builder) => {
                 let (stmt, fields) = get_update_stmt(builder.collection_name);
                 conn.execute(
                     stmt,
-                    serde_rusqlite::to_params_named_with_fields(&builder.document, fields)
-                        .unwrap()
+                    serde_rusqlite::to_params_named_with_fields(&builder.document, fields)?
                         .to_slice()
                         .as_slice(),
-                )
-                .unwrap();
+                )?;
             }
             DocumentWriter::Delete(builder) => {
                 conn.execute(
                     &format!("DELETE FROM _{} WHERE id = ?1", builder.collection_name),
                     [builder.document_name],
-                )
-                .unwrap();
+                )?;
             }
         }
         Ok(())
