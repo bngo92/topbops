@@ -308,8 +308,6 @@ pub async fn update_playlist(
         .header("Authorization", format!("Bearer {}", access_token))
         .json(&playlist)
         .send()
-        .await?
-        .json()
         .await?;
     Ok(())
 }
@@ -331,6 +329,7 @@ pub async fn update_list(
     let resp = client
         .put(uri)
         .header("Authorization", format!("Bearer {}", access_token))
+        .header("Content-Length", "0")
         .send()
         .await?;
     if resp.status().is_client_error() || resp.status().is_server_error() {
@@ -349,6 +348,7 @@ pub async fn update_list(
         let resp = client
             .post(uri)
             .header("Authorization", format!("Bearer {}", access_token))
+            .header("Content-Length", "0")
             .send()
             .await?;
         if resp.status().is_client_error() || resp.status().is_server_error() {
