@@ -18,7 +18,7 @@ futures.workspace = true
 password-auth = "1.0.0"
 rand = { version = "0.8.4", features = ["min_const_gen"] }
 reqwest = { workspace = true, features = ["blocking"] }
-rusqlite.workspace = true
+rusqlite = { workspace = true, features = ["limits"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_arrow = { workspace = true, features = ["arrow-50"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }

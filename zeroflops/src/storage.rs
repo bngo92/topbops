@@ -5,7 +5,7 @@ use azure_data_cosmos::{
     prelude::{self as cosmos, DatabaseClient, Param, Query},
     CosmosEntity,
 };
-use rusqlite::{Connection, OptionalExtension, ToSql};
+use rusqlite::{config::DbConfig, limits::Limit, Connection, OpenFlags, OptionalExtension, ToSql};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use sqlparser::ast::Query;
@@ -219,7 +219,20 @@ impl SessionClient for SqlSessionClient {
                 }
             })
             .collect();
-        let conn = Connection::open(self.path)?;
+        let conn = Connection::open_with_flags(self.path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        // https://www.sqlite.org/security.html
+        conn.set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
+        conn.set_limit(Limit::SQLITE_LIMIT_LENGTH, 1_000_000);
+        conn.set_limit(Limit::SQLITE_LIMIT_SQL_LENGTH, 100_000);
+        conn.set_limit(Limit::SQLITE_LIMIT_COLUMN, 100);
+        conn.set_limit(Limit::SQLITE_LIMIT_EXPR_DEPTH, 10);
+        conn.set_limit(Limit::SQLITE_LIMIT_COMPOUND_SELECT, 3);
+        conn.set_limit(Limit::SQLITE_LIMIT_VDBE_OP, 25_000);
+        conn.set_limit(Limit::SQLITE_LIMIT_FUNCTION_ARG, 8);
+        conn.set_limit(Limit::SQLITE_LIMIT_ATTACHED, 0);
+        conn.set_limit(Limit::SQLITE_LIMIT_LIKE_PATTERN_LENGTH, 50);
+        conn.set_limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER, 10);
+        conn.set_limit(Limit::SQLITE_LIMIT_TRIGGER_DEPTH, 10);
         // Emulate partitions with views
         match builder.partition_key {
             View::User(user_id) => {
