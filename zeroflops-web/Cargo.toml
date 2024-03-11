@@ -38,3 +38,6 @@ zeroflops = { path = "../zeroflops/", features = ["full"] }
 [features]
 dev = []
 azure = ["azure_core", "azure_data_cosmos"]
+
+[dev-dependencies]
+arrow = "50.0.0"
