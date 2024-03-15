@@ -316,8 +316,9 @@ impl SessionClient for SqlSessionClient {
 fn get_insert_stmt(collection_name: &str, is_upsert: bool) -> &str {
     match (collection_name, is_upsert) {
         ("item", false) => "INSERT INTO _item (id, user_id, type, name, iframe, rating, user_score, user_wins, user_losses, metadata, hidden) VALUES (:id, :user_id, :type, :name, :iframe, :rating, :user_score, :user_wins, :user_losses, :metadata, :hidden)",
-        ("item", true) => "INSERT INTO _item (id, user_id, type, name, iframe, rating, user_score, user_wins, user_losses, metadata, hidden) VALUES (:id, :user_id, :type, :name, :iframe, :rating, :user_score, :user_wins, :user_losses, :metadata, :hidden) ON CONFLICT(id, user_id) DO UPDATE SET rating=excluded.rating, user_score=excluded.user_score, user_wins=excluded.user_wins, user_losses=excluded.user_losses",
         ("list", false) => "INSERT INTO _list (id, user_id, mode, name, sources, iframe, items, favorite, query) VALUES (:id, :user_id, :mode, :name, :sources, :iframe, :items, :favorite, :query)",
+        // is_upsert is currently only used to reset demo lists and items
+        ("item", true) => "INSERT INTO _item (id, user_id, type, name, iframe, rating, user_score, user_wins, user_losses, metadata, hidden) VALUES (:id, :user_id, :type, :name, :iframe, :rating, :user_score, :user_wins, :user_losses, :metadata, :hidden) ON CONFLICT(id, user_id) DO UPDATE SET rating=excluded.rating, user_score=excluded.user_score, user_wins=excluded.user_wins, user_losses=excluded.user_losses",
         ("list", true) => "INSERT INTO _list (id, user_id, mode, name, sources, iframe, items, favorite, query) VALUES (:id, :user_id, :mode, :name, :sources, :iframe, :items, :favorite, :query) ON CONFLICT(id, user_id) DO UPDATE SET items=excluded.items, query=excluded.query",
         _ => unreachable!()
     }

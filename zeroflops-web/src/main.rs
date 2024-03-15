@@ -170,8 +170,7 @@ async fn get_lists(
                 View::User(user_id.clone()),
                 CosmosQuery::new(query.into_query()?),
             ))
-            .await
-            .map_err(Error::from)?
+            .await?
             .into_iter()
             .map(RawList::try_into)
             .collect::<Result<_, _>>()?,

@@ -6,7 +6,7 @@ use zeroflops::{
         CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder, ReplaceDocumentBuilder,
         SessionClient,
     },
-    Error, ItemMetadata, List, RawList, Source, SourceType, Spotify, UserId,
+    Error, InternalError, ItemMetadata, List, RawList, Source, SourceType, Spotify, UserId,
 };
 
 pub mod setlist;
@@ -166,13 +166,27 @@ pub async fn create_items(
     items
         .into_iter()
         .map(|item| async move {
-            client
+            match client
                 .write_document(DocumentWriter::Create(CreateDocumentBuilder {
                     collection_name: "item",
                     document: RawItem::from(item),
                     is_upsert,
                 }))
                 .await
+            {
+                Ok(_)
+                // If an error is returned because the item already exists, ignore the error
+                | Err(Error::InternalError(InternalError::SqlError(
+                    rusqlite::Error::SqliteFailure(
+                        libsqlite3_sys::Error {
+                            code: libsqlite3_sys::ErrorCode::ConstraintViolation,
+                            ..
+                        },
+                        _,
+                    ),
+                ))) => Ok(()),
+                Err(e) => Err(e),
+            }
         })
         .collect::<FuturesUnordered<_>>()
         .try_collect()
