@@ -22,15 +22,15 @@ rustup run nightly wasm-pack build --target web
 - [x] Add Google auth
 - [ ] Add IMDb data source
 - [x] Support user lists
-- [ ] Add dedicated import page
-- [ ] Add documentation
+- [x] Add dedicated import page
+- [x] Add documentation
 - [ ] Support resetting items
 - [ ] Add Spotify search support
 - [x] Add chart visualization
 - [ ] Add custom tournaments
 - [ ] Add item notes
 - [ ] Add description
-- [ ] Add lists as a data source
+- [x] Add lists as a data source
 - [x] Add time weighted averages
 - [ ] Support data source refresh
 ### P2
