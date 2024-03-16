@@ -1,9 +1,9 @@
 use crate::query::IntoQuery;
-use futures::{StreamExt, TryStreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use tracing::Level;
 use zeroflops::{
     spotify::{Playlist, Playlists, RecentTrack},
     storage::{
@@ -200,25 +200,16 @@ pub async fn get_album(user_id: &UserId, id: Id) -> Result<(Source, Vec<crate::I
         .await?
         .json()
         .await?;
-    let items: Vec<_> = futures::stream::iter(
-        album_items
-            .items
-            .into_iter()
-            .map(|i| (i, token.access_token.clone()))
-            .map(move |(item, access_token)| async move {
-                let track = client
-                    .get(item.href)
-                    .header("Authorization", format!("Bearer {}", access_token))
-                    .send()
-                    .await?
-                    .json()
-                    .await?;
-                Ok::<_, Error>(new_spotify_item(track, user_id))
-            }),
-    )
-    .buffered(1)
-    .try_collect()
-    .await?;
+    let mut items = Vec::with_capacity(album_items.items.len());
+    for item in &album_items.items {
+        let response = client
+            .get(&item.href)
+            .header("Authorization", format!("Bearer {}", token.access_token))
+            .send()
+            .await?;
+        tracing::event!(Level::DEBUG, "{} {}", item.href, response.status());
+        items.push(new_spotify_item(response.json().await?, user_id));
+    }
     Ok((
         Source {
             source_type: SourceType::Spotify(Spotify::Album(id)),

@@ -3028,6 +3028,7 @@ dependencies = [
  "time",
  "tokio",
  "tower-http",
+ "tracing",
  "tracing-subscriber",
  "urlencoding",
  "uuid 0.8.2",
