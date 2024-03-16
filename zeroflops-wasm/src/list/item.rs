@@ -6,10 +6,7 @@ use crate::{
 use arrow::{array::AsArray, datatypes::UInt64Type};
 use js_sys::Error;
 use serde_json::Value;
-use std::{
-    collections::{HashMap},
-    rc::Rc,
-};
+use std::{collections::HashMap, rc::Rc};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{
@@ -292,10 +289,19 @@ impl Component for ListItems {
                     .map(|(i, item)| (item.item.id.as_str().to_owned(), i))
                     .collect();
                 let ids = query.column("id").unwrap().as_string::<i64>();
-                let ratings = query.column("rating").unwrap().as_primitive::<UInt64Type>();
+                // NullArray does not cast correctly
+                let ratings = if let Some(ratings) = query
+                    .column("rating")
+                    .unwrap()
+                    .as_primitive_opt::<UInt64Type>()
+                {
+                    ratings.into_iter().collect()
+                } else {
+                    vec![None; query.column("rating").unwrap().len()]
+                };
                 let hidden = query.column("hidden").unwrap().as_boolean();
                 for ((id, rating), hidden) in ids.iter().zip(ratings.iter()).zip(hidden.iter()) {
-                    self.state[index[id.unwrap()]].rating_hidden = Some((rating, hidden.unwrap()));
+                    self.state[index[id.unwrap()]].rating_hidden = Some((*rating, hidden.unwrap()));
                 }
                 true
             }
