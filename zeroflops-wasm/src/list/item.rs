@@ -26,6 +26,8 @@ pub enum Msg {
     SaveSuccess(Vec<(usize, HashMap<String, Value>)>),
     Push,
     Open(usize),
+    ModalBack,
+    ModalForward,
     HideModal,
     SelectView,
     Delete((String, usize)),
@@ -117,12 +119,22 @@ impl Component for ListItems {
                 .callback(move |rating| Msg::UpdateRating(i, rating));
             html! {
                 <Modal header={item.item.name.clone()} hide={ctx.link().callback(|_| Msg::HideModal)}>
-                    if let Some(iframe) = &item.item.iframe {
-                        <iframe width="100%" height="380" frameborder="0" src={iframe.clone()}></iframe>
-                    }
+                    <div class="carousel slide">
+                        <div class="carousel-item active">
+                            if let Some(iframe) = &item.item.iframe {
+                                <iframe width="100%" height="380" frameborder="0" src={iframe.clone()}></iframe>
+                            }
+                        </div>
+                        <button class="carousel-control-prev" type="button" onclick={ctx.link().callback(|_| Msg::ModalBack)}>
+                            <span class="carousel-control-prev-icon"></span>
+                        </button>
+                        <button class="carousel-control-next" type="button" onclick={ctx.link().callback(|_| Msg::ModalForward)}>
+                            <span class="carousel-control-next-icon"></span>
+                        </button>
+                    </div>
                     <div class="col-2">
-                       <Rating rating={self.state.as_ref().unwrap()[i].rating} {onchange} disabled={disabled}/>
-                   </div>
+                        <Rating rating={self.state.as_ref().unwrap()[i].rating} {onchange} disabled={disabled}/>
+                    </div>
                 </Modal>
             }
         } else {
@@ -414,6 +426,18 @@ impl Component for ListItems {
             }
             Msg::Open(item) => {
                 self.modal = Some(item);
+                true
+            }
+            Msg::ModalBack => {
+                self.modal = self
+                    .modal
+                    .map(|i| if i == 0 { self.items.len() - 1 } else { i - 1 });
+                true
+            }
+            Msg::ModalForward => {
+                self.modal = self
+                    .modal
+                    .map(|i| if i == self.items.len() - 1 { 0 } else { i + 1 });
                 true
             }
             Msg::HideModal => {
