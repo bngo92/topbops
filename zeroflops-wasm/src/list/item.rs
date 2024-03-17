@@ -125,10 +125,10 @@ impl Component for ListItems {
                                 <iframe width="100%" height="380" frameborder="0" src={iframe.clone()}></iframe>
                             }
                         </div>
-                        <button class="carousel-control-prev" type="button" onclick={ctx.link().callback(|_| Msg::ModalBack)}>
+                        <button class="carousel-control-prev" type="button" onclick={ctx.link().callback(|_| Msg::ModalBack)} style="top: 56px; bottom: auto; height: 137px">
                             <span class="carousel-control-prev-icon"></span>
                         </button>
-                        <button class="carousel-control-next" type="button" onclick={ctx.link().callback(|_| Msg::ModalForward)}>
+                        <button class="carousel-control-next" type="button" onclick={ctx.link().callback(|_| Msg::ModalForward)} style="top: 56px; bottom: auto; height: 137px">
                             <span class="carousel-control-next-icon"></span>
                         </button>
                     </div>
