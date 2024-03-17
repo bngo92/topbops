@@ -38,7 +38,8 @@ pub struct ListProps {
 }
 
 pub struct ListItems {
-    state: Vec<ListItem>,
+    items: Vec<ListItem>,
+    state: Option<Vec<State>>,
     select_ref: NodeRef,
     mode: ItemMode,
     alert: Option<Result<String, String>>,
@@ -47,9 +48,14 @@ pub struct ListItems {
 
 struct ListItem {
     item: ItemMetadata,
-    rating_hidden: Option<(Option<u64>, bool)>,
     rating_ref: NodeRef,
     hidden_ref: NodeRef,
+}
+
+#[derive(Clone, Default)]
+struct State {
+    rating: Option<u64>,
+    hidden: bool,
 }
 
 enum ItemMode {
@@ -77,18 +83,18 @@ impl Component for ListItems {
             });
         }
         ListItems {
-            state: ctx
+            items: ctx
                 .props()
                 .list
                 .items
                 .iter()
                 .map(|i| ListItem {
                     item: i.clone(),
-                    rating_hidden: None,
                     rating_ref: NodeRef::default(),
                     hidden_ref: NodeRef::default(),
                 })
                 .collect(),
+            state: None,
             select_ref: NodeRef::default(),
             mode: if let ListMode::View(_) = ctx.props().list.mode {
                 ItemMode::View
@@ -126,7 +132,7 @@ impl Component for ListItems {
         });
         let html: Html = match self.mode {
             ItemMode::View => self
-                .state
+                .items
                 .iter()
                 .map(|ListItem { item, .. }| {
                     let open = {
@@ -141,15 +147,15 @@ impl Component for ListItems {
                 })
                 .collect(),
             ItemMode::Update => self
-                .state
+                .items
                 .iter()
+                .enumerate()
                 .map(
-                    |ListItem {
-                         item,
-                         rating_hidden,
-                         rating_ref,
-                         hidden_ref,
-                     }| {
+                    |(i, ListItem {
+                        item,
+                        rating_ref,
+                        hidden_ref,
+                    })| {
                         let open = {
                             let item = item.clone();
                             ctx.link().callback(move |_| Msg::Open(item.clone()))
@@ -157,7 +163,7 @@ impl Component for ListItems {
                         html! {
                             <div class="row mb-1">
                                 <label class="col-9 col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
-                                if let Some((rating, hidden)) = rating_hidden {
+                                if let Some(State { rating, hidden }) = self.state.as_ref().and_then(|s| s.get(i)) {
                                     <div class="col-2">
                                         <select ref={rating_ref} class="form-select" {disabled}>
                                             <option selected={rating.is_none()}></option>
@@ -184,7 +190,7 @@ impl Component for ListItems {
                 )
                 .collect(),
             ItemMode::Delete => self
-                .state
+                .items
                 .iter()
                 .enumerate()
                 .map(|(i, ListItem { item, .. })| {
@@ -283,7 +289,7 @@ impl Component for ListItems {
                     return false;
                 };
                 let index: HashMap<_, _> = self
-                    .state
+                    .items
                     .iter()
                     .enumerate()
                     .map(|(i, item)| (item.item.id.as_str().to_owned(), i))
@@ -300,9 +306,14 @@ impl Component for ListItems {
                     vec![None; query.column("rating").unwrap().len()]
                 };
                 let hidden = query.column("hidden").unwrap().as_boolean();
-                for ((id, rating), hidden) in ids.iter().zip(ratings.iter()).zip(hidden.iter()) {
-                    self.state[index[id.unwrap()]].rating_hidden = Some((*rating, hidden.unwrap()));
+                let mut state = vec![State::default(); self.items.len()];
+                for ((id, &rating), hidden) in ids.iter().zip(ratings.iter()).zip(hidden.iter()) {
+                    state[index[id.unwrap()]] = State {
+                        rating,
+                        hidden: hidden.unwrap(),
+                    };
                 }
+                self.state = Some(state);
                 true
             }
             Msg::Save => {
@@ -310,15 +321,21 @@ impl Component for ListItems {
                 let mut update_indexes = Vec::new();
                 for (
                     i,
-                    ListItem {
-                        item,
+                    (
+                        ListItem {
+                            item,
+                            rating_ref,
+                            hidden_ref,
+                        },
                         rating_hidden,
-                        rating_ref,
-                        hidden_ref,
-                    },
-                ) in self.state.iter().enumerate()
+                    ),
+                ) in self
+                    .items
+                    .iter()
+                    .zip(self.state.as_ref().unwrap().iter())
+                    .enumerate()
                 {
-                    let (rating, hidden) = rating_hidden.as_ref().unwrap();
+                    let State { rating, hidden } = rating_hidden;
                     let mut updates = HashMap::new();
                     let value = rating_ref
                         .cast::<HtmlSelectElement>()
@@ -390,13 +407,8 @@ impl Component for ListItems {
             Msg::SaveSuccess(updates) => {
                 for (i, update) in updates {
                     for (k, v) in update {
-                        let (rating, hidden) = self
-                            .state
-                            .get_mut(i)
-                            .unwrap()
-                            .rating_hidden
-                            .as_mut()
-                            .unwrap();
+                        let State { rating, hidden } =
+                            self.state.as_mut().unwrap().get_mut(i).unwrap();
                         match k.as_str() {
                             "rating" => {
                                 *rating = v.as_u64();
@@ -449,7 +461,10 @@ impl Component for ListItems {
                 false
             }
             Msg::DeleteSuccess(i) => {
-                self.state.remove(i);
+                self.items.remove(i);
+                if let Some(state) = &mut self.state {
+                    state.remove(i);
+                }
                 true
             }
         }
