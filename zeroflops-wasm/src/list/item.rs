@@ -12,19 +12,20 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::{
     HtmlInputElement, HtmlSelectElement, Request, RequestInit, RequestMode, Response, Url,
 };
-use yew::{html, Component, Context, Html, NodeRef, Properties};
+use yew::{html, Callback, Component, Context, Html, NodeRef, Properties};
 use yew_router::prelude::Link;
 use zeroflops::{Id, ItemMetadata, List, ListMode, SourceType, Spotify, User};
 
 pub enum Msg {
     None,
     Load(Option<DataFrame>),
+    UpdateRating(usize, Option<u64>),
     Save,
     SaveError(String),
     HideAlert,
     SaveSuccess(Vec<(usize, HashMap<String, Value>)>),
     Push,
-    Open(ItemMetadata),
+    Open(usize),
     HideModal,
     SelectView,
     Delete((String, usize)),
@@ -39,16 +40,16 @@ pub struct ListProps {
 
 pub struct ListItems {
     items: Vec<ListItem>,
+    prev_state: Option<Vec<State>>,
     state: Option<Vec<State>>,
     select_ref: NodeRef,
     mode: ItemMode,
     alert: Option<Result<String, String>>,
-    modal: Option<ItemMetadata>,
+    modal: Option<usize>,
 }
 
 struct ListItem {
     item: ItemMetadata,
-    rating_ref: NodeRef,
     hidden_ref: NodeRef,
 }
 
@@ -90,10 +91,10 @@ impl Component for ListItems {
                 .iter()
                 .map(|i| ListItem {
                     item: i.clone(),
-                    rating_ref: NodeRef::default(),
                     hidden_ref: NodeRef::default(),
                 })
                 .collect(),
+            prev_state: None,
             state: None,
             select_ref: NodeRef::default(),
             mode: if let ListMode::View(_) = ctx.props().list.mode {
@@ -109,6 +110,24 @@ impl Component for ListItems {
     fn view(&self, ctx: &Context<Self>) -> Html {
         let disabled = ctx.props().user.is_none();
         let list = &ctx.props().list;
+        let modal_html = if let Some(i) = self.modal {
+            let item = &self.items[i];
+            let onchange = ctx
+                .link()
+                .callback(move |rating| Msg::UpdateRating(i, rating));
+            html! {
+                <Modal header={item.item.name.clone()} hide={ctx.link().callback(|_| Msg::HideModal)}>
+                    if let Some(iframe) = &item.item.iframe {
+                        <iframe width="100%" height="380" frameborder="0" src={iframe.clone()}></iframe>
+                    }
+                    <div class="col-2">
+                       <Rating rating={self.state.as_ref().unwrap()[i].rating} {onchange} disabled={disabled}/>
+                   </div>
+                </Modal>
+            }
+        } else {
+            html! {}
+        };
         let source_html = list.sources.iter().map(|source| {
             let raw_id = match &source.source_type {
                 SourceType::Spotify(Spotify::Playlist(Id { raw_id, .. }))
@@ -134,11 +153,9 @@ impl Component for ListItems {
             ItemMode::View => self
                 .items
                 .iter()
-                .map(|ListItem { item, .. }| {
-                    let open = {
-                        let item = item.clone();
-                        ctx.link().callback(move |_| Msg::Open(item.clone()))
-                    };
+                .enumerate()
+                .map(|(i, ListItem { item, .. })| {
+                    let open = ctx.link().callback(move |_| Msg::Open(i));
                     html! {
                         <div class="row mb-1">
                             <label class="col col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
@@ -153,32 +170,15 @@ impl Component for ListItems {
                 .map(
                     |(i, ListItem {
                         item,
-                        rating_ref,
                         hidden_ref,
                     })| {
-                        let open = {
-                            let item = item.clone();
-                            ctx.link().callback(move |_| Msg::Open(item.clone()))
-                        };
+                        let open = ctx.link().callback(move |_| Msg::Open(i));
                         html! {
                             <div class="row mb-1">
                                 <label class="col-9 col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
                                 if let Some(State { rating, hidden }) = self.state.as_ref().and_then(|s| s.get(i)) {
                                     <div class="col-2">
-                                        <select ref={rating_ref} class="form-select" {disabled}>
-                                            <option selected={rating.is_none()}></option>
-                                            <option selected={*rating == Some(0)}>{"0"}</option>
-                                            <option selected={*rating == Some(1)}>{"1"}</option>
-                                            <option selected={*rating == Some(2)}>{"2"}</option>
-                                            <option selected={*rating == Some(3)}>{"3"}</option>
-                                            <option selected={*rating == Some(4)}>{"4"}</option>
-                                            <option selected={*rating == Some(5)}>{"5"}</option>
-                                            <option selected={*rating == Some(6)}>{"6"}</option>
-                                            <option selected={*rating == Some(7)}>{"7"}</option>
-                                            <option selected={*rating == Some(8)}>{"8"}</option>
-                                            <option selected={*rating == Some(9)}>{"9"}</option>
-                                            <option selected={*rating == Some(10)}>{"10"}</option>
-                                        </select>
+                                        <Rating {rating} onchange={ctx.link().callback(move |rating| Msg::UpdateRating(i, rating))} {disabled}/>
                                     </div>
                                     <div class="col-1 d-flex justify-content-center">
                                         <input ref={hidden_ref} class="form-check-input mt-2" type="checkbox" checked={*hidden}/>
@@ -194,10 +194,7 @@ impl Component for ListItems {
                 .iter()
                 .enumerate()
                 .map(|(i, ListItem { item, .. })| {
-                    let open = {
-                        let item = item.clone();
-                        ctx.link().callback(move |_| Msg::Open(item.clone()))
-                    };
+                    let open = ctx.link().callback(move |_| Msg::Open(i));
                     let delete = {
                         let id = item.id.clone();
                         ctx.link().callback(move |_| Msg::Delete((id.clone(), i)))
@@ -227,13 +224,7 @@ impl Component for ListItems {
         let hide = ctx.link().callback(|_| Msg::HideAlert);
         html! {
             <div>
-                if let Some(item) = &self.modal {
-                    <Modal header={item.name.clone()} hide={ctx.link().callback(|_| Msg::HideModal)}>
-                        if let Some(iframe) = &item.iframe {
-                            <iframe width="100%" height="380" frameborder="0" src={iframe.clone()}></iframe>
-                        }
-                    </Modal>
-                }
+                {modal_html}
                 if matches!(ctx.props().list.mode, ListMode::View(_)) {
                     <div class="row mb-3">
                         <label class="col-auto col-form-label">
@@ -313,23 +304,18 @@ impl Component for ListItems {
                         hidden: hidden.unwrap(),
                     };
                 }
+                self.prev_state = Some(state.clone());
                 self.state = Some(state);
+                true
+            }
+            Msg::UpdateRating(i, rating) => {
+                self.state.as_mut().unwrap()[i].rating = rating;
                 true
             }
             Msg::Save => {
                 let mut update_ids = HashMap::new();
                 let mut update_indexes = Vec::new();
-                for (
-                    i,
-                    (
-                        ListItem {
-                            item,
-                            rating_ref,
-                            hidden_ref,
-                        },
-                        rating_hidden,
-                    ),
-                ) in self
+                for (i, (ListItem { item, hidden_ref }, rating_hidden)) in self
                     .items
                     .iter()
                     .zip(self.state.as_ref().unwrap().iter())
@@ -337,14 +323,8 @@ impl Component for ListItems {
                 {
                     let State { rating, hidden } = rating_hidden;
                     let mut updates = HashMap::new();
-                    let value = rating_ref
-                        .cast::<HtmlSelectElement>()
-                        .unwrap()
-                        .value()
-                        .parse::<u64>()
-                        .ok();
-                    if value != *rating {
-                        updates.insert(String::from("rating"), value.into());
+                    if self.prev_state.as_ref().unwrap()[i].rating != *rating {
+                        updates.insert(String::from("rating"), (*rating).into());
                     }
                     let value =
                         Value::Bool(hidden_ref.cast::<HtmlInputElement>().unwrap().checked());
@@ -420,6 +400,7 @@ impl Component for ListItems {
                         }
                     }
                 }
+                self.prev_state = self.state.clone();
                 self.alert = Some(Ok("Save successful".to_owned()));
                 true
             }
@@ -467,6 +448,60 @@ impl Component for ListItems {
                 }
                 true
             }
+        }
+    }
+}
+
+#[derive(PartialEq, Properties)]
+struct RatingProps {
+    rating: Option<u64>,
+    onchange: Callback<Option<u64>>,
+    disabled: bool,
+}
+
+struct Rating {
+    select_ref: NodeRef,
+}
+
+impl Component for Rating {
+    type Message = ();
+    type Properties = RatingProps;
+
+    fn create(_: &Context<Self>) -> Self {
+        Rating {
+            select_ref: NodeRef::default(),
+        }
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let rating = &ctx.props().rating;
+        let onchange = ctx.props().onchange.clone();
+        let select_ref = self.select_ref.clone();
+        let onchange = ctx.link().callback(move |_| {
+            onchange.emit(
+                select_ref
+                    .cast::<HtmlSelectElement>()
+                    .unwrap()
+                    .value()
+                    .parse()
+                    .ok(),
+            )
+        });
+        html! {
+            <select ref={&self.select_ref} {onchange} class="form-select" disabled={ctx.props().disabled}>
+                <option selected={rating.is_none()}></option>
+                <option selected={*rating == Some(0)}>{"0"}</option>
+                <option selected={*rating == Some(1)}>{"1"}</option>
+                <option selected={*rating == Some(2)}>{"2"}</option>
+                <option selected={*rating == Some(3)}>{"3"}</option>
+                <option selected={*rating == Some(4)}>{"4"}</option>
+                <option selected={*rating == Some(5)}>{"5"}</option>
+                <option selected={*rating == Some(6)}>{"6"}</option>
+                <option selected={*rating == Some(7)}>{"7"}</option>
+                <option selected={*rating == Some(8)}>{"8"}</option>
+                <option selected={*rating == Some(9)}>{"9"}</option>
+                <option selected={*rating == Some(10)}>{"10"}</option>
+            </select>
         }
     }
 }
