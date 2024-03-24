@@ -728,10 +728,12 @@ impl Component for Row {
 enum ListState {
     Fetching,
     Success(List),
+    NotFound,
 }
 
 pub enum ListMsg {
     Load(List),
+    NotFound,
 }
 
 #[derive(PartialEq, Properties)]
@@ -758,14 +760,24 @@ impl Component for ListComponent {
             | ListsRoute::Match { id }
             | ListsRoute::Tournament { id } => id.clone(),
         };
-        ctx.link()
-            .send_future(async move { ListMsg::Load(crate::fetch_list(&id).await.unwrap()) });
+        ctx.link().send_future(async move {
+            if let Some(list) = crate::fetch_list(&id).await.unwrap() {
+                ListMsg::Load(list)
+            } else {
+                ListMsg::NotFound
+            }
+        });
         ListComponent {
             state: ListState::Fetching,
         }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
+        if let ListState::NotFound = self.state {
+            return html! {
+                <h1>{"Not found"}</h1>
+            };
+        }
         let query = ctx
             .link()
             .location()
@@ -792,6 +804,7 @@ impl Component for ListComponent {
             }
         };
         match &self.state {
+            ListState::NotFound => unreachable!(),
             ListState::Fetching => html! {},
             ListState::Success(list) => {
                 let mut tabs = ["nav-link"; 3];
@@ -879,9 +892,12 @@ impl Component for ListComponent {
         match msg {
             ListMsg::Load(list) => {
                 self.state = ListState::Success(list);
-                true
+            }
+            ListMsg::NotFound => {
+                self.state = ListState::NotFound;
             }
         }
+        true
     }
 
     // Navigation within the list page doesn't update the component so we need to implement changed
@@ -895,8 +911,9 @@ impl Component for ListComponent {
                 | ListsRoute::Match { id }
                 | ListsRoute::Tournament { id } => id.clone(),
             };
-            ctx.link()
-                .send_future(async move { ListMsg::Load(crate::fetch_list(&id).await.unwrap()) });
+            ctx.link().send_future(async move {
+                ListMsg::Load(crate::fetch_list(&id).await.unwrap().unwrap())
+            });
         }
         // Rank dropdown breaks if this is set to false
         true
@@ -960,13 +977,16 @@ async fn fetch_lists(favorite: bool) -> Result<Vec<List>, JsValue> {
     Ok(lists.lists)
 }
 
-async fn fetch_list(id: &str) -> Result<List, JsValue> {
+async fn fetch_list(id: &str) -> Result<Option<List>, JsValue> {
     let window = window();
     let request = query(&format!("/api/lists/{}", id), "GET")?;
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
+    if resp.status() == 404 {
+        return Ok(None);
+    }
     let json = JsFuture::from(resp.json()?).await?;
-    Ok(serde_wasm_bindgen::from_value(json).unwrap())
+    Ok(Some(serde_wasm_bindgen::from_value(json).unwrap()))
 }
 
 async fn create_list() -> Result<List, JsValue> {

@@ -264,6 +264,7 @@ pub struct User {
 pub enum Error {
     ClientError(String),
     InternalError(InternalError),
+    NotFound,
 }
 
 impl Error {
@@ -351,6 +352,7 @@ impl From<Error> for Response<Body> {
                 eprintln!("server error: {:?}", e);
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
+            Error::NotFound => StatusCode::NOT_FOUND.into_response(),
         }
     }
 }

@@ -154,7 +154,7 @@ pub async fn get_list(
     {
         list.try_into()
     } else {
-        todo!()
+        Err(Error::NotFound)
     }
 }
 

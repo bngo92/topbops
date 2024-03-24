@@ -430,7 +430,7 @@ impl Component for Tournament {
                         crate::update_stats(&id, &win, &lose).await.unwrap();
                         if !updated_ranks.is_empty() {
                             // TODO: handle state syncing better
-                            let mut list = crate::fetch_list(&id).await.unwrap();
+                            let mut list = crate::fetch_list(&id).await.unwrap().unwrap();
                             for (item, rank) in &mut list.items.iter_mut().zip(updated_ranks) {
                                 item.rank = rank;
                             }
