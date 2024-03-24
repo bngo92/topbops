@@ -327,7 +327,7 @@ fn get_insert_stmt(collection_name: &str, is_upsert: bool) -> &str {
 fn get_update_stmt(collection_name: &str) -> (&str, &[&str]) {
     match collection_name {
         "item" => ("UPDATE _item SET rating = :rating, user_score = :user_score, user_wins = :user_wins, user_losses = :user_losses WHERE id = :id AND user_id = :user_id", &["id", "user_id", "rating", "user_score", "user_wins", "user_losses"]),
-        "list" => ("UPDATE _list SET name = :name, sources = :sources, items = :items, favorite = :favorite, query = :query WHERE id = :id AND user_id = :user_id", &["id", "user_id", "name", "sources", "items", "favorite", "query"]),
+        "list" => ("UPDATE _list SET mode = :mode, name = :name, sources = :sources, iframe = :iframe, items = :items, favorite = :favorite, query = :query WHERE id = :id AND user_id = :user_id", &["id", "user_id", "mode", "name", "sources", "iframe", "items", "favorite", "query"]),
         _ => unreachable!()
     }
 }
