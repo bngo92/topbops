@@ -260,17 +260,15 @@ async fn create_list(
     auth: AuthContext,
 ) -> Result<impl IntoResponse, Response> {
     let user = require_user(auth)?;
-    let list = List {
-        id: Uuid::new_v4().to_hyphenated().to_string(),
-        user_id: user.user_id,
-        mode: ListMode::User(None),
-        name: String::from("New List"),
-        sources: Vec::new(),
-        iframe: None,
-        items: Vec::new(),
-        favorite: false,
-        query: String::from("SELECT name, user_score FROM item"),
-    };
+    let list = List::new(
+        Uuid::new_v4().to_hyphenated().to_string(),
+        &UserId(user.user_id),
+        ListMode::User(None),
+        String::from("New List"),
+        Vec::new(),
+        None,
+        Vec::new(),
+    );
     create_list_doc(&state.sql_client, list.clone(), false).await?;
     Ok((StatusCode::CREATED, Json(list)))
 }
@@ -366,7 +364,7 @@ async fn handle_action(
             if let (Some(source), Some(id)) = (params.remove("source"), params.remove("id")) {
                 let user = require_user(auth)?;
                 let user_id = UserId(user.user_id.clone());
-                return Ok(import_list(state, user_id, &source, id, false).await?);
+                return Ok(import_list(state, user_id, &source, id, false, false).await?);
             }
         }
         Some("updateItems") => {
@@ -490,10 +488,11 @@ async fn import_list(
     source: &str,
     id: String,
     favorite: bool,
+    public: bool,
 ) -> Result<StatusCode, Error> {
     match source.split_once(':') {
         Some(("spotify", source)) => {
-            import_spotify(&state.sql_client, &user_id, source, id, favorite).await?
+            import_spotify(&state.sql_client, &user_id, source, id, favorite, public).await?
         }
         _ => todo!(),
     };
@@ -506,18 +505,21 @@ pub async fn import_spotify(
     source: &str,
     id: String,
     favorite: bool,
+    public: bool,
 ) -> Result<(), Error> {
     let is_upsert = user_id.0 == DEMO_USER;
     let items = match source {
         "playlist" => {
             let (mut list, items) = spotify::import_playlist(user_id, id).await?;
             list.favorite = favorite;
+            list.public = public;
             create_list_doc(client, list, is_upsert).await?;
             items
         }
         "album" => {
             let (mut list, items) = spotify::import_album(user_id, id).await?;
             list.favorite = favorite;
+            list.public = public;
             create_list_doc(client, list, is_upsert).await?;
             items
         }
@@ -717,6 +719,7 @@ async fn main() {
             "spotify:playlist",
             "5MztFbRbMpyxbVYuOSfQV9".to_owned(),
             true,
+            true,
         )
         .await
         .unwrap();
@@ -733,6 +736,7 @@ async fn main() {
                 items: Vec::new(),
                 favorite: true,
                 query: String::from("SELECT artists, AVG(user_score) FROM item GROUP BY artists"),
+                public: true,
             },
             true,
         )
@@ -750,6 +754,7 @@ async fn main() {
                 items: Vec::new(),
                 favorite: true,
                 query: String::from("SELECT name, user_score FROM item WHERE user_score >= 1500"),
+                public: true,
             },
             true,
         )

@@ -163,17 +163,15 @@ pub async fn import_playlist(
         id: playlist_id,
     };
     let (source, items) = get_playlist(user_id, id.clone()).await?;
-    let list = List {
-        id: id.id,
-        user_id: user_id.0.clone(),
-        mode: ListMode::External,
-        name: source.name.clone(),
-        sources: vec![source],
-        iframe: Some(id.raw_id),
-        items: crate::convert_items(&items),
-        favorite: false,
-        query: String::from("SELECT name, user_score FROM item"),
-    };
+    let list = List::new(
+        id.id,
+        user_id,
+        ListMode::External,
+        source.name.clone(),
+        vec![source],
+        Some(id.raw_id),
+        crate::convert_items(&items),
+    );
     Ok((list, items))
 }
 
@@ -228,17 +226,15 @@ pub async fn import_album(user_id: &UserId, id: String) -> Result<(List, Vec<cra
         ),
     };
     let (source, items) = get_album(user_id, id.clone()).await?;
-    let list = List {
-        id: id.id,
-        user_id: user_id.0.clone(),
-        mode: ListMode::External,
-        name: source.name.clone(),
-        sources: vec![source],
-        iframe: Some(id.raw_id),
-        items: crate::convert_items(&items),
-        favorite: false,
-        query: String::from("SELECT name, user_score FROM item"),
-    };
+    let list = List::new(
+        id.id,
+        user_id,
+        ListMode::External,
+        source.name.clone(),
+        vec![source],
+        Some(id.raw_id),
+        crate::convert_items(&items),
+    );
     Ok((list, items))
 }
 

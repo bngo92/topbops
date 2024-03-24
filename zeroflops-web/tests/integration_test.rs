@@ -25,6 +25,7 @@ fn test_get_lists() {
             items: Vec::new(),
             favorite: true,
             query: "SELECT artists, AVG(user_score) FROM item GROUP BY artists".to_owned(),
+            public: true,
             ..artists.clone()
         }
     );
@@ -39,6 +40,7 @@ fn test_get_lists() {
             items: Vec::new(),
             favorite: true,
             query: "SELECT name, user_score FROM item WHERE user_score >= 1500".to_owned(),
+            public: true,
             ..winners.clone()
         }
     );
@@ -82,6 +84,7 @@ pub fn assert_bop_to_the_top(list: &List) {
     }
     assert!(list.favorite);
     assert_eq!(list.query, "SELECT name, user_score FROM item");
+    assert!(list.public);
 }
 
 #[test]

@@ -29,6 +29,7 @@ pub struct Edit {
     external_ref: NodeRef,
     query_ref: NodeRef,
     favorite_ref: NodeRef,
+    public_ref: NodeRef,
 }
 
 impl Component for Edit {
@@ -58,6 +59,7 @@ impl Component for Edit {
             external_ref: NodeRef::default(),
             query_ref: NodeRef::default(),
             favorite_ref: NodeRef::default(),
+            public_ref: NodeRef::default(),
         }
     }
 
@@ -132,6 +134,10 @@ impl Component for Edit {
                         <label class="form-check-label" for="favorite">{"Favorite"}</label>
                         <input ref={&self.favorite_ref} class="form-check-input" type="checkbox" id="favorite"/>
                     </div>
+                    <div class="form-check">
+                        <label class="form-check-label" for="public">{"Public"}</label>
+                        <input ref={&self.public_ref} class="form-check-input" type="checkbox" id="public"/>
+                    </div>
                 </form>
                 <hr/>
                 <h4>{"Data Sources"}</h4>
@@ -184,6 +190,11 @@ impl Component for Edit {
                 self.list.query = self.query_ref.cast::<HtmlInputElement>().unwrap().value();
                 self.list.favorite = self
                     .favorite_ref
+                    .cast::<HtmlInputElement>()
+                    .unwrap()
+                    .checked();
+                self.list.public = self
+                    .public_ref
                     .cast::<HtmlInputElement>()
                     .unwrap()
                     .checked();
@@ -295,6 +306,12 @@ impl Component for Edit {
                 .set_value(&self.list.query);
             if self.list.favorite {
                 self.favorite_ref
+                    .cast::<HtmlInputElement>()
+                    .unwrap()
+                    .set_checked(true);
+            }
+            if self.list.public {
+                self.public_ref
                     .cast::<HtmlInputElement>()
                     .unwrap()
                     .set_checked(true);

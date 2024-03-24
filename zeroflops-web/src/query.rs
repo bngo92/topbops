@@ -385,6 +385,7 @@ pub mod test {
             items: Vec::new(),
             favorite: false,
             query: String::from("SELECT name, user_score FROM item"),
+            public: false,
         };
         assert_eq!(
             super::get_list_items(
@@ -422,6 +423,7 @@ pub mod test {
             }],
             favorite: false,
             query: String::from("SELECT name, user_score FROM item"),
+            public: false,
         };
         let client = TestSessionClient {
             get_mock: Mock::empty(),
@@ -473,6 +475,7 @@ pub mod test {
             }],
             favorite: false,
             query: String::from("SELECT name, user_score FROM item"),
+            public: false,
         };
         let client = TestSessionClient {
             get_mock: Mock::empty(),

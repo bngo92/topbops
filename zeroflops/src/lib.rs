@@ -39,6 +39,32 @@ pub struct List {
     pub favorite: bool,
     // For external lists, query is only used to select fields (not filter)
     pub query: String,
+    pub public: bool,
+}
+
+impl List {
+    pub fn new(
+        id: String,
+        user_id: &UserId,
+        mode: ListMode,
+        name: String,
+        sources: Vec<Source>,
+        iframe: Option<String>,
+        items: Vec<ItemMetadata>,
+    ) -> List {
+        List {
+            id,
+            user_id: user_id.0.clone(),
+            mode,
+            name,
+            sources,
+            iframe,
+            items,
+            favorite: false,
+            query: String::from("SELECT name, user_score FROM item"),
+            public: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -56,6 +82,7 @@ pub struct RawList {
     pub favorite: bool,
     // For external lists, query is only used to select fields (not filter)
     pub query: String,
+    pub public: Option<bool>,
 }
 
 impl From<List> for RawList {
@@ -70,6 +97,7 @@ impl From<List> for RawList {
             items: serde_json::to_string(&l.items).expect("items should serialize"),
             favorite: l.favorite,
             query: l.query,
+            public: Some(l.public),
         }
     }
 }
@@ -87,6 +115,7 @@ impl TryFrom<RawList> for List {
             items: serde_json::from_str(&l.items)?,
             favorite: l.favorite,
             query: l.query,
+            public: l.public.unwrap_or_default(),
         })
     }
 }
