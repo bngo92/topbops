@@ -134,6 +134,78 @@ fn test_sql_injection() {
     }
 }
 
+#[test]
+fn test_get_public_list() {
+    let Some(b) = UrlBuilder::new("PUBLIC_ID") else {
+        return;
+    };
+    assert_eq!(
+        reqwest::blocking::get(b.get_url(None)).unwrap().status(),
+        200
+    );
+    // TODO: should this be public?
+    assert_eq!(
+        reqwest::blocking::get(b.get_url(Some("items")))
+            .unwrap()
+            .status(),
+        200
+    );
+    assert_eq!(
+        reqwest::blocking::get(b.get_url(Some("query")))
+            .unwrap()
+            .status(),
+        200
+    );
+}
+
+#[test]
+fn test_get_private_list() {
+    let Some(b) = UrlBuilder::new("PRIVATE_ID") else {
+        return;
+    };
+    assert_eq!(
+        reqwest::blocking::get(b.get_url(None)).unwrap().status(),
+        404
+    );
+    assert_eq!(
+        reqwest::blocking::get(b.get_url(Some("items")))
+            .unwrap()
+            .status(),
+        404
+    );
+    assert_eq!(
+        reqwest::blocking::get(b.get_url(Some("query")))
+            .unwrap()
+            .status(),
+        404
+    );
+}
+
 fn get_url(path: &str) -> Option<String> {
     std::env::var("TEST_URL").ok().map(|url| url + path)
+}
+
+struct UrlBuilder {
+    url: String,
+    id: String,
+}
+
+impl UrlBuilder {
+    fn new(id_var: &str) -> Option<UrlBuilder> {
+        let Ok(url) = std::env::var("TEST_URL") else {
+            return None;
+        };
+        Some(UrlBuilder {
+            url,
+            id: std::env::var(id_var).unwrap().to_owned(),
+        })
+    }
+
+    fn get_url(&self, path: Option<&str>) -> String {
+        if let Some(path) = path {
+            format!("{}/api/lists/{}/{}", self.url, self.id, path)
+        } else {
+            format!("{}/api/lists/{}", self.url, self.id)
+        }
+    }
 }

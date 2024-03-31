@@ -129,6 +129,15 @@ pub async fn query_list(
         )
     } else if list.items.is_empty() {
         return Ok(Vec::new());
+    } else if list.user_id != user_id.0 {
+        (
+            CosmosQuery::new(if let Some(query) = query {
+                query.into_query()?
+            } else {
+                list.query.into_query()?
+            }),
+            View::PublicList(list.items.into_iter().map(|i| i.id).collect()),
+        )
     } else {
         (
             CosmosQuery::new(if let Some(query) = query {

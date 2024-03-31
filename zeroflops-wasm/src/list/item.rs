@@ -110,7 +110,8 @@ impl Component for ListItems {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        let disabled = ctx.props().user.is_none();
+        let disabled =
+            ctx.props().user.is_none() || !crate::user_list(&ctx.props().list, &ctx.props().user);
         let list = &ctx.props().list;
         let modal_html = if let Some(i) = self.modal {
             let item = &self.items[i];

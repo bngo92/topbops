@@ -774,9 +774,7 @@ impl Component for ListComponent {
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         if let ListState::NotFound = self.state {
-            return html! {
-                <h1>{"Not found"}</h1>
-            };
+            return not_found();
         }
         let query = ctx
             .link()
@@ -815,20 +813,31 @@ impl Component for ListComponent {
                     ListPage::Edit => tabs[2] = active,
                     _ => {}
                 }
-                let component = match view {
-                    ListPage::View => html! { <ListView list={list.clone()}/> },
-                    ListPage::List => {
-                        html! { <ListItems user={Rc::clone(&ctx.props().user)} list={list.clone()}/> }
+                let component = if user_list(list, &ctx.props().user) {
+                    match view {
+                        ListPage::View => html! { <ListView list={list.clone()}/> },
+                        ListPage::List => {
+                            html! { <ListItems user={Rc::clone(&ctx.props().user)} list={list.clone()}/> }
+                        }
+                        ListPage::Edit => {
+                            html! { <Edit logged_in={ctx.props().user.is_some()} list={list.clone()}/> }
+                        }
+                        ListPage::RandomMatches => html! { <RandomMatches id={list.id.clone()}/> },
+                        ListPage::RandomRounds => html! { <RandomRounds id={list.id.clone()}/> },
+                        ListPage::RandomTournament => {
+                            html! { <RandomTournamentLoader list={list.clone()}/> }
+                        }
+                        ListPage::Tournament => html! { <TournamentLoader list={list.clone()}/> },
                     }
-                    ListPage::Edit => {
-                        html! { <Edit logged_in={ctx.props().user.is_some()} list={list.clone()}/> }
+                } else {
+                    match view {
+                        ListPage::View => html! { <ListView list={list.clone()}/> },
+                        ListPage::List => {
+                            html! { <ListItems user={Rc::clone(&ctx.props().user)} list={list.clone()}/> }
+                        }
+                        // TODO: move this up?
+                        _ => not_found(),
                     }
-                    ListPage::RandomMatches => html! { <RandomMatches id={list.id.clone()}/> },
-                    ListPage::RandomRounds => html! { <RandomRounds id={list.id.clone()}/> },
-                    ListPage::RandomTournament => {
-                        html! { <RandomTournamentLoader list={list.clone()}/> }
-                    }
-                    ListPage::Tournament => html! { <TournamentLoader list={list.clone()}/> },
                 };
                 let toggle = match view {
                     ListPage::RandomMatches => "Random Matches",
@@ -864,10 +873,14 @@ impl Component for ListComponent {
                         </li>
                     }
                 };
+                let user = user_list(list, &ctx.props().user);
                 html! {
                     <div class="row">
                         <div class="col-lg-10 col-xl-8">
                             <h2 class="col-11">{&list.name}</h2>
+                            if !user {
+                                <h3>{&format!("{}'s list", list.user_id)}</h3>
+                            }
                             <ul class="nav nav-tabs mb-3">
                                 <li class="nav-item">
                                     <Link<ListsRoute> classes={tabs[0]} to={ListsRoute::View{id: list.id.clone()}}>{"View"}</Link<ListsRoute>>
@@ -875,10 +888,12 @@ impl Component for ListComponent {
                                 <li class="nav-item">
                                     <Link<ListsRoute> classes={tabs[1]} to={ListsRoute::List{id: list.id.clone()}}>{"Items"}</Link<ListsRoute>>
                                 </li>
-                                {dropdown_html}
-                                <li class="nav-item">
-                                    <Link<ListsRoute> classes={tabs[2]} to={ListsRoute::Edit{id: list.id.clone()}}>{"Settings"}</Link<ListsRoute>>
-                                </li>
+                                if user {
+                                    {dropdown_html}
+                                    <li class="nav-item">
+                                        <Link<ListsRoute> classes={tabs[2]} to={ListsRoute::Edit{id: list.id.clone()}}>{"Settings"}</Link<ListsRoute>>
+                                    </li>
+                                }
                             </ul>
                             {component}
                         </div>
@@ -1136,6 +1151,16 @@ async fn get_user() -> Result<User, JsValue> {
     let resp: Response = resp_value.dyn_into()?;
     let json = JsFuture::from(resp.json()?).await?;
     Ok(serde_wasm_bindgen::from_value(json).unwrap())
+}
+
+fn user_list(list: &List, user: &Option<User>) -> bool {
+    Some(&list.user_id) == user.as_ref().as_ref().map(|u| &u.user_id)
+}
+
+fn not_found() -> Html {
+    html! {
+        <h1>{"Not found"}</h1>
+    }
 }
 
 fn window() -> Window {

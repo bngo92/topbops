@@ -4,7 +4,7 @@ use serde_json::{Map, Value};
 use zeroflops::{
     storage::{
         CreateDocumentBuilder, DocumentWriter, GetDocumentBuilder, ReplaceDocumentBuilder,
-        SessionClient,
+        SessionClient, View,
     },
     Error, InternalError, ItemMetadata, List, RawList, Source, SourceType, Spotify, UserId,
 };
@@ -148,8 +148,13 @@ pub async fn get_list(
         .get_document::<RawList>(GetDocumentBuilder::new(
             "list",
             id.to_owned(),
-            user_id.clone(),
+            View::User(user_id.clone()),
         ))
+        .await?
+    {
+        list.try_into()
+    } else if let Some(list) = client
+        .get_document::<RawList>(GetDocumentBuilder::new("list", id.to_owned(), View::Public))
         .await?
     {
         list.try_into()

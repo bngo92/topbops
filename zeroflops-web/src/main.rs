@@ -549,7 +549,7 @@ async fn get_item_doc(
         .get_document::<RawItem>(GetDocumentBuilder::new(
             "item",
             id.to_owned(),
-            user_id.clone(),
+            View::User(user_id.clone()),
         ))
         .await?
     {

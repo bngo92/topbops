@@ -39,7 +39,7 @@ rustup run nightly wasm-pack build --target web
 - [x] Fix sort mode responsiveness
 - [ ] Add spinners
 - [ ] Improve error handling
-- [ ] Add sharing
+- [x] Add sharing
 - [ ] Add multiplayer
 - [ ] Add Spotify snapshot caching 
 - [ ] Add public home page

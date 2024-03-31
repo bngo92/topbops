@@ -62,14 +62,14 @@ impl CosmosParam {
 pub struct GetDocumentBuilder {
     pub collection_name: &'static str,
     pub document_name: String,
-    pub partition_key: UserId,
+    pub partition_key: View,
 }
 
 impl GetDocumentBuilder {
     pub fn new(
         collection_name: &'static str,
         document_name: String,
-        partition_key: UserId,
+        partition_key: View,
     ) -> GetDocumentBuilder {
         GetDocumentBuilder {
             collection_name,
@@ -133,6 +133,8 @@ impl QueryDocumentsBuilder {
 pub enum View {
     User(UserId),
     List(UserId, Vec<String>),
+    Public,
+    PublicList(Vec<String>),
 }
 
 #[async_trait]
@@ -163,21 +165,24 @@ impl SessionClient for SqlSessionClient {
         T: DeserializeOwned + Send + Sync,
     {
         let conn = Connection::open(self.path)?;
-        let user_id = builder.partition_key;
-        conn.execute(
-            &format!(
-                "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{}'",
-                user_id.0
-            ),
-            [],
-        )?;
-        conn.execute(
-            &format!(
-                "CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{}'",
-                user_id.0
-            ),
-            [],
-        )?;
+        match builder.partition_key {
+            View::User(user_id) => {
+                conn.execute_batch(
+                    &format!(
+                        "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{user_id}';
+                        CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{user_id}';",
+                        user_id=user_id.0
+                    ),
+                )?;
+            }
+            View::Public => {
+                conn.execute_batch(
+                    "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE public = true;
+                    CREATE TEMP VIEW item AS SELECT _item.* FROM _list, json_each(_list.items) JOIN _item ON _item.id=json_each.value->>'id' WHERE public = true;",
+                )?;
+            }
+            _ => return Err(Error::internal_error("unsupported view")),
+        }
         let mut stmt = conn.prepare(&format!(
             "SELECT * FROM {} WHERE id = ?1",
             builder.collection_name
@@ -235,39 +240,43 @@ impl SessionClient for SqlSessionClient {
         // Emulate partitions with views
         match builder.partition_key {
             View::User(user_id) => {
-                conn.execute(
+                conn.execute_batch(
                     &format!(
-                        "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{}'",
-                        user_id.0
+                        "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{user_id}';
+                        CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{user_id}';",
+                        user_id=user_id.0
                     ),
-                    [],
-                )?;
-                conn.execute(
-                    &format!(
-                        "CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{}'",
-                        user_id.0
-                    ),
-                    [],
                 )?;
             }
             View::List(user_id, ids) => {
-                conn.execute(
+                conn.execute_batch(
                     &format!(
-                        "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{}'",
-                        user_id.0
+                        "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{user_id}';
+                        CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{user_id}' AND id IN ({});",
+                        ids.iter()
+                            .map(|id| format!("'{id}'"))
+                            .collect::<Vec<_>>()
+                            .join(","),
+                        user_id=user_id.0
                     ),
-                    [],
                 )?;
-                conn.execute(
+            }
+            View::Public => {
+                conn.execute_batch(
+                    "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE public = true;
+                    CREATE TEMP VIEW item AS SELECT _item.* FROM _list, json_each(_list.items) JOIN _item ON _item.id=json_each.value->>'id' WHERE public = true;",
+                )?;
+            }
+            View::PublicList(ids) => {
+                conn.execute_batch(
                     &format!(
-                        "CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{}' AND id IN ({})",
-                        user_id.0,
+                        "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE public = true;
+                        CREATE TEMP VIEW item AS SELECT _item.* FROM _list, json_each(_list.items) JOIN _item ON _item.id=json_each.value->>'id' WHERE public = true AND _item.id IN ({});",
                         ids.iter()
                             .map(|id| format!("'{id}'"))
                             .collect::<Vec<_>>()
                             .join(",")
                     ),
-                    [],
                 )?;
             }
         }
