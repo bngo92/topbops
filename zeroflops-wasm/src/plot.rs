@@ -68,7 +68,7 @@ fn df_item_view(df: &DataFrame, i: usize) -> Html {
         <tr>
             <th>{i + 1}</th>
             {for df.arrays.iter().map(|item| html! {
-                <td class="text-truncate max-width">{display::array_value_to_string(item, i).unwrap()}</td>
+                <td>{display::array_value_to_string(item, i).unwrap()}</td>
             })}
         </tr>
     }
