@@ -162,6 +162,11 @@ impl Component for ListItems {
                 }
             }
         });
+        let style = match self.mode {
+            ItemMode::View => "grid-template-columns: auto",
+            ItemMode::Update => "grid-template-columns: auto max-content max-content",
+            ItemMode::Delete => "grid-template-columns: auto max-content",
+        };
         let html: Html = match self.mode {
             ItemMode::View => self
                 .items
@@ -170,9 +175,7 @@ impl Component for ListItems {
                 .map(|(i, ListItem { item, .. })| {
                     let open = ctx.link().callback(move |_| Msg::Open(i));
                     html! {
-                        <div class="row mb-1">
-                            <label class="col col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
-                        </div>
+                        <label class="col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
                     }
                 })
                 .collect(),
@@ -187,17 +190,20 @@ impl Component for ListItems {
                     })| {
                         let open = ctx.link().callback(move |_| Msg::Open(i));
                         html! {
-                            <div class="row mb-1">
-                                <label class="col-9 col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
+                            <>
+                                <label class="col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
                                 if let Some(State { rating, hidden }) = self.state.as_ref().and_then(|s| s.get(i)) {
-                                    <div class="col-2">
+                                    <div>
                                         <Rating {rating} onchange={ctx.link().callback(move |rating| Msg::UpdateRating(i, rating))} {disabled}/>
                                     </div>
-                                    <div class="col-1 d-flex justify-content-center">
+                                    <div class="d-flex justify-content-center">
                                         <input ref={hidden_ref} class="form-check-input mt-2" type="checkbox" checked={*hidden}/>
                                     </div>
+                                } else {
+                                    <div></div>
+                                    <div></div>
                                 }
-                            </div>
+                            </>
                         }
                     },
                 )
@@ -213,12 +219,10 @@ impl Component for ListItems {
                         ctx.link().callback(move |_| Msg::Delete((id.clone(), i)))
                     };
                     html! {
-                        <div class="row mb-1">
-                            <label class="col col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
-                            <div class="col-auto">
-                                <button type="button" class="btn btn-danger" onclick={delete} {disabled}>{"Delete"}</button>
-                            </div>
-                        </div>
+                        <>
+                            <label class="col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
+                            <button type="button" class="btn btn-danger" onclick={delete} {disabled}>{"Delete"}</button>
+                        </>
                     }
                 })
                 .collect(),
@@ -236,7 +240,7 @@ impl Component for ListItems {
         };
         let hide = ctx.link().callback(|_| Msg::HideAlert);
         html! {
-            <div>
+            <div style="max-width: 600px">
                 {modal_html}
                 if matches!(ctx.props().list.mode, ListMode::View(_)) {
                     <div class="row mb-3">
@@ -252,21 +256,18 @@ impl Component for ListItems {
                     </div>
                 }
                 if let Some(src) = list.iframe.clone() {
-                    <div class="row">
-                        <div class="col-12 col-xl-11">
-                            <iframe width="100%" height="380" frameborder="0" {src}></iframe>
-                        </div>
-                    </div>
-                }
-                if let ItemMode::Update = self.mode {
-                    <div class="row">
-                        <p class="col-2 offset-9"><strong>{"Rating"}</strong></p>
-                        <p class="col-1"><strong>{"Hidden"}</strong></p>
-                    </div>
+                    <iframe width="100%" height="380" frameborder="0" {src}></iframe>
                 }
                 <form>
-                    <div class="overflow-y-auto mb-3" style="max-height: 800px">
-                        {html}
+                    <div class="d-grid gap-1 mb-3" {style}>
+                        if let ItemMode::Update = self.mode {
+                            <div></div>
+                            <p><strong>{"Rating"}</strong></p>
+                            <p><strong>{"Hidden"}</strong></p>
+                        }
+                        <div class="d-grid gap-1 overflow-y-auto" style="max-height: 800px; grid-template-columns: subgrid; grid-column: span 3">
+                            {html}
+                        </div>
                     </div>
                     if let Some(result) = self.alert.clone() {
                         <button type="button" class="btn btn-success mb-3" onclick={save} {disabled}>{"Save"}</button>
