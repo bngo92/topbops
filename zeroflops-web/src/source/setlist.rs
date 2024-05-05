@@ -1,4 +1,4 @@
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use time::Date;
@@ -85,13 +85,16 @@ pub async fn get_setlist(user_id: &UserId, id: Id) -> Result<(Source, Vec<crate:
             })
         })
         .collect();
-    let items: Vec<_> =
+    let items =
         futures::stream::iter(songs.into_iter().map(|(song, artist)| {
             crate::source::spotify::search_song(token, song, artist, user_id)
         }))
         .buffered(5)
-        .try_collect()
-        .await?;
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .filter_map(Result::ok)
+        .collect();
     let read_format = time::format_description::parse("[day]-[month]-[year]").unwrap();
     let write_format = time::format_description::parse("[month repr:short] [day], [year]").unwrap();
     let date = Date::parse(&setlist.event_date, &read_format)
