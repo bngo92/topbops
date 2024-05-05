@@ -61,6 +61,7 @@ pub async fn get_setlist(user_id: &UserId, id: Id) -> Result<(Source, Vec<crate:
 
     let setlist: Setlist = Client::new()
         .get(format!("https://api.setlist.fm/rest/1.0/setlist/{}", id.id))
+        .header("Accept", "application/json")
         .header(
             "x-api-key",
             std::env::var("SETLIST_KEY").expect("SETLIST_KEY is missing"),
