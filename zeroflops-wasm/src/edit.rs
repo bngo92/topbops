@@ -107,8 +107,8 @@ impl Component for Edit {
         html! {
             <div>
                 <h4>{"List Settings"}</h4>
-                <form>
-                    <div class="form-floating mb-2 col-md-8">
+                <form style="max-width: 800px">
+                    <div class="form-floating mb-2">
                         if let ListMode::External = &self.list.mode {
                             <input type="text" readonly=true class="form-control-plaintext" id="name" value={self.list.name.clone()} placeholder=""/>
                         } else {
@@ -116,17 +116,17 @@ impl Component for Edit {
                         }
                         <label for="name">{"List name"}</label>
                     </div>
-                    <div class="form-floating mb-2 col-md-8">
+                    <div class="form-floating mb-2">
                         <input type="text" readonly=true class="form-control-plaintext" id="mode" value={mode} placeholder=""/>
                         <label for="mode">{"List mode"}</label>
                     </div>
                     if let ListMode::User(_) = &self.list.mode {
-                        <div class="form-floating mb-3 col-md-8">
+                        <div class="form-floating mb-3">
                             <input class="form-control" id="externalId" ref={&self.external_ref} placeholder="External ID"/>
                             <label for="externalId">{"External ID"}</label>
                         </div>
                     }
-                    <div class="form-floating mb-3 col-md-8">
+                    <div class="form-floating mb-3">
                         <input class="form-control" id="query" ref={&self.query_ref} placeholder="External ID"/>
                         <label for="query">{"Query"}</label>
                     </div>

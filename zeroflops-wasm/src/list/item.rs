@@ -240,42 +240,44 @@ impl Component for ListItems {
         };
         let hide = ctx.link().callback(|_| Msg::HideAlert);
         html! {
-            <div style="max-width: 600px">
-                {modal_html}
-                if matches!(ctx.props().list.mode, ListMode::View(_)) {
-                    <div class="row mb-3">
-                        <label class="col-auto col-form-label">
-                            <strong>{"Item Mode:"}</strong>
-                        </label>
-                        <div class="col-auto">
-                            <select ref={self.select_ref.clone()} class="form-select" onchange={ctx.link().callback(|_| Msg::SelectView)}>
-                                <option selected=true>{"Update"}</option>
-                                <option>{"Delete"}</option>
-                            </select>
+            <div>
+                <div class="d-flex flex-row-reverse flex-wrap justify-content-end row-gap-3 column-gap-5">
+                    {modal_html}
+                    if matches!(ctx.props().list.mode, ListMode::View(_)) {
+                        <div class="row mb-3">
+                            <label class="col-auto col-form-label">
+                                <strong>{"Item Mode:"}</strong>
+                            </label>
+                            <div class="col-auto">
+                                <select ref={self.select_ref.clone()} class="form-select" onchange={ctx.link().callback(|_| Msg::SelectView)}>
+                                    <option selected=true>{"Update"}</option>
+                                    <option>{"Delete"}</option>
+                                </select>
+                            </div>
                         </div>
-                    </div>
-                }
-                if let Some(src) = list.iframe.clone() {
-                    <iframe width="100%" height="380" frameborder="0" {src}></iframe>
-                }
-                <form>
-                    <div class="d-grid gap-1 mb-3" {style}>
-                        if let ItemMode::Update = self.mode {
-                            <div></div>
-                            <p><strong>{"Rating"}</strong></p>
-                            <p><strong>{"Hidden"}</strong></p>
-                        }
-                        <div class="d-grid gap-1 overflow-y-auto" style="max-height: 800px; grid-template-columns: subgrid; grid-column: span 3">
-                            {html}
-                        </div>
-                    </div>
-                    if let Some(result) = self.alert.clone() {
-                        <button type="button" class="btn btn-success mb-3" onclick={save} {disabled}>{"Save"}</button>
-                        <Alert {result} {hide}/>
-                    } else {
-                        <button type="button" class="btn btn-success" onclick={save} {disabled}>{"Save"}</button>
                     }
-                </form>
+                    if let Some(src) = list.iframe.clone() {
+                        <iframe width="100%" height="380" frameborder="0" {src} style="flex-basis: 600px"></iframe>
+                    }
+                    <form style="flex-basis: 750px">
+                        <div class="d-grid row-gap-1 column-gap-3 mb-3" {style}>
+                            if let ItemMode::Update = self.mode {
+                                <div></div>
+                                <p><strong>{"Rating"}</strong></p>
+                                <p><strong>{"Hidden"}</strong></p>
+                            }
+                            <div class="d-grid row-gap-1 overflow-y-auto" style="max-height: 800px; grid-template-columns: subgrid; grid-column: span 3">
+                                {html}
+                            </div>
+                        </div>
+                        if let Some(result) = self.alert.clone() {
+                            <button type="button" class="btn btn-success mb-3" onclick={save} {disabled}>{"Save"}</button>
+                            <Alert {result} {hide}/>
+                        } else {
+                            <button type="button" class="btn btn-success" onclick={save} {disabled}>{"Save"}</button>
+                        }
+                    </form>
+                </div>
                 <hr/>
                 <h4>{"Data Sources"}</h4>
                 {for source_html}

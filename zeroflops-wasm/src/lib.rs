@@ -111,9 +111,7 @@ fn switch(
         Route::Spotify => html! { <SpotifyIntegration {logged_in}/> },
     };
     html! {
-        <div class="container-lg my-md-4">
-            { content }
-        </div>
+        { content }
     }
 }
 
@@ -179,8 +177,11 @@ impl Component for App {
         } else */{
             "nav-link"
         };
-        let (toggle_class, menu_class) = dropdown_class(self.dropdown);
-        let (int_toggle_class, int_menu_class) = dropdown_class(self.integrations_dropdown);
+        let vertical_search = "nav-link text-white";
+        let (toggle_class, menu_class) = dropdown_class(self.dropdown, false);
+        let (int_toggle_class, int_menu_class) = dropdown_class(self.integrations_dropdown, false);
+        let (vertical_toggle_class, vertical_menu_class) = dropdown_class(self.dropdown, true);
+        let (vertical_int_toggle_class, vertical_int_menu_class) = dropdown_class(self.integrations_dropdown, true);
         let dropdown = ctx.link().callback(|e: MouseEvent| {
             // Prevent reset_dropdown from triggering
             e.stop_propagation();
@@ -210,9 +211,9 @@ impl Component for App {
             }
         };
         html! {
-            <div class="vh-100" onclick={reset_dropdown}>
+            <div onclick={reset_dropdown}>
                 <BrowserRouter>
-                    <nav class="navbar navbar-expand navbar-dark bg-dark">
+                    <nav class="navbar navbar-expand navbar-dark bg-dark d-sm-none">
                         <div class="container-lg">
                             <Link<Route> classes="navbar-brand" to={Route::Home}>{"zeroflops"}</Link<Route>>
                             <ul class="navbar-nav me-auto">
@@ -223,7 +224,7 @@ impl Component for App {
                                     <Link<Route> classes={search} to={Route::Search}>{"Query"}</Link<Route>>
                                 </li>
                                 <li class="nav-item dropdown">
-                                    <a class={int_toggle_class} href="#" onclick={int_dropdown}>{"Integrations"}</a>
+                                    <a class={int_toggle_class} href="#" onclick={int_dropdown.clone()}>{"Integrations"}</a>
                                     <ul class={int_menu_class}>
                                         <li><Link<Route> classes="dropdown-item" to={Route::Spotify}>{"Spotify"}</Link<Route>></li>
                                     </ul>
@@ -236,7 +237,7 @@ impl Component for App {
                                 <ul class="navbar-nav">
                                     if let Some(user) = &*self.user {
                                         <li class="nav-item dropdown">
-                                            <a class={toggle_class} href="#" onclick={dropdown}>{&user.user_id}</a>
+                                            <a class={toggle_class} href="#" onclick={dropdown.clone()}>{&user.user_id}</a>
                                             <ul class={menu_class}>
                                                 <li><Link<Route> classes="dropdown-item" to={Route::Settings}>{"Settings"}</Link<Route>></li>
                                                 <li><a class="dropdown-item" href="/api/logout">{"Log out"}</a></li>
@@ -244,13 +245,59 @@ impl Component for App {
                                         </li>
                                     } else {
                                         <li class="nav-item">
-                                            <a class="nav-link" href="#" onclick={login}>{"Log in"}</a>
+                                            <a class="nav-link" href="#" onclick={login.clone()}>{"Log in"}</a>
                                         </li>
                                     }
                                 </ul>
                             }
                         </div>
                     </nav>
+                    <div class="d-flex vh-100 min-vh-100 align-items-stretch">
+                        <div class="d-none d-sm-flex flex-column p-3 bg-dark flex-shrink-0" style="width: 200px;">
+                            <Link<Route> classes="text-white text-decoration-none" to={Route::Home}>{"zeroflops"}</Link<Route>>
+                            <hr/>
+                            <ul class="nav nav-pills flex-column">
+                                <li class="nav-item">
+                                    <Link<Route> classes={vertical_search} to={Route::ListsRoot}>{"Lists"}</Link<Route>>
+                                </li>
+                                <li class="nav-item">
+                                    <Link<Route> classes={vertical_search} to={Route::Search}>{"Query"}</Link<Route>>
+                                </li>
+                                <li class="nav-item dropdown">
+                                    <a class={vertical_int_toggle_class} href="#" onclick={int_dropdown}>{"Integrations"}</a>
+                                    <ul class={vertical_int_menu_class}>
+                                        <li><Link<Route> classes="dropdown-item" to={Route::Spotify}>{"Spotify"}</Link<Route>></li>
+                                    </ul>
+                                </li>
+                                <li class="nav-item">
+                                    <Link<Route> classes={vertical_search} to={Route::Docs}>{"Docs"}</Link<Route>>
+                                </li>
+                            </ul>
+                            if self.user_loaded {
+                                <hr/>
+                                <div>
+                                    <ul class="nav nav-pills flex-column">
+                                        if let Some(user) = &*self.user {
+                                            <li class="nav-item dropdown">
+                                                <a class={vertical_toggle_class} href="#" onclick={dropdown}>{&user.user_id}</a>
+                                                <ul class={vertical_menu_class}>
+                                                    <li><Link<Route> classes="dropdown-item" to={Route::Settings}>{"Settings"}</Link<Route>></li>
+                                                    <li><a class="dropdown-item" href="/api/logout">{"Log out"}</a></li>
+                                                </ul>
+                                            </li>
+                                        } else {
+                                            <li class="nav-item">
+                                                <a class={vertical_search} href="#" onclick={login}>{"Log in"}</a>
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+                        </div>
+                        if self.user_loaded {
+                            <Switch<Route> {render} />
+                        }
+                    </div>
                     if self.login {
                         <Modal header={"Log in"} {hide}>
                             <div class="modal-body d-grid gap-2">
@@ -258,9 +305,6 @@ impl Component for App {
                                 <a class="btn btn-success" href={format!("https://accounts.google.com/o/oauth2/v2/auth?client_id=1038220726403-n55jha2cvprd8kdb4akdfvo0uiok4p5u.apps.googleusercontent.com&redirect_uri={}/api/login/google&response_type=code&scope=email", location.origin().unwrap().as_str())}>{"Log in with Google"}</a>
                             </div>
                         </Modal>
-                    }
-                    if self.user_loaded {
-                        <Switch<Route> {render} />
                     }
                 </BrowserRouter>
             </div>
@@ -303,11 +347,12 @@ impl Component for App {
     }
 }
 
-fn dropdown_class(dropdown: bool) -> (&'static str, &'static str) {
-    if dropdown {
-        ("nav-link dropdown-toggle show", "dropdown-menu show")
-    } else {
-        ("nav-link dropdown-toggle", "dropdown-menu")
+fn dropdown_class(dropdown: bool, vertical: bool) -> (&'static str, &'static str) {
+    match (dropdown, vertical) {
+        (true, false) => ("nav-link dropdown-toggle show", "dropdown-menu show"),
+        (false, false) => ("nav-link dropdown-toggle", "dropdown-menu"),
+        (true, true) => ("nav-link dropdown-toggle show text-white", "dropdown-menu dropdown-menu-dark show"),
+        (false, true) => ("nav-link dropdown-toggle text-white", "dropdown-menu dropdown-menu-dark"),
     }
 }
 
@@ -875,26 +920,30 @@ impl Component for ListComponent {
                 };
                 let user = user_list(list, &ctx.props().user);
                 html! {
-                    <div class="row">
-                        <div class="col-lg-10 col-xl-8">
-                            <h2 class="col-11">{&list.name}</h2>
+                    <div class="flex-grow-1 h-100 d-flex flex-column">
+                        <nav class="navbar navbar-expand py-2 mb-3" style="background-color: #2fb380;">
+                            <div class="container-fluid">
+                                <ul class="navbar-nav me-auto">
+                                    <li class="navbar-brand">{&list.name}</li>
+                                    <li class="nav-item">
+                                        <Link<ListsRoute> classes={tabs[0]} to={ListsRoute::View{id: list.id.clone()}}>{"View"}</Link<ListsRoute>>
+                                    </li>
+                                    <li class="nav-item">
+                                        <Link<ListsRoute> classes={tabs[1]} to={ListsRoute::List{id: list.id.clone()}}>{"Items"}</Link<ListsRoute>>
+                                    </li>
+                                    if user {
+                                        {dropdown_html}
+                                        <li class="nav-item">
+                                            <Link<ListsRoute> classes={tabs[2]} to={ListsRoute::Edit{id: list.id.clone()}}>{"Settings"}</Link<ListsRoute>>
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        </nav>
+                        <div class="container-fluid flex-grow-1 overflow-y-auto">
                             if !user {
                                 <h3>{&format!("{}'s list", list.user_id)}</h3>
                             }
-                            <ul class="nav nav-tabs mb-3">
-                                <li class="nav-item">
-                                    <Link<ListsRoute> classes={tabs[0]} to={ListsRoute::View{id: list.id.clone()}}>{"View"}</Link<ListsRoute>>
-                                </li>
-                                <li class="nav-item">
-                                    <Link<ListsRoute> classes={tabs[1]} to={ListsRoute::List{id: list.id.clone()}}>{"Items"}</Link<ListsRoute>>
-                                </li>
-                                if user {
-                                    {dropdown_html}
-                                    <li class="nav-item">
-                                        <Link<ListsRoute> classes={tabs[2]} to={ListsRoute::Edit{id: list.id.clone()}}>{"Settings"}</Link<ListsRoute>>
-                                    </li>
-                                }
-                            </ul>
                             {component}
                         </div>
                     </div>

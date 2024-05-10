@@ -47,19 +47,36 @@ impl DataView {
 
 pub fn df_table_view(df: &DataFrame) -> Html {
     html! {
-        <div class="table-responsive">
-            <table class="table table-striped mb-0">
-                <thead>
-                    <tr>
-                        <th>{"#"}</th>
-                        {for df.schema.fields.iter().map(|f| html! {
-                            <th>{&f.name()}</th>
-                        })}
-                    </tr>
-                </thead>
-                <tbody>{for (0..df.arrays[0].len()).map(|i| df_item_view(df, i))}</tbody>
-            </table>
-        </div>
+        <>
+            <div class="d-md-none">
+                <div class="table-responsive">
+                    <table class="table table-striped mb-0">
+                        <thead>
+                            <tr>
+                                <th>{"#"}</th>
+                                {for df.schema.fields.iter().map(|f| html! {
+                                    <th>{&f.name()}</th>
+                                })}
+                            </tr>
+                        </thead>
+                        <tbody>{for (0..df.arrays[0].len()).map(|i| df_item_view(df, i))}</tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="d-none d-md-block h-100">
+                <table class="table table-striped mb-0 w-auto" style="min-width: 568px">
+                    <thead>
+                        <tr>
+                            <th>{"#"}</th>
+                            {for df.schema.fields.iter().map(|f| html! {
+                                <th>{&f.name()}</th>
+                            })}
+                        </tr>
+                    </thead>
+                    <tbody>{for (0..df.arrays[0].len()).map(|i| df_item_view(df, i))}</tbody>
+                </table>
+            </div>
+        </>
     }
 }
 
