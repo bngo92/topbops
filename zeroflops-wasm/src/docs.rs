@@ -1,9 +1,14 @@
 use yew::{html, Html};
 
 pub fn docs() -> Html {
-    html! {
-        <div>
-            <h1>{"Docs"}</h1>
+    crate::nav_content(
+        html! {
+          <ul class="navbar-nav me-auto">
+            <li class="navbar-brand">{"Docs"}</li>
+          </ul>
+        },
+        html! {
+          <div>
             <h3>{"Item features"}</h3>
             <h5>{"Rank items"}</h5>
             <p>{"Rank items like your songs to figure out what your favorite songs are."}</p>
@@ -35,6 +40,7 @@ pub fn docs() -> Html {
             <p>{"Create a list from other lists to reuse the data sources."}</p>
             <p>{"Create a table showing your average ratings by album."}</p>
             <p>{"Create a column chart showing artists with the most number of songs you've rated 10 out of 10."}</p>
-        </div>
-    }
+          </div>
+        },
+    )
 }

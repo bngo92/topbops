@@ -295,7 +295,9 @@ impl Component for App {
                             }
                         </div>
                         if self.user_loaded {
-                            <Switch<Route> {render} />
+                            <div class="flex-grow-1 h-100 d-flex flex-column">
+                                <Switch<Route> {render} />
+                            </div>
                         }
                     </div>
                     if self.login {
@@ -390,56 +392,62 @@ impl Component for Home {
     fn view(&self, ctx: &Context<Self>) -> Html {
         let disabled = !ctx.props().logged_in;
         let create = ctx.link().callback(|_| HomeMsg::Create);
-        html! {
-          <div>
-            <h1>if disabled { {"Demo"} } else { { "Home" } }</h1>
-            <div class="row mb-3">
-              <label class="col-auto col-form-label">
-                <strong>{"Sort Mode:"}</strong>
-              </label>
-              <div class="col-auto">
-                <select ref={self.select_ref.clone()} class="form-select">
-                  <option>{"Tournament"}</option>
-                  <option selected=true>{"Random Tournament"}</option>
-                  <option>{"Random Matches"}</option>
-                  <option>{"Random Rounds"}</option>
-                </select>
-              </div>
-              <div class="col-auto">
-                <button class="btn btn-info" onclick={ctx.link().callback(|_| HomeMsg::ToggleHelp)}>{"Help"}</button>
-              </div>
-            </div>
-            <Collapse collapsed={self.help_collapsed}>
-              <p>
-              {"zeroflops is an app that helps you filter your data and remove flops from your life.
-                Use it to gain insights about your favorite songs, TV shows, and even restaurants.
-                zeroflops makes it easy to rate and/or rank what's important to you."}
-              </p>
-              <p>
-              {"The data is organized into lists of items and your lists are displayed here on the home page using user-defined widgets.
-                The fastest way to rank your items is with a randomly generated tournament.
-                You can start a tournament for a list by clicking the "}<button type="button" class="btn btn-success btn-sm">{"Rank"}</button>
-                {" button below the list widget. Here is the full list of sort modes:"}
-              </p>
-              <ul>
-                <li><strong>{"Tournament"}</strong>{" - Sort by choosing between items that are organized using a seeded tournament."}</li>
-                <li><strong>{"Random Tournament"}</strong>{" - Sort by choosing between items that are organized using a randomly generated tournament."}</li>
-                <li><strong>{"Random Matches"}</strong>{" - Sort by choosing between randomly selected items."}</li>
-                <li><strong>{"Random Rounds"}</strong>{" - This mode is similar to Random Matches except every item will be selected before an item is repeated."}</li>
+        nav_content(
+            html! {
+              <ul class="navbar-nav me-auto">
+                <li class="navbar-brand">if disabled { {"Demo"} } else { { "Home" } }</li>
               </ul>
-              <p>{"To rate items, go to the item rating page for the list by clicking on the "}<button type="button" class="btn btn-success btn-sm">{"Rate"}</button>{" button."}</p>
-              <p>{"You can also:"}</p>
-              <ul class="mb-0">
-                  <li>{"View items in the list by clicking on the widget to expand it."}</li>
-                  <li>{"Search for data about your ratings and rankings by going to the "}<Link<Route> to={Route::Search}>{"Search"}</Link<Route>>{" page."}</li>
-              </ul>
-            </Collapse>
-            <div class="row mt-3">
-            {for self.lists.iter().map(|l| html! {<Widget list={l.clone()} select_ref={self.select_ref.clone()}/>})}
-            </div>
-            <button type="button" class="btn btn-primary" onclick={create} {disabled}>{"Create List"}</button>
-          </div>
-        }
+            },
+            html! {
+              <div>
+                <div class="row mb-3">
+                  <label class="col-auto col-form-label">
+                    <strong>{"Sort Mode:"}</strong>
+                  </label>
+                  <div class="col-auto">
+                    <select ref={self.select_ref.clone()} class="form-select">
+                      <option>{"Tournament"}</option>
+                      <option selected=true>{"Random Tournament"}</option>
+                      <option>{"Random Matches"}</option>
+                      <option>{"Random Rounds"}</option>
+                    </select>
+                  </div>
+                  <div class="col-auto">
+                    <button class="btn btn-info" onclick={ctx.link().callback(|_| HomeMsg::ToggleHelp)}>{"Help"}</button>
+                  </div>
+                </div>
+                <Collapse collapsed={self.help_collapsed}>
+                  <p>
+                  {"zeroflops is an app that helps you filter your data and remove flops from your life.
+                    Use it to gain insights about your favorite songs, TV shows, and even restaurants.
+                    zeroflops makes it easy to rate and/or rank what's important to you."}
+                  </p>
+                  <p>
+                  {"The data is organized into lists of items and your lists are displayed here on the home page using user-defined widgets.
+                    The fastest way to rank your items is with a randomly generated tournament.
+                    You can start a tournament for a list by clicking the "}<button type="button" class="btn btn-success btn-sm">{"Rank"}</button>
+                    {" button below the list widget. Here is the full list of sort modes:"}
+                  </p>
+                  <ul>
+                    <li><strong>{"Tournament"}</strong>{" - Sort by choosing between items that are organized using a seeded tournament."}</li>
+                    <li><strong>{"Random Tournament"}</strong>{" - Sort by choosing between items that are organized using a randomly generated tournament."}</li>
+                    <li><strong>{"Random Matches"}</strong>{" - Sort by choosing between randomly selected items."}</li>
+                    <li><strong>{"Random Rounds"}</strong>{" - This mode is similar to Random Matches except every item will be selected before an item is repeated."}</li>
+                  </ul>
+                  <p>{"To rate items, go to the item rating page for the list by clicking on the "}<button type="button" class="btn btn-success btn-sm">{"Rate"}</button>{" button."}</p>
+                  <p>{"You can also:"}</p>
+                  <ul class="mb-0">
+                    <li>{"View items in the list by clicking on the widget to expand it."}</li>
+                    <li>{"Search for data about your ratings and rankings by going to the "}<Link<Route> to={Route::Search}>{"Search"}</Link<Route>>{" page."}</li>
+                  </ul>
+                </Collapse>
+                <div class="row mt-3">
+                  {for self.lists.iter().map(|l| html! {<Widget list={l.clone()} select_ref={self.select_ref.clone()}/>})}
+                </div>
+                <button type="button" class="btn btn-primary" onclick={create} {disabled}>{"Create List"}</button>
+              </div>
+            },
+        )
     }
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
@@ -919,35 +927,33 @@ impl Component for ListComponent {
                     }
                 };
                 let user = user_list(list, &ctx.props().user);
-                html! {
-                    <div class="flex-grow-1 h-100 d-flex flex-column">
-                        <nav class="navbar navbar-expand py-2 mb-3" style="background-color: #2fb380;">
-                            <div class="container-fluid">
-                                <ul class="navbar-nav me-auto">
-                                    <li class="navbar-brand">{&list.name}</li>
-                                    <li class="nav-item">
-                                        <Link<ListsRoute> classes={tabs[0]} to={ListsRoute::View{id: list.id.clone()}}>{"View"}</Link<ListsRoute>>
-                                    </li>
-                                    <li class="nav-item">
-                                        <Link<ListsRoute> classes={tabs[1]} to={ListsRoute::List{id: list.id.clone()}}>{"Items"}</Link<ListsRoute>>
-                                    </li>
-                                    if user {
-                                        {dropdown_html}
-                                        <li class="nav-item">
-                                            <Link<ListsRoute> classes={tabs[2]} to={ListsRoute::Edit{id: list.id.clone()}}>{"Settings"}</Link<ListsRoute>>
-                                        </li>
-                                    }
-                                </ul>
-                            </div>
-                        </nav>
-                        <div class="container-fluid flex-grow-1 overflow-y-auto">
-                            if !user {
-                                <h3>{&format!("{}'s list", list.user_id)}</h3>
-                            }
-                            {component}
-                        </div>
-                    </div>
-                }
+                nav_content(
+                    html! {
+                      <ul class="navbar-nav me-auto">
+                        <li class="navbar-brand">{&list.name}</li>
+                        <li class="nav-item">
+                          <Link<ListsRoute> classes={tabs[0]} to={ListsRoute::View{id: list.id.clone()}}>{"View"}</Link<ListsRoute>>
+                        </li>
+                        <li class="nav-item">
+                          <Link<ListsRoute> classes={tabs[1]} to={ListsRoute::List{id: list.id.clone()}}>{"Items"}</Link<ListsRoute>>
+                        </li>
+                        if user {
+                          {dropdown_html}
+                          <li class="nav-item">
+                            <Link<ListsRoute> classes={tabs[2]} to={ListsRoute::Edit{id: list.id.clone()}}>{"Settings"}</Link<ListsRoute>>
+                          </li>
+                        }
+                      </ul>
+                    },
+                    html! {
+                      <>
+                        if !user {
+                          <h3>{&format!("{}'s list", list.user_id)}</h3>
+                        }
+                        {component}
+                      </>
+                    },
+                )
             }
         }
     }
@@ -1004,23 +1010,45 @@ impl Component for Settings {
         let location = window.location();
         // TODO: let you remove integrations
         // Should we link to Google profile?
-        html! {
-            <div>
+        nav_content(
+            html! {
+              <ul class="navbar-nav me-auto">
+                <li class="navbar-brand">{"Settings"}</li>
+              </ul>
+            },
+            html! {
+              <div>
                 <h1>{"Integrations"}</h1>
                 <h2>{"Spotify"}</h2>
                 if let (Some(url), Some(user)) = (&ctx.props().user.spotify_url, &ctx.props().user.spotify_user) {
-                    <a href={url.clone()}>{&user}</a>
+                  <a href={url.clone()}>{&user}</a>
                 } else {
-                    <a class="btn btn-success" href={format!("https://accounts.spotify.com/authorize?client_id=ee3d1b4f8d80477ea48743a511ef3018&redirect_uri={}/api/login&response_type=code&scope=playlist-modify-public playlist-modify-private user-read-recently-played playlist-read-private", location.origin().unwrap().as_str())}>{"Log in with Spotify"}</a>
+                  <a class="btn btn-success" href={format!("https://accounts.spotify.com/authorize?client_id=ee3d1b4f8d80477ea48743a511ef3018&redirect_uri={}/api/login&response_type=code&scope=playlist-modify-public playlist-modify-private user-read-recently-played playlist-read-private", location.origin().unwrap().as_str())}>{"Log in with Spotify"}</a>
                 }
                 <h2>{"Google"}</h2>
                 if let Some(google_email) = &ctx.props().user.google_email {
-                    <p>{google_email}</p>
+                  <p>{google_email}</p>
                 } else {
-                    <a class="btn btn-success" href={format!("https://accounts.google.com/o/oauth2/v2/auth?client_id=1038220726403-n55jha2cvprd8kdb4akdfvo0uiok4p5u.apps.googleusercontent.com&redirect_uri={}/api/login/google&response_type=code&scope=email", location.origin().unwrap().as_str())}>{"Log in with Google"}</a>
+                  <a class="btn btn-success" href={format!("https://accounts.google.com/o/oauth2/v2/auth?client_id=1038220726403-n55jha2cvprd8kdb4akdfvo0uiok4p5u.apps.googleusercontent.com&redirect_uri={}/api/login/google&response_type=code&scope=email", location.origin().unwrap().as_str())}>{"Log in with Google"}</a>
                 }
+              </div>
+            },
+        )
+    }
+}
+
+fn nav_content(nav: Html, content: Html) -> Html {
+    html! {
+        <>
+            <nav class="navbar navbar-expand py-2 mb-3" style="background-color: #2fb380;">
+                <div class="container-fluid">
+                    {nav}
+                </div>
+            </nav>
+            <div class="container-fluid flex-grow-1 overflow-y-auto">
+                {content}
             </div>
-        }
+        </>
     }
 }
 

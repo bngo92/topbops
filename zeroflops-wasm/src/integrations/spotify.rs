@@ -68,43 +68,49 @@ impl Component for SpotifyIntegration {
             Vec::new()
         };
         let import = ctx.link().callback(|_| Msg::Import);
-        html! {
-            <div>
-                <h1>{"Spotify"}</h1>
+        crate::nav_content(
+            html! {
+              <ul class="navbar-nav me-auto">
+                <li class="navbar-brand">{"Spotify"}</li>
+              </ul>
+            },
+            html! {
+              <div>
                 <Accordion header={"Recent Tracks"} collapsed={false}>
-                    if ctx.props().logged_in {
-                        <div class="row">
-                            <div class="col"></div>
-                            <div class="col-1"><strong>{"Rating"}</strong></div>
-                            <div class="col-1"><strong>{"User Score"}</strong></div>
-                        </div>
-                        {for track_html}
-                    } else {
-                        <p>{"Create an account to view and import tracks that were recently played in Spotify"}</p>
-                    }
+                  if ctx.props().logged_in {
+                    <div class="row">
+                      <div class="col"></div>
+                      <div class="col-1"><strong>{"Rating"}</strong></div>
+                      <div class="col-1"><strong>{"User Score"}</strong></div>
+                    </div>
+                    {for track_html}
+                  } else {
+                    <p>{"Create an account to view and import tracks that were recently played in Spotify"}</p>
+                  }
                 </Accordion>
                 <Accordion header={"Saved Playlists"} collapsed={false}>
-                    if ctx.props().logged_in {
-                        if let Some(playlists) = &self.playlists {
-                            {for playlists.items.iter().map(|i| html! {<div><a href={i.external_urls["spotify"].clone()}>{&i.name}</a></div>})}
-                        }
-                    } else {
-                        <p>{"Create an account to import playlists from Spotify"}</p>
+                  if ctx.props().logged_in {
+                    if let Some(playlists) = &self.playlists {
+                      {for playlists.items.iter().map(|i| html! {<div><a href={i.external_urls["spotify"].clone()}>{&i.name}</a></div>})}
                     }
+                  } else {
+                    <p>{"Create an account to import playlists from Spotify"}</p>
+                  }
                 </Accordion>
                 <h2>{"Import from Spotify link"}</h2>
                 <form>
-                    <div class="row">
-                        <div class="col-12 col-md-8 col-lg-9">
-                            <input ref={self.import_ref.clone()} type="text" class="w-100 h-100" value={default_import}/>
-                        </div>
-                        <div class="col-2 col-lg-1 pe-2">
-                            <button type="button" class="btn btn-success" onclick={import} disabled={!ctx.props().logged_in}>{"Import"}</button>
-                        </div>
+                  <div class="row">
+                    <div class="col-12 col-md-8 col-lg-9">
+                      <input ref={self.import_ref.clone()} type="text" class="w-100 h-100" value={default_import}/>
                     </div>
+                    <div class="col-2 col-lg-1 pe-2">
+                      <button type="button" class="btn btn-success" onclick={import} disabled={!ctx.props().logged_in}>{"Import"}</button>
+                    </div>
+                  </div>
                 </form>
-            </div>
-        }
+              </div>
+            },
+        )
     }
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {

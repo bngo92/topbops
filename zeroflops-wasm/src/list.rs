@@ -40,15 +40,21 @@ impl Component for Lists {
         });
         let disabled = !ctx.props().logged_in;
         let create = ctx.link().callback(|_| ListsMsg::Create);
-        html! {
-          <div>
-            <h1>{"All Lists"}</h1>
-            <div class="row mt-3">
-              {for list_html}
-            </div>
-            <button type="button" class="btn btn-primary" onclick={create} {disabled}>{"Create List"}</button>
-          </div>
-        }
+        crate::nav_content(
+            html! {
+              <ul class="navbar-nav me-auto">
+                <li class="navbar-brand">{"All Lists"}</li>
+              </ul>
+            },
+            html! {
+              <div>
+                <div class="row mt-3">
+                  {for list_html}
+                </div>
+                <button type="button" class="btn btn-primary" onclick={create} {disabled}>{"Create List"}</button>
+              </div>
+            },
+        )
     }
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {

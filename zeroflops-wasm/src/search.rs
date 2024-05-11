@@ -38,74 +38,72 @@ impl Component for Search {
         } else {
             "Split View"
         };
-        html! {
-            <div>
-                <div class="container-lg">
-                    <div class="row align-items-end mb-3">
-                        <h1 class="col m-0">{"Query"}</h1>
-                        <div class="col-2">
-                            <button type="button" class="btn btn-info w-100" {onclick}>{button_text}</button>
-                        </div>
-                        <div class="col-auto">
-                            <button class="btn btn-info" onclick={ctx.link().callback(|_| SearchMsg::ToggleHelp)}>{"Help"}</button>
-                        </div>
-                    </div>
-                    <Collapse collapsed={self.help_collapsed}>
-                        <p>{"Run SQL queries to transform your data into insights.
-                            All queries should run against the \"c\" table."}</p>
-                        <p><strong>{"Example Queries"}</strong></p>
-                        <p>{"Get names of songs that have more tournament and match wins than losses:"}</p>
-                        <code>{"SELECT name, user_wins, user_losses FROM item WHERE type='track' AND user_wins > user_losses"}</code>
-                        <p>{"Get names of songs ordered by your scores:"}</p>
-                        <code>{"SELECT name, user_score FROM item WHERE type='track' ORDER BY user_score DESC"}</code>
-                        <p>{"Count how many songs were performed by each distinct group of artists:"}</p>
-                        <code>{"SELECT artists, COUNT(1) FROM item WHERE type='track' GROUP BY artists"}</code>
-                        <p>{"Get songs performed by Troy:"}</p>
-                        <code>{"SELECT name, artists FROM item, json_each(metadata->'artists') WHERE json_each.value='Troy'"}</code>
-                        <p>{"Get your average score for each group of artists:"}</p>
-                        <code>{"SELECT artists, AVG(user_score) FROM item WHERE type='track' GROUP BY artists"}</code>
-                        <p><strong>{"Fields"}</strong></p>
-                        <p>{"The fields you can query on are listed below.
-                            Here is the list of fields that are available for all items:"}</p>
-                        <ul>
-                            <li>{"type: string - The type of item"}</li>
-                            <li>{"name: string - The name of the item"}</li>
-                            <li>{"rating: number - The rating that you gave the item"}</li>
-                            <li>{"user_score: number - Score computed from tournaments and matches"}</li>
-                            <li>{"user_wins: number - Tournament and match wins"}</li>
-                            <li>{"user_losses: number - Tournament and match losses"}</li>
-                            <li>{"hidden: boolean - The item was hidden"}</li>
-                        </ul>
-                        <p>{"There are also fields that are specific to a single item type."}</p>
-                        <p><em>{"Spotify Item Fields"}</em></p>
-                        <p>{"Type is set to 'track' for Spotify items"}</p>
-                        <ul>
-                            <li>{"album: string - The name of the album that the track appears on"}</li>
-                            <li>{"artists: array of string - The names of the artists who performed the track"}</li>
-                            <li>{"duration_ms: number - The track length in milliseconds"}</li>
-                            <li>{"popularity - Spotify popularity of the track"}</li>
-                            <li>{"track_number - The number of the track"}</li>
-                        </ul>
-                    </Collapse>
+        crate::nav_content(
+            html! {
+              <>
+                <ul class="navbar-nav me-auto">
+                  <li class="navbar-brand">{"Query"}</li>
+                </ul>
+                <div class="d-flex gap-3">
+                  <button type="button" class="btn btn-info" style="width: 112px" {onclick}>{button_text}</button>
+                  <button class="btn btn-info" onclick={ctx.link().callback(|_| SearchMsg::ToggleHelp)}>{"Help"}</button>
+                </div>
+              </>
+            },
+            html! {
+              <>
+                <div class="mb-3">
+                  <Collapse collapsed={self.help_collapsed}>
+                    <p>{"Run SQL queries to transform your data into insights.
+                        All queries should run against the \"c\" table."}</p>
+                    <p><strong>{"Example Queries"}</strong></p>
+                    <p>{"Get names of songs that have more tournament and match wins than losses:"}</p>
+                    <code>{"SELECT name, user_wins, user_losses FROM item WHERE type='track' AND user_wins > user_losses"}</code>
+                    <p>{"Get names of songs ordered by your scores:"}</p>
+                    <code>{"SELECT name, user_score FROM item WHERE type='track' ORDER BY user_score DESC"}</code>
+                    <p>{"Count how many songs were performed by each distinct group of artists:"}</p>
+                    <code>{"SELECT artists, COUNT(1) FROM item WHERE type='track' GROUP BY artists"}</code>
+                    <p>{"Get songs performed by Troy:"}</p>
+                    <code>{"SELECT name, artists FROM item, json_each(metadata->'artists') WHERE json_each.value='Troy'"}</code>
+                    <p>{"Get your average score for each group of artists:"}</p>
+                    <code>{"SELECT artists, AVG(user_score) FROM item WHERE type='track' GROUP BY artists"}</code>
+                    <p><strong>{"Fields"}</strong></p>
+                    <p>{"The fields you can query on are listed below.
+                        Here is the list of fields that are available for all items:"}</p>
+                    <ul>
+                      <li>{"type: string - The type of item"}</li>
+                      <li>{"name: string - The name of the item"}</li>
+                      <li>{"rating: number - The rating that you gave the item"}</li>
+                      <li>{"user_score: number - Score computed from tournaments and matches"}</li>
+                      <li>{"user_wins: number - Tournament and match wins"}</li>
+                      <li>{"user_losses: number - Tournament and match losses"}</li>
+                      <li>{"hidden: boolean - The item was hidden"}</li>
+                    </ul>
+                    <p>{"There are also fields that are specific to a single item type."}</p>
+                    <p><em>{"Spotify Item Fields"}</em></p>
+                    <p>{"Type is set to 'track' for Spotify items"}</p>
+                    <ul>
+                      <li>{"album: string - The name of the album that the track appears on"}</li>
+                      <li>{"artists: array of string - The names of the artists who performed the track"}</li>
+                      <li>{"duration_ms: number - The track length in milliseconds"}</li>
+                      <li>{"popularity - Spotify popularity of the track"}</li>
+                      <li>{"track_number - The number of the track"}</li>
+                    </ul>
+                  </Collapse>
                 </div>
                 if self.split_view {
-                    <div class="container-fluid">
-                        <div class="row">
-                            <div class="col-6">
-                                <SearchPane/>
-                            </div>
-                            <div class="col-6">
-                                <SearchPane/>
-                            </div>
-                        </div>
-                    </div>
+                  <div class="d-flex gap-3">
+                    <SearchPane/>
+                    <SearchPane/>
+                  </div>
                 } else {
-                    <div class="container-lg">
-                        <SearchPane/>
-                    </div>
+                  <div style="max-width: 1000px">
+                    <SearchPane/>
+                  </div>
                 }
-            </div>
-        }
+              </>
+            },
+        )
     }
 
     fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
@@ -176,7 +174,7 @@ impl Component for SearchPane {
             }
         });
         html! {
-            <div class="row">
+            <div class="row w-100">
                 if let Format::Table = self.format {
                     <div class="col-auto">
                         <select ref={self.select_ref.clone()} class="form-select mb-3" {onchange}>
