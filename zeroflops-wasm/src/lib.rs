@@ -760,33 +760,6 @@ impl Component for ListView {
     }
 }
 
-#[derive(Eq, PartialEq, Properties)]
-pub struct RowProps {
-    i: i32,
-    values: Vec<String>,
-}
-
-struct Row;
-
-impl Component for Row {
-    type Message = ();
-    type Properties = RowProps;
-
-    fn create(_: &Context<Self>) -> Self {
-        Row
-    }
-
-    fn view(&self, ctx: &Context<Self>) -> Html {
-        html! {
-          <tr>
-            <th>{ctx.props().i}</th>
-            <td class="td">{&ctx.props().values[0]}</td>
-            <td class="td">{&ctx.props().values[1]}</td>
-          </tr>
-        }
-    }
-}
-
 enum ListState {
     Fetching,
     Success(List),
