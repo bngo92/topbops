@@ -97,14 +97,19 @@ fn switch(
     show_list_dropdown: Rc<Callback<MouseEvent>>,
 ) -> Html {
     let logged_in = user.is_some();
-    let content = match routes {
+    match routes {
         Route::Home => html! { <Home {logged_in}/> },
         Route::Docs => docs::docs(),
         Route::ListsRoot => html! { <crate::list::Lists {logged_in}/> },
         Route::Lists => {
-            html! { <Switch<ListsRoute> render={move |r| switch_lists(r, Rc::clone(&user), list_dropdown, Rc::clone(&show_list_dropdown))}/> }
+            let render = move |view| {
+                html! {
+                  <ListComponent {view} user={Rc::clone(&user)} dropdown={list_dropdown} show_dropdown={Rc::clone(&show_list_dropdown)}/>
+                }
+            };
+            html! { <Switch<ListsRoute> {render}/> }
         }
-        Route::Search => return html! { <Search {logged_in}/> },
+        Route::Search => html! { <Search {logged_in}/> },
         Route::Settings => html! {
             if let Some(user) = (*user).clone() {
                 <Settings {user}/>
@@ -113,19 +118,7 @@ fn switch(
             }
         },
         Route::Spotify => html! { <SpotifyIntegration {logged_in}/> },
-    };
-    html! {
-        { content }
     }
-}
-
-fn switch_lists(
-    route: ListsRoute,
-    user: Rc<Option<User>>,
-    list_dropdown: bool,
-    show_list_dropdown: Rc<Callback<MouseEvent>>,
-) -> Html {
-    html! { <ListComponent view={route} {user} dropdown={list_dropdown} show_dropdown={show_list_dropdown}/> }
 }
 
 enum Msg {
