@@ -252,9 +252,9 @@ impl Component for App {
                     </nav>
                     <div class="d-flex vh-100 min-vh-100 align-items-stretch">
                         <div class="d-none d-sm-flex flex-column p-3 bg-dark flex-shrink-0" style="width: 200px;">
-                            <Link<Route> classes="text-white text-decoration-none" to={Route::Home}>{"zeroflops"}</Link<Route>>
+                            <Link<Route> classes="text-white text-decoration-none fs-5" to={Route::Home}>{"zeroflops"}</Link<Route>>
                             <hr/>
-                            <ul class="nav nav-pills flex-column">
+                            <ul class="nav nav-pills flex-column mb-auto">
                                 <li class="nav-item">
                                     <Link<Route> classes={vertical_search} to={Route::ListsRoot}>{"Lists"}</Link<Route>>
                                 </li>
@@ -278,7 +278,7 @@ impl Component for App {
                                         if let Some(user) = &*self.user {
                                             <li class="nav-item dropdown">
                                                 <a class={vertical_toggle_class} href="#" onclick={dropdown}>{&user.user_id}</a>
-                                                <ul class={vertical_menu_class}>
+                                                <ul class={vertical_menu_class} style="inset: auto auto 0px 0px; transform: translate3d(0px, -34px, 0px)">
                                                     <li><Link<Route> classes="dropdown-item" to={Route::Settings}>{"Settings"}</Link<Route>></li>
                                                     <li><a class="dropdown-item" href="/api/logout">{"Log out"}</a></li>
                                                 </ul>
