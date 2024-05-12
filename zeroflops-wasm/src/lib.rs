@@ -927,6 +927,7 @@ async fn get_user() -> Result<User, JsValue> {
 
 fn user_list(list: &List, user: &Option<User>) -> bool {
     Some(&list.user_id) == user.as_ref().as_ref().map(|u| &u.user_id)
+        || (user.is_none() && list.user_id == "demo")
 }
 
 fn not_found() -> Html {

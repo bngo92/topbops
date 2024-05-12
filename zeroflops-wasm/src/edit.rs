@@ -107,7 +107,7 @@ impl Component for Edit {
         html! {
             <div>
                 <h4>{"List Settings"}</h4>
-                <form style="max-width: 800px">
+                <form class="mb-4" style="max-width: 800px">
                     <div class="form-floating mb-2">
                         if let ListMode::External = &self.list.mode {
                             <input type="text" readonly=true class="form-control-plaintext" id="name" value={self.list.name.clone()} placeholder=""/>
@@ -139,20 +139,18 @@ impl Component for Edit {
                         <input ref={&self.public_ref} class="form-check-input" type="checkbox" id="public"/>
                     </div>
                 </form>
-                <hr/>
                 <h4>{"Data Sources"}</h4>
                 <div class="mb-3">
                     {for source_html}
                 </div>
                 <div class="d-flex gap-3">
                     <button type="button" class="btn btn-primary" onclick={add_source}>{"Add source"}</button>
-                    <button type="button" class="btn btn-success" onclick={save} {disabled}>{"Save all settings"}</button>
                 </div>
                 <hr/>
-                <h4>{"Delete List"}</h4>
+                <button type="button" class="btn btn-success mb-3" onclick={save} {disabled}>{"Save all settings"}</button>
                 <div class="d-flex gap-3">
-                    <button type="button" class="btn btn-danger" onclick={delete}>{"Delete"}</button>
-                    <button type="button" class="btn btn-danger" onclick={delete_all}>{"Delete All"}</button>
+                    <button type="button" class="btn btn-danger" onclick={delete} {disabled}>{"Delete"}</button>
+                    <button type="button" class="btn btn-danger" onclick={delete_all} {disabled}>{"Delete All"}</button>
                 </div>
             </div>
         }
