@@ -98,22 +98,22 @@ impl Component for Input {
     fn view(&self, ctx: &Context<Self>) -> Html {
         let (class, error) = if let Some(error) = &ctx.props().error {
             (
-                "w-100 is-invalid",
+                "is-invalid",
                 Some(html! {<div class="invalid-feedback">{error}</div>}),
             )
         } else {
-            ("w-100", None)
+            ("", None)
         };
         html! {
-            <div class="row">
-                <div class="col-12 col-md">
+            <div class="d-flex gap-2">
+                <div style="flex-basis: 800px">
                     // Copy only the styles from .form-control that are needed for sizing
-                    <input ref={&ctx.props().input_ref} type="text" {class} style="padding: .5rem 1rem; font-size: .875rem; border-width: 1px" placeholder={ctx.props().default} value={ctx.props().value.clone()} disabled={ctx.props().disabled}/>
+                    <input ref={&ctx.props().input_ref} type="text" {class} style="padding: .5rem 1rem; font-size: .875rem; border-width: 1px; min-width: 100%" placeholder={ctx.props().default} value={ctx.props().value.clone()} disabled={ctx.props().disabled}/>
                     if let Some(error) = error {
                         {error}
                     }
                 </div>
-                <div class="col-auto">
+                <div>
                     <button type="button" class="btn btn-success" onclick={&ctx.props().onclick} disabled={ctx.props().disabled}>{"Search"}</button>
                 </div>
             </div>

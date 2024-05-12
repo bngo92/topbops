@@ -293,7 +293,7 @@ impl Component for App {
                             }
                         </div>
                         if self.user_loaded {
-                            <div class="flex-grow-1 h-100 d-flex flex-column">
+                            <div class="flex-grow-1 h-100 w-100 d-flex flex-column">
                                 <Switch<Route> {render} />
                             </div>
                         }

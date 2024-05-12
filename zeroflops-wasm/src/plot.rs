@@ -28,7 +28,7 @@ impl DataView {
             <div>
                 <canvas id="canvas" width="640" height="426" class={if let DataView::Table = self { "d-none" } else { "" }}></canvas>
                 if let DataView::Table = self {
-                    {df_table_view(df)}
+                    {df_table_view(df, true)}
                 }
             </div>
         }
@@ -45,38 +45,26 @@ impl DataView {
     }
 }
 
-pub fn df_table_view(df: &DataFrame) -> Html {
+pub fn df_table_view(df: &DataFrame, min_width: bool) -> Html {
+    let style = if min_width {
+        "min-width: calc(min(568px, 100%))"
+    } else {
+        "min-width: 100%"
+    };
     html! {
-        <>
-            <div class="d-md-none">
-                <div class="table-responsive">
-                    <table class="table table-striped mb-0">
-                        <thead>
-                            <tr>
-                                <th>{"#"}</th>
-                                {for df.schema.fields.iter().map(|f| html! {
-                                    <th>{&f.name()}</th>
-                                })}
-                            </tr>
-                        </thead>
-                        <tbody>{for (0..df.arrays[0].len()).map(|i| df_item_view(df, i))}</tbody>
-                    </table>
-                </div>
-            </div>
-            <div class="d-none d-md-block h-100">
-                <table class="table table-striped mb-0 w-auto" style="min-width: 568px">
-                    <thead>
-                        <tr>
-                            <th>{"#"}</th>
-                            {for df.schema.fields.iter().map(|f| html! {
-                                <th>{&f.name()}</th>
-                            })}
-                        </tr>
-                    </thead>
-                    <tbody>{for (0..df.arrays[0].len()).map(|i| df_item_view(df, i))}</tbody>
-                </table>
-            </div>
-        </>
+        <div class="table-responsive">
+            <table class="table table-striped mb-0 w-auto" {style}>
+                <thead>
+                    <tr>
+                        <th>{"#"}</th>
+                        {for df.schema.fields.iter().map(|f| html! {
+                            <th>{&f.name()}</th>
+                        })}
+                    </tr>
+                </thead>
+                <tbody>{for (0..df.arrays[0].len()).map(|i| df_item_view(df, i))}</tbody>
+            </table>
+        </div>
     }
 }
 

@@ -206,7 +206,7 @@ impl Component for Widget {
             <div class="col-12 col-md-6">
                 <Accordion header={list.name.clone()} collapsed={self.collapsed} {on_toggle}>
                     if let Some(query) = &self.query {
-                        {crate::plot::df_table_view(query)}
+                        {crate::plot::df_table_view(query, false)}
                     } else {
                         <div></div>
                     }
