@@ -124,6 +124,8 @@ fn switch(
 enum Msg {
     Demo,
     Success(User),
+    Sidebar,
+    HideSidebar,
     Login,
     HideLogin,
     Dropdown,
@@ -137,6 +139,7 @@ enum Msg {
 struct App {
     user_loaded: bool,
     user: Rc<Option<User>>,
+    sidebar: bool,
     login: bool,
     dropdown: bool,
     list_dropdown: bool,
@@ -157,6 +160,7 @@ impl Component for App {
         App {
             user_loaded: false,
             user: Rc::new(None),
+            sidebar: false,
             login: false,
             dropdown: false,
             list_dropdown: false,
@@ -172,14 +176,10 @@ impl Component for App {
         let search = /*if location.pathname().unwrap() == "/search" {
             "nav-link active"
         } else */{
-            "nav-link"
+            "nav-link text-white"
         };
-        let vertical_search = "nav-link text-white";
-        let (toggle_class, menu_class) = dropdown_class(self.dropdown, false);
-        let (int_toggle_class, int_menu_class) = dropdown_class(self.integrations_dropdown, false);
-        let (vertical_toggle_class, vertical_menu_class) = dropdown_class(self.dropdown, true);
-        let (vertical_int_toggle_class, vertical_int_menu_class) =
-            dropdown_class(self.integrations_dropdown, true);
+        let (toggle_class, menu_class) = dropdown_class(self.dropdown);
+        let (int_toggle_class, int_menu_class) = dropdown_class(self.integrations_dropdown);
         let dropdown = ctx.link().callback(|e: MouseEvent| {
             // Prevent reset_dropdown from triggering
             e.stop_propagation();
@@ -189,6 +189,13 @@ impl Component for App {
             e.stop_propagation();
             Msg::IntegrationsDropdown
         });
+        let sidebar_class = if self.sidebar {
+            "p-3 bg-dark flex-shrink-0 h-100 offcanvas-sm offcanvas-start text-bg-dark show"
+        } else {
+            "p-3 bg-dark flex-shrink-0 h-100 offcanvas-sm offcanvas-start text-bg-dark"
+        };
+        let sidebar = ctx.link().callback(|_| Msg::Sidebar);
+        let hide_sidebar = ctx.link().callback(|_| Msg::HideSidebar);
         let login = ctx.link().callback(|_| Msg::Login);
         let hide = ctx.link().callback(|_| Msg::HideLogin);
         let reset_dropdown = ctx.link().callback(|_| Msg::ResetDropdown);
@@ -209,105 +216,81 @@ impl Component for App {
             }
         };
         html! {
-            <div onclick={reset_dropdown}>
-                <BrowserRouter>
-                    <nav class="navbar navbar-expand navbar-dark bg-dark d-sm-none">
-                        <div class="container-lg">
-                            <Link<Route> classes="navbar-brand" to={Route::Home}>{"zeroflops"}</Link<Route>>
-                            <ul class="navbar-nav me-auto">
-                                <li class="nav-item">
-                                    <Link<Route> classes={search} to={Route::ListsRoot}>{"Lists"}</Link<Route>>
-                                </li>
-                                <li class="nav-item">
-                                    <Link<Route> classes={search} to={Route::Search}>{"Query"}</Link<Route>>
-                                </li>
-                                <li class="nav-item dropdown">
-                                    <a class={int_toggle_class} href="#" onclick={int_dropdown.clone()}>{"Integrations"}</a>
-                                    <ul class={int_menu_class}>
-                                        <li><Link<Route> classes="dropdown-item" to={Route::Spotify}>{"Spotify"}</Link<Route>></li>
-                                    </ul>
-                                </li>
-                                <li class="nav-item">
-                                    <Link<Route> classes={search} to={Route::Docs}>{"Docs"}</Link<Route>>
-                                </li>
-                            </ul>
-                            if self.user_loaded {
-                                <ul class="navbar-nav">
-                                    if let Some(user) = &*self.user {
-                                        <li class="nav-item dropdown">
-                                            <a class={toggle_class} href="#" onclick={dropdown.clone()}>{&user.user_id}</a>
-                                            <ul class={menu_class}>
-                                                <li><Link<Route> classes="dropdown-item" to={Route::Settings}>{"Settings"}</Link<Route>></li>
-                                                <li><a class="dropdown-item" href="/api/logout">{"Log out"}</a></li>
-                                            </ul>
-                                        </li>
-                                    } else {
-                                        <li class="nav-item">
-                                            <a class="nav-link" href="#" onclick={login.clone()}>{"Log in"}</a>
-                                        </li>
-                                    }
-                                </ul>
-                            }
-                        </div>
-                    </nav>
-                    <div class="d-flex vh-100 min-vh-100 align-items-stretch">
-                        <div class="d-none d-sm-flex flex-column p-3 bg-dark flex-shrink-0" style="width: 200px;">
-                            <Link<Route> classes="text-white text-decoration-none fs-5" to={Route::Home}>{"zeroflops"}</Link<Route>>
-                            <hr/>
-                            <ul class="nav nav-pills flex-column mb-auto">
-                                <li class="nav-item">
-                                    <Link<Route> classes={vertical_search} to={Route::ListsRoot}>{"Lists"}</Link<Route>>
-                                </li>
-                                <li class="nav-item">
-                                    <Link<Route> classes={vertical_search} to={Route::Search}>{"Query"}</Link<Route>>
-                                </li>
-                                <li class="nav-item dropdown">
-                                    <a class={vertical_int_toggle_class} href="#" onclick={int_dropdown}>{"Integrations"}</a>
-                                    <ul class={vertical_int_menu_class}>
-                                        <li><Link<Route> classes="dropdown-item" to={Route::Spotify}>{"Spotify"}</Link<Route>></li>
-                                    </ul>
-                                </li>
-                                <li class="nav-item">
-                                    <Link<Route> classes={vertical_search} to={Route::Docs}>{"Docs"}</Link<Route>>
-                                </li>
-                            </ul>
-                            if self.user_loaded {
-                                <hr/>
-                                <div>
-                                    <ul class="nav nav-pills flex-column">
-                                        if let Some(user) = &*self.user {
-                                            <li class="nav-item dropdown">
-                                                <a class={vertical_toggle_class} href="#" onclick={dropdown}>{&user.user_id}</a>
-                                                <ul class={vertical_menu_class} style="inset: auto auto 0px 0px; transform: translate3d(0px, -34px, 0px)">
-                                                    <li><Link<Route> classes="dropdown-item" to={Route::Settings}>{"Settings"}</Link<Route>></li>
-                                                    <li><a class="dropdown-item" href="/api/logout">{"Log out"}</a></li>
-                                                </ul>
-                                            </li>
-                                        } else {
-                                            <li class="nav-item">
-                                                <a class={vertical_search} href="#" onclick={login}>{"Log in"}</a>
-                                            </li>
-                                        }
-                                    </ul>
-                                </div>
-                            }
-                        </div>
-                        if self.user_loaded {
-                            <div class="flex-grow-1 h-100 w-100 d-flex flex-column">
-                                <Switch<Route> {render} />
-                            </div>
-                        }
+          <div onclick={reset_dropdown}>
+            <BrowserRouter>
+              <nav class="navbar navbar-expand navbar-dark bg-dark d-sm-none">
+                <div class="container-lg d-flex justify-content-start gap-3">
+                  <button type="button" class="border-0" style="background-color: transparent; color: rgba(255,255,255,0.85)" onclick={sidebar}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-list" viewBox="0 0 16 16">
+                      <path fill-rule="evenodd" d="M2.5 12a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5"/>
+                    </svg>
+                  </button>
+                  <Link<Route> classes="navbar-brand" to={Route::Home}>{"zeroflops"}</Link<Route>>
+                </div>
+              </nav>
+              <div class="d-flex vh-100 min-vh-100 align-items-stretch">
+                <div class={sidebar_class} style="width: 200px;">
+                  <div class="h-100 offcanvas-body d-flex flex-column">
+                    <div class="d-flex gap-2 align-items-baseline" data-bs-theme="dark">
+                      <Link<Route> classes="text-white text-decoration-none fs-5" to={Route::Home}>{"zeroflops"}</Link<Route>>
+                      <button type="button" class="btn-close d-sm-none" onclick={hide_sidebar}></button>
                     </div>
-                    if self.login {
-                        <Modal header={"Log in"} {hide}>
-                            <div class="modal-body d-grid gap-2">
-                                <a class="btn btn-success" href={format!("https://accounts.spotify.com/authorize?client_id=ee3d1b4f8d80477ea48743a511ef3018&redirect_uri={}/api/login&response_type=code&scope=playlist-modify-public playlist-modify-private user-read-recently-played playlist-read-private", location.origin().unwrap().as_str())}>{"Log in with Spotify"}</a>
-                                <a class="btn btn-success" href={format!("https://accounts.google.com/o/oauth2/v2/auth?client_id=1038220726403-n55jha2cvprd8kdb4akdfvo0uiok4p5u.apps.googleusercontent.com&redirect_uri={}/api/login/google&response_type=code&scope=email", location.origin().unwrap().as_str())}>{"Log in with Google"}</a>
-                            </div>
-                        </Modal>
+                    <hr/>
+                    <ul class="nav nav-pills flex-column mb-auto">
+                      <li class="nav-item">
+                        <Link<Route> classes={search} to={Route::ListsRoot}>{"Lists"}</Link<Route>>
+                      </li>
+                      <li class="nav-item">
+                        <Link<Route> classes={search} to={Route::Search}>{"Query"}</Link<Route>>
+                      </li>
+                      <li class="nav-item dropdown">
+                        <a class={int_toggle_class} href="#" onclick={int_dropdown}>{"Integrations"}</a>
+                        <ul class={int_menu_class}>
+                          <li><Link<Route> classes="dropdown-item" to={Route::Spotify}>{"Spotify"}</Link<Route>></li>
+                        </ul>
+                      </li>
+                      <li class="nav-item">
+                        <Link<Route> classes={search} to={Route::Docs}>{"Docs"}</Link<Route>>
+                      </li>
+                    </ul>
+                    if self.user_loaded {
+                      <hr/>
+                      <div>
+                        <ul class="nav nav-pills flex-column">
+                          if let Some(user) = &*self.user {
+                            <li class="nav-item dropdown">
+                              <a class={toggle_class} href="#" onclick={dropdown}>{&user.user_id}</a>
+                              <ul class={menu_class} style="inset: auto auto 0px 0px; transform: translate3d(0px, -34px, 0px)">
+                                <li><Link<Route> classes="dropdown-item" to={Route::Settings}>{"Settings"}</Link<Route>></li>
+                                <li><a class="dropdown-item" href="/api/logout">{"Log out"}</a></li>
+                              </ul>
+                            </li>
+                          } else {
+                            <li class="nav-item">
+                              <a class={search} href="#" onclick={login}>{"Log in"}</a>
+                            </li>
+                          }
+                        </ul>
+                      </div>
                     }
-                </BrowserRouter>
-            </div>
+                  </div>
+                </div>
+                if self.user_loaded {
+                  <div class="flex-grow-1 h-100 w-100 d-flex flex-column">
+                    <Switch<Route> {render} />
+                  </div>
+                }
+              </div>
+              if self.login {
+                <Modal header={"Log in"} {hide}>
+                  <div class="modal-body d-grid gap-2">
+                    <a class="btn btn-success" href={format!("https://accounts.spotify.com/authorize?client_id=ee3d1b4f8d80477ea48743a511ef3018&redirect_uri={}/api/login&response_type=code&scope=playlist-modify-public playlist-modify-private user-read-recently-played playlist-read-private", location.origin().unwrap().as_str())}>{"Log in with Spotify"}</a>
+                    <a class="btn btn-success" href={format!("https://accounts.google.com/o/oauth2/v2/auth?client_id=1038220726403-n55jha2cvprd8kdb4akdfvo0uiok4p5u.apps.googleusercontent.com&redirect_uri={}/api/login/google&response_type=code&scope=email", location.origin().unwrap().as_str())}>{"Log in with Google"}</a>
+                  </div>
+                </Modal>
+              }
+            </BrowserRouter>
+          </div>
         }
     }
 
@@ -318,6 +301,8 @@ impl Component for App {
                 self.user_loaded = true;
                 self.user = Rc::new(Some(user))
             }
+            Msg::Sidebar => self.sidebar = true,
+            Msg::HideSidebar => self.sidebar = false,
             Msg::Login => self.login = true,
             Msg::HideLogin => self.login = false,
             Msg::Dropdown => self.dropdown = !self.dropdown,
@@ -347,15 +332,13 @@ impl Component for App {
     }
 }
 
-fn dropdown_class(dropdown: bool, vertical: bool) -> (&'static str, &'static str) {
-    match (dropdown, vertical) {
-        (true, false) => ("nav-link dropdown-toggle show", "dropdown-menu show"),
-        (false, false) => ("nav-link dropdown-toggle", "dropdown-menu"),
-        (true, true) => (
+fn dropdown_class(dropdown: bool) -> (&'static str, &'static str) {
+    match dropdown {
+        true => (
             "nav-link dropdown-toggle show text-white",
             "dropdown-menu dropdown-menu-dark show",
         ),
-        (false, true) => (
+        false => (
             "nav-link dropdown-toggle text-white",
             "dropdown-menu dropdown-menu-dark",
         ),
