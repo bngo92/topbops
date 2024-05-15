@@ -652,10 +652,11 @@ impl Component for ListComponent {
                     }
                 };
                 let user = user_list(list, &ctx.props().user);
-                nav_content(
-                    html! {
+                html! {
+                  <Content
+                    heading={list.name.clone()}
+                    nav={html! {
                       <ul class="navbar-nav me-auto">
-                        <li class="navbar-brand">{&list.name}</li>
                         <li class="nav-item">
                           <Link<ListsRoute> classes={tabs[0]} to={ListsRoute::View{id: list.id.clone()}}>{"View"}</Link<ListsRoute>>
                         </li>
@@ -669,16 +670,16 @@ impl Component for ListComponent {
                           </li>
                         }
                       </ul>
-                    },
-                    html! {
+                    }}
+                    content={html! {
                       <>
                         if !user {
                           <h3>{&format!("{}'s list", list.user_id)}</h3>
                         }
                         {component}
                       </>
-                    },
-                )
+                    }}/>
+                }
             }
         }
     }
@@ -727,6 +728,69 @@ fn nav_content(nav: Html, content: Html) -> Html {
                 {content}
             </div>
         </>
+    }
+}
+
+enum ContentMsg {
+    Toggle,
+}
+
+#[derive(PartialEq, Properties)]
+struct ContentProps {
+    heading: String,
+    nav: Html,
+    content: Html,
+}
+
+struct Content {
+    collapse: bool,
+}
+
+impl Component for Content {
+    type Message = ContentMsg;
+    type Properties = ContentProps;
+
+    fn create(_: &Context<Self>) -> Self {
+        Content { collapse: true }
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let class = if self.collapse {
+            "collapse navbar-collapse"
+        } else {
+            "navbar-collapse"
+        };
+        html! {
+          <>
+            <nav class="navbar navbar-expand-sm py-2 mb-3" style="background-color: #2fb380;">
+              <div class="container-fluid">
+                <a class="navbar-brand" href="#">{&ctx.props().heading}</a>
+                <button class="navbar-toggler" type="button" onclick={ctx.link().callback(|_| ContentMsg::Toggle)}>
+                  if self.collapse {
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-plus-lg" viewBox="0 0 16 16">
+                      <path fill-rule="evenodd" d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2"/>
+                    </svg>
+                  } else {
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-dash-lg" viewBox="0 0 16 16">
+                      <path fill-rule="evenodd" d="M2 8a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11A.5.5 0 0 1 2 8"/>
+                    </svg>
+                  }
+                </button>
+                <div {class}>
+                  {ctx.props().nav.clone()}
+                </div>
+              </div>
+            </nav>
+            <div class="container-fluid flex-grow-1 overflow-y-auto">
+              {ctx.props().content.clone()}
+            </div>
+          </>
+        }
+    }
+
+    fn update(&mut self, _: &Context<Self>, _: Self::Message) -> bool {
+        self.collapse = !self.collapse;
+        true
     }
 }
 
