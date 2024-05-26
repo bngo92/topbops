@@ -100,7 +100,7 @@ fn switch(
     match routes {
         Route::Home => html! { <Home {logged_in}/> },
         Route::Docs => docs::docs(),
-        Route::ListsRoot => html! { <crate::list::Lists {logged_in}/> },
+        Route::ListsRoot => html! { <list::Lists {logged_in}/> },
         Route::Lists => {
             let render = move |view| {
                 html! {
@@ -166,6 +166,43 @@ impl Component for App {
             list_dropdown: false,
             integrations_dropdown: false,
         }
+    }
+
+    fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
+        match msg {
+            Msg::Demo => self.user_loaded = true,
+            Msg::Success(user) => {
+                self.user_loaded = true;
+                self.user = Rc::new(Some(user))
+            }
+            Msg::Sidebar => self.sidebar = true,
+            Msg::HideSidebar => self.sidebar = false,
+            Msg::Login => self.login = true,
+            Msg::HideLogin => self.login = false,
+            Msg::Dropdown => self.dropdown = !self.dropdown,
+            // We need to check which dropdown is clicked instead of relying on stop_propagation
+            // TODO: fix multiple open dropdowns
+            Msg::ResetDropdown => {
+                self.dropdown = false;
+                self.list_dropdown = false;
+                self.integrations_dropdown = false;
+            }
+            Msg::ListDropdown => self.list_dropdown = !self.list_dropdown,
+            Msg::IntegrationsDropdown => self.integrations_dropdown = !self.integrations_dropdown,
+            /*Msg::Logout => {
+                ctx.link().clone().send_future(async move {
+                    let window = web_sys::window().expect("no global `window` exists");
+                    let request = query("/api/logout", "POST").unwrap();
+                    JsFuture::from(window.fetch_with_request(&request))
+                        .await
+                        .unwrap();
+                    Msg::Reload
+                });
+                false
+            }
+            Msg::Reload => true,*/
+        }
+        true
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
@@ -293,43 +330,6 @@ impl Component for App {
           </div>
         }
     }
-
-    fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
-        match msg {
-            Msg::Demo => self.user_loaded = true,
-            Msg::Success(user) => {
-                self.user_loaded = true;
-                self.user = Rc::new(Some(user))
-            }
-            Msg::Sidebar => self.sidebar = true,
-            Msg::HideSidebar => self.sidebar = false,
-            Msg::Login => self.login = true,
-            Msg::HideLogin => self.login = false,
-            Msg::Dropdown => self.dropdown = !self.dropdown,
-            // We need to check which dropdown is clicked instead of relying on stop_propagation
-            // TODO: fix multiple open dropdowns
-            Msg::ResetDropdown => {
-                self.dropdown = false;
-                self.list_dropdown = false;
-                self.integrations_dropdown = false;
-            }
-            Msg::ListDropdown => self.list_dropdown = !self.list_dropdown,
-            Msg::IntegrationsDropdown => self.integrations_dropdown = !self.integrations_dropdown,
-            /*Msg::Logout => {
-                ctx.link().clone().send_future(async move {
-                    let window = web_sys::window().expect("no global `window` exists");
-                    let request = query("/api/logout", "POST").unwrap();
-                    JsFuture::from(window.fetch_with_request(&request))
-                        .await
-                        .unwrap();
-                    Msg::Reload
-                });
-                false
-            }
-            Msg::Reload => true,*/
-        }
-        true
-    }
 }
 
 fn dropdown_class(dropdown: bool) -> (&'static str, &'static str) {
@@ -351,9 +351,9 @@ pub struct UserProps {
 }
 
 fn parse_spotify_source(input: String) -> Option<Spotify> {
-    let playlist_re = Regex::new(r"https://open.spotify.com/playlist/([[:alnum:]]*)").unwrap();
-    let album_re = Regex::new(r"https://open.spotify.com/album/([[:alnum:]]*)").unwrap();
-    let track_re = Regex::new(r"https://open.spotify.com/track/([[:alnum:]]*)").unwrap();
+    let playlist_re = Regex::new(r"https://open.spotify.com/playlist/([:alnum]*)").unwrap();
+    let album_re = Regex::new(r"https://open.spotify.com/album/([:alnum]*)").unwrap();
+    let track_re = Regex::new(r"https://open.spotify.com/track/([:alnum]*)").unwrap();
     return if let Some(caps) = playlist_re.captures_iter(&input).next() {
         Some(Spotify::Playlist(Id {
             id: caps[1].to_owned(),
@@ -375,7 +375,7 @@ fn parse_spotify_source(input: String) -> Option<Spotify> {
 }
 
 fn parse_setlist_source(input: String) -> Option<Id> {
-    let re = Regex::new(r"https://www.setlist.fm/setlist/.*-([[:alnum:]]*).html").unwrap();
+    let re = Regex::new(r"https://www.setlist.fm/setlist/.*-([:alnum]*).html").unwrap();
     return if let Some(caps) = re.captures_iter(&input).next() {
         Some(Id {
             id: caps[1].to_owned(),
@@ -427,28 +427,6 @@ impl Component for ListView {
         }
     }
 
-    fn view(&self, ctx: &Context<Self>) -> Html {
-        let onchange = ctx.link().callback(|_| ListViewMsg::Select);
-        let query = ctx.link().callback(|_| ListViewMsg::Query);
-        html! {
-            <div class="row">
-                <div class="col-auto">
-                    <select ref={self.select_ref.clone()} class="form-select mb-3" {onchange}>
-                        <option selected=true>{"Table"}</option>
-                        <option>{"Column Graph"}</option>
-                        <option>{"Line Graph"}</option>
-                        <option>{"Scatter Plot"}</option>
-                        <option>{"Cumulative Line Graph"}</option>
-                    </select>
-                </div>
-                <Input input_ref={self.query_ref.clone()} onclick={query.clone()} error={self.error.clone()} disabled={matches!(ctx.props().list.mode, ListMode::View(_))}/>
-                if let Some(data) = &self.data {
-                    {self.view.render(data)}
-                }
-            </div>
-        }
-    }
-
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
             ListViewMsg::Success(data) => {
@@ -495,6 +473,28 @@ impl Component for ListView {
         true
     }
 
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let onchange = ctx.link().callback(|_| ListViewMsg::Select);
+        let query = ctx.link().callback(|_| ListViewMsg::Query);
+        html! {
+            <div class="row">
+                <div class="col-auto">
+                    <select ref={self.select_ref.clone()} class="form-select mb-3" {onchange}>
+                        <option selected=true>{"Table"}</option>
+                        <option>{"Column Graph"}</option>
+                        <option>{"Line Graph"}</option>
+                        <option>{"Scatter Plot"}</option>
+                        <option>{"Cumulative Line Graph"}</option>
+                    </select>
+                </div>
+                <Input input_ref={self.query_ref.clone()} onclick={query.clone()} error={self.error.clone()} disabled={matches!(ctx.props().list.mode, ListMode::View(_))}/>
+                if let Some(data) = &self.data {
+                    {self.view.render(data)}
+                }
+            </div>
+        }
+    }
+
     fn rendered(&mut self, ctx: &Context<Self>, first_render: bool) {
         if first_render || matches!(ctx.props().list.mode, ListMode::View(_)) {
             let query = self.query_ref.cast::<HtmlSelectElement>().unwrap();
@@ -539,7 +539,7 @@ impl Component for ListComponent {
             | ListsRoute::Tournament { id } => id.clone(),
         };
         ctx.link().send_future(async move {
-            if let Some(list) = crate::fetch_list(&id).await.unwrap() {
+            if let Some(list) = fetch_list(&id).await.unwrap() {
                 ListMsg::Load(list)
             } else {
                 ListMsg::NotFound
@@ -548,6 +548,37 @@ impl Component for ListComponent {
         ListComponent {
             state: ListState::Fetching,
         }
+    }
+
+    fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
+        match msg {
+            ListMsg::Load(list) => {
+                self.state = ListState::Success(list);
+            }
+            ListMsg::NotFound => {
+                self.state = ListState::NotFound;
+            }
+        }
+        true
+    }
+
+    // Navigation within the list page doesn't update the component, so we need to implement changed
+    fn changed(&mut self, ctx: &Context<Self>, old_props: &Self::Properties) -> bool {
+        // Should we compare IDs instead
+        if ctx.props().view != old_props.view {
+            let id = match &ctx.props().view {
+                ListsRoute::List { id }
+                | ListsRoute::View { id }
+                | ListsRoute::Edit { id }
+                | ListsRoute::Match { id }
+                | ListsRoute::Tournament { id } => id.clone(),
+            };
+            ctx.link().send_future(async move {
+                ListMsg::Load(fetch_list(&id).await.unwrap().unwrap())
+            });
+        }
+        // Rank dropdown breaks if this is set to false
+        true
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
@@ -683,37 +714,6 @@ impl Component for ListComponent {
             }
         }
     }
-
-    fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
-        match msg {
-            ListMsg::Load(list) => {
-                self.state = ListState::Success(list);
-            }
-            ListMsg::NotFound => {
-                self.state = ListState::NotFound;
-            }
-        }
-        true
-    }
-
-    // Navigation within the list page doesn't update the component so we need to implement changed
-    fn changed(&mut self, ctx: &Context<Self>, old_props: &Self::Properties) -> bool {
-        // Should we compare IDs instead
-        if ctx.props().view != old_props.view {
-            let id = match &ctx.props().view {
-                ListsRoute::List { id }
-                | ListsRoute::View { id }
-                | ListsRoute::Edit { id }
-                | ListsRoute::Match { id }
-                | ListsRoute::Tournament { id } => id.clone(),
-            };
-            ctx.link().send_future(async move {
-                ListMsg::Load(crate::fetch_list(&id).await.unwrap().unwrap())
-            });
-        }
-        // Rank dropdown breaks if this is set to false
-        true
-    }
 }
 
 fn nav_content(nav: Html, content: Html) -> Html {
@@ -754,6 +754,11 @@ impl Component for Content {
         Content { collapse: true }
     }
 
+    fn update(&mut self, _: &Context<Self>, _: Self::Message) -> bool {
+        self.collapse = !self.collapse;
+        true
+    }
+
     fn view(&self, ctx: &Context<Self>) -> Html {
         let class = if self.collapse {
             "collapse navbar-collapse"
@@ -786,11 +791,6 @@ impl Component for Content {
             </div>
           </>
         }
-    }
-
-    fn update(&mut self, _: &Context<Self>, _: Self::Message) -> bool {
-        self.collapse = !self.collapse;
-        true
     }
 }
 
