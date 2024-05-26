@@ -762,7 +762,7 @@ impl Component for Content {
         };
         html! {
           <>
-            <nav class="navbar navbar-expand-sm navbar-bg py-2 mb-3" style="background-color: #2fb380;">
+            <nav class="navbar navbar-expand-sm navbar-bg py-2" style="background-color: #2fb380;">
               <div class="container-fluid">
                 <a class="navbar-brand" href="#">{&ctx.props().heading}</a>
                 <button class="navbar-toggler" type="button" onclick={ctx.link().callback(|_| ContentMsg::Toggle)}>
