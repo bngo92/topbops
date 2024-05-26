@@ -781,7 +781,7 @@ impl Component for Content {
                 </div>
               </div>
             </nav>
-            <div class="main-bg container-fluid flex-grow-1 overflow-y-auto">
+            <div class="main-bg container-fluid flex-grow-1 pt-3 overflow-y-auto">
               {ctx.props().content.clone()}
             </div>
           </>
