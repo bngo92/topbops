@@ -214,6 +214,14 @@ impl List {
         }
         Ok((source, external_id))
     }
+    pub fn update_iframe(&mut self) {
+        if let Ok((Some("spotify"), Some(external_id))) = self.get_unique_source() {
+            self.iframe = Some(format!(
+                "https://open.spotify.com/embed/playlist/{}?utm_source=generator",
+                external_id.id
+            ));
+        }
+    }
 }
 
 fn get_source_id(source: &Source) -> Option<&str> {

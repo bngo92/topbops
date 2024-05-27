@@ -462,6 +462,7 @@ async fn push_list(state: Arc<AppState>, user: &mut User, id: &str) -> Result<St
             ListMode::View(_) => ListMode::View(Some(id.clone())),
             _ => unreachable!(),
         };
+        list.update_iframe();
         source::update_list(&state.sql_client, &user_id, list.clone()).await?;
         id.id
     };

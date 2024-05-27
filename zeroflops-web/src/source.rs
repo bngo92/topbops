@@ -42,12 +42,7 @@ pub async fn update_list_items(
             list.items.extend(items);
         }
     }
-    if let Ok((Some("spotify"), Some(external_id))) = list.get_unique_source() {
-        list.iframe = Some(format!(
-            "https://open.spotify.com/embed/playlist/{}?utm_source=generator",
-            external_id.id
-        ));
-    }
+    list.update_iframe();
     update_list(client, user_id, list).await?;
     Ok(())
 }
