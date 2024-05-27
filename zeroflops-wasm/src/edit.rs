@@ -63,99 +63,6 @@ impl Component for Edit {
         }
     }
 
-    fn view(&self, ctx: &Context<Self>) -> Html {
-        let disabled = !ctx.props().logged_in;
-        let source_html = self.sources
-            .iter()
-            .enumerate()
-            .map(|(i, (key, source_ref, id, source))| {
-                let mut selected = [false; 4];
-                match source {
-                    None => selected[1] = true,
-                    Some(SourceType::Custom(_)) => selected[0] = true,
-                    Some(SourceType::Spotify(_)) => selected[1] = true,
-                    Some(SourceType::Setlist(_)) => selected[2] = true,
-                    Some(SourceType::ListItems(_)) => selected[3] = true,
-                };
-                let onclick = ctx.link().callback(move |_| Msg::DeleteSource(i));
-                html! {
-                    <div class="row mb-1" key={*key}>
-                        <div class="col-4 col-sm-3 col-md-2">
-                            <select ref={source_ref} class="form-select">
-                                <option selected={selected[0]}>{"Custom"}</option>
-                                <option selected={selected[1]}>{"Spotify"}</option>
-                                <option selected={selected[2]}>{"Setlist"}</option>
-                                <option selected={selected[3]}>{"List Items"}</option>
-                            </select>
-                        </div>
-                        <input class="col-9 col-sm-7 col-md-8" ref={id}/>
-                        <div class="col-auto">
-                            <button type="button" class="btn btn-danger" {onclick}>{"Delete"}</button>
-                        </div>
-                    </div>
-                }
-            });
-        let mode = match self.list.mode {
-            ListMode::User(_) => "User",
-            ListMode::External => "External",
-            ListMode::View(_) => "View",
-        };
-        let add_source = ctx.link().callback(|_| Msg::AddSource);
-        let save = ctx.link().callback(|_| Msg::Save);
-        let delete = ctx.link().callback(|_| Msg::Delete);
-        let delete_all = ctx.link().callback(|_| Msg::DeleteAll);
-        html! {
-            <div>
-                <h4>{"List Settings"}</h4>
-                <form class="mb-4" style="max-width: 800px">
-                    <div class="form-floating mb-2">
-                        if let ListMode::External = &self.list.mode {
-                            <input type="text" readonly=true class="form-control-plaintext" id="name" value={self.list.name.clone()} placeholder=""/>
-                        } else {
-                            <input type="text" class="form-control" id="name" ref={&self.name_ref} placeholder=""/>
-                        }
-                        <label for="name">{"List name"}</label>
-                    </div>
-                    <div class="form-floating mb-2">
-                        <input type="text" readonly=true class="form-control-plaintext" id="mode" value={mode} placeholder=""/>
-                        <label for="mode">{"List mode"}</label>
-                    </div>
-                    if let ListMode::User(_) = &self.list.mode {
-                        <div class="form-floating mb-3">
-                            <input class="form-control" id="externalId" ref={&self.external_ref} placeholder="External ID"/>
-                            <label for="externalId">{"External ID"}</label>
-                        </div>
-                    }
-                    <div class="form-floating mb-3">
-                        <input class="form-control" id="query" ref={&self.query_ref} placeholder="External ID"/>
-                        <label for="query">{"Query"}</label>
-                    </div>
-                    <div class="form-check">
-                        <label class="form-check-label" for="favorite">{"Favorite"}</label>
-                        <input ref={&self.favorite_ref} class="form-check-input" type="checkbox" id="favorite"/>
-                    </div>
-                    <div class="form-check">
-                        <label class="form-check-label" for="public">{"Public"}</label>
-                        <input ref={&self.public_ref} class="form-check-input" type="checkbox" id="public"/>
-                    </div>
-                </form>
-                <h4>{"Data Sources"}</h4>
-                <div class="mb-3">
-                    {for source_html}
-                </div>
-                <div class="d-flex gap-3">
-                    <button type="button" class="btn btn-primary" onclick={add_source}>{"Add source"}</button>
-                </div>
-                <hr/>
-                <button type="button" class="btn btn-success mb-3" onclick={save} {disabled}>{"Save all settings"}</button>
-                <div class="d-flex gap-3">
-                    <button type="button" class="btn btn-danger" onclick={delete} {disabled}>{"Delete"}</button>
-                    <button type="button" class="btn btn-danger" onclick={delete_all} {disabled}>{"Delete All"}</button>
-                </div>
-            </div>
-        }
-    }
-
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
             Msg::None => false,
@@ -281,6 +188,99 @@ impl Component for Edit {
                 }
                 false
             }
+        }
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let disabled = !ctx.props().logged_in;
+        let source_html = self.sources
+            .iter()
+            .enumerate()
+            .map(|(i, (key, source_ref, id, source))| {
+                let mut selected = [false; 4];
+                match source {
+                    None => selected[1] = true,
+                    Some(SourceType::Custom(_)) => selected[0] = true,
+                    Some(SourceType::Spotify(_)) => selected[1] = true,
+                    Some(SourceType::Setlist(_)) => selected[2] = true,
+                    Some(SourceType::ListItems(_)) => selected[3] = true,
+                };
+                let onclick = ctx.link().callback(move |_| Msg::DeleteSource(i));
+                html! {
+                    <div class="row mb-1" key={*key}>
+                        <div class="col-4 col-sm-3 col-md-2">
+                            <select ref={source_ref} class="form-select">
+                                <option selected={selected[0]}>{"Custom"}</option>
+                                <option selected={selected[1]}>{"Spotify"}</option>
+                                <option selected={selected[2]}>{"Setlist"}</option>
+                                <option selected={selected[3]}>{"List Items"}</option>
+                            </select>
+                        </div>
+                        <input class="col-9 col-sm-7 col-md-8" ref={id}/>
+                        <div class="col-auto">
+                            <button type="button" class="btn btn-danger" {onclick}>{"Delete"}</button>
+                        </div>
+                    </div>
+                }
+            });
+        let mode = match self.list.mode {
+            ListMode::User(_) => "User",
+            ListMode::External => "External",
+            ListMode::View(_) => "View",
+        };
+        let add_source = ctx.link().callback(|_| Msg::AddSource);
+        let save = ctx.link().callback(|_| Msg::Save);
+        let delete = ctx.link().callback(|_| Msg::Delete);
+        let delete_all = ctx.link().callback(|_| Msg::DeleteAll);
+        html! {
+            <div>
+                <h4>{"List Settings"}</h4>
+                <form class="mb-4" style="max-width: 800px">
+                    <div class="form-floating mb-2">
+                        if let ListMode::External = &self.list.mode {
+                            <input type="text" readonly=true class="form-control-plaintext" id="name" value={self.list.name.clone()} placeholder=""/>
+                        } else {
+                            <input type="text" class="form-control" id="name" ref={&self.name_ref} placeholder=""/>
+                        }
+                        <label for="name">{"List name"}</label>
+                    </div>
+                    <div class="form-floating mb-2">
+                        <input type="text" readonly=true class="form-control-plaintext" id="mode" value={mode} placeholder=""/>
+                        <label for="mode">{"List mode"}</label>
+                    </div>
+                    if let ListMode::User(_) = &self.list.mode {
+                        <div class="form-floating mb-3">
+                            <input class="form-control" id="externalId" ref={&self.external_ref} placeholder="External ID"/>
+                            <label for="externalId">{"External ID"}</label>
+                        </div>
+                    }
+                    <div class="form-floating mb-3">
+                        <input class="form-control" id="query" ref={&self.query_ref} placeholder="External ID"/>
+                        <label for="query">{"Query"}</label>
+                    </div>
+                    <div class="form-check">
+                        <label class="form-check-label" for="favorite">{"Favorite"}</label>
+                        <input ref={&self.favorite_ref} class="form-check-input" type="checkbox" id="favorite"/>
+                    </div>
+                    <div class="form-check">
+                        <label class="form-check-label" for="public">{"Public"}</label>
+                        <input ref={&self.public_ref} class="form-check-input" type="checkbox" id="public"/>
+                    </div>
+                </form>
+                <h4>{"Data Sources"}</h4>
+                <div class="mb-3">
+                    {for source_html}
+                </div>
+                <div class="d-flex gap-3">
+                    <button type="button" class="btn btn-primary" onclick={add_source}>{"Add source"}</button>
+                </div>
+                <hr/>
+                <button type="button" class="btn btn-success mb-3" onclick={save} {disabled}>{"Save all settings"}</button>
+                <div class="d-flex gap-3">
+                    <button type="button" class="btn btn-danger" onclick={delete} {disabled}>{"Delete"}</button>
+                    <button type="button" class="btn btn-danger" onclick={delete_all} {disabled}>{"Delete All"}</button>
+                </div>
+            </div>
         }
     }
 

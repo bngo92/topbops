@@ -37,6 +37,28 @@ impl Component for Home {
         }
     }
 
+    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
+        match msg {
+            HomeMsg::ToggleHelp => {
+                self.help_collapsed = !self.help_collapsed;
+                true
+            }
+            HomeMsg::Load(lists) => {
+                self.lists = lists;
+                true
+            }
+            HomeMsg::Create => {
+                let navigator = ctx.link().navigator().unwrap();
+                ctx.link().send_future_batch(async move {
+                    let list = crate::create_list().await.unwrap();
+                    navigator.push(&ListsRoute::Edit { id: list.id });
+                    None
+                });
+                false
+            }
+        }
+    }
+
     fn view(&self, ctx: &Context<Self>) -> Html {
         let disabled = !ctx.props().logged_in;
         let create = ctx.link().callback(|_| HomeMsg::Create);
@@ -97,28 +119,6 @@ impl Component for Home {
             },
         )
     }
-
-    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
-        match msg {
-            HomeMsg::ToggleHelp => {
-                self.help_collapsed = !self.help_collapsed;
-                true
-            }
-            HomeMsg::Load(lists) => {
-                self.lists = lists;
-                true
-            }
-            HomeMsg::Create => {
-                let navigator = ctx.link().navigator().unwrap();
-                ctx.link().send_future_batch(async move {
-                    let list = crate::create_list().await.unwrap();
-                    navigator.push(&ListsRoute::Edit { id: list.id });
-                    None
-                });
-                false
-            }
-        }
-    }
 }
 
 impl Home {
@@ -152,6 +152,28 @@ impl Component for Widget {
         Widget {
             collapsed: true,
             query: None,
+        }
+    }
+
+    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
+        match msg {
+            WidgetMsg::Fetching(list) => {
+                // TODO: add the ability to refresh
+                if self.query.is_none() {
+                    ctx.link().send_future(async move {
+                        WidgetMsg::Success(crate::query_list(&list, None).await.unwrap())
+                    });
+                    false
+                } else {
+                    self.collapsed = !self.collapsed;
+                    true
+                }
+            }
+            WidgetMsg::Success(query) => {
+                self.collapsed = false;
+                self.query = query;
+                true
+            }
         }
     }
 
@@ -220,28 +242,6 @@ impl Component for Widget {
                     </div>
                 </div>
             </div>
-        }
-    }
-
-    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
-        match msg {
-            WidgetMsg::Fetching(list) => {
-                // TODO: add the ability to refresh
-                if self.query.is_none() {
-                    ctx.link().send_future(async move {
-                        WidgetMsg::Success(crate::query_list(&list, None).await.unwrap())
-                    });
-                    false
-                } else {
-                    self.collapsed = !self.collapsed;
-                    true
-                }
-            }
-            WidgetMsg::Success(query) => {
-                self.collapsed = false;
-                self.query = query;
-                true
-            }
         }
     }
 }

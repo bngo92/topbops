@@ -26,6 +26,24 @@ impl Component for Lists {
         Lists { lists: Vec::new() }
     }
 
+    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
+        match msg {
+            ListsMsg::Load(lists) => {
+                self.lists = lists;
+                true
+            }
+            ListsMsg::Create => {
+                let navigator = ctx.link().navigator().unwrap();
+                ctx.link().send_future_batch(async move {
+                    let list = crate::create_list().await.unwrap();
+                    navigator.push(&ListsRoute::Edit { id: list.id });
+                    None
+                });
+                false
+            }
+        }
+    }
+
     fn view(&self, ctx: &Context<Self>) -> Html {
         let list_html = self.lists.iter().map(|l| {
             html! {
@@ -55,23 +73,5 @@ impl Component for Lists {
               </div>
             },
         )
-    }
-
-    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
-        match msg {
-            ListsMsg::Load(lists) => {
-                self.lists = lists;
-                true
-            }
-            ListsMsg::Create => {
-                let navigator = ctx.link().navigator().unwrap();
-                ctx.link().send_future_batch(async move {
-                    let list = crate::create_list().await.unwrap();
-                    navigator.push(&ListsRoute::Edit { id: list.id });
-                    None
-                });
-                false
-            }
-        }
     }
 }

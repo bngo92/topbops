@@ -29,6 +29,11 @@ impl Component for IframeCompare {
         }
     }
 
+    fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
+        self.flag = msg;
+        true
+    }
+
     fn view(&self, ctx: &Context<Self>) -> Html {
         let IframeCompareProps {
             left,
@@ -67,11 +72,6 @@ impl Component for IframeCompare {
           </div>
         </div>
         }
-    }
-
-    fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
-        self.flag = msg;
-        true
     }
 }
 

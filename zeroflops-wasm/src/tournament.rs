@@ -363,52 +363,6 @@ impl Component for Tournament {
         }
     }
 
-    fn view(&self, ctx: &Context<Self>) -> Html {
-        let fields = &self.state;
-        let (toggle, html) = match &fields.state {
-            TournamentState::Tournament => ("Match Mode", {
-                let winner = if let Some(winner) = fields.bracket.winner() {
-                    fields.list.items.get(*winner)
-                } else {
-                    None
-                };
-                html! {
-                    <div>
-                        if let Some(winner) = winner {
-                            <h2>{format!("Winner: {}", winner.name)}</h2>
-                            // TODO: only show if iframe exists
-                            <div class="row">
-                                <div class="col-6">
-                                    <iframe width="100%" height="380" frameborder="0" src={winner.iframe.clone()}></iframe>
-                                </div>
-                            </div>
-                        }
-                        <div class="overflow-scroll">
-                        {tournament_bracket_view(&fields.bracket, &fields.list.items, ctx.link().callback(Msg::Update), false)}
-                        </div>
-                        if let Some(src) = fields.list.iframe.clone() {
-                            <div class="row">
-                                <div class="col-12 col-lg-10 col-xl-8">
-                                    <iframe width="100%" height="380" frameborder="0" {src}></iframe>
-                                </div>
-                            </div>
-                        }
-                    </div>
-                }
-            }),
-            TournamentState::Match => ("Tournament Mode", self.match_view(fields, ctx)),
-        };
-        html! {
-            <div>
-                <div class="d-flex gap-3">
-                    <button type="button" class="btn btn-primary mb-1" onclick={ctx.link().callback(|_| Msg::Toggle)} style="width: 156.33px">{toggle}</button>
-                    <button type="button" class="btn btn-danger mb-1" onclick={ctx.link().callback(|_| Msg::Reset)}>{"Reset"}</button>
-                </div>
-                {html}
-            </div>
-        }
-    }
-
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         let fields = &mut self.state;
         match msg {
@@ -464,6 +418,52 @@ impl Component for Tournament {
             }
         }
         true
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let fields = &self.state;
+        let (toggle, html) = match &fields.state {
+            TournamentState::Tournament => ("Match Mode", {
+                let winner = if let Some(winner) = fields.bracket.winner() {
+                    fields.list.items.get(*winner)
+                } else {
+                    None
+                };
+                html! {
+                    <div>
+                        if let Some(winner) = winner {
+                            <h2>{format!("Winner: {}", winner.name)}</h2>
+                            // TODO: only show if iframe exists
+                            <div class="row">
+                                <div class="col-6">
+                                    <iframe width="100%" height="380" frameborder="0" src={winner.iframe.clone()}></iframe>
+                                </div>
+                            </div>
+                        }
+                        <div class="overflow-scroll">
+                        {tournament_bracket_view(&fields.bracket, &fields.list.items, ctx.link().callback(Msg::Update), false)}
+                        </div>
+                        if let Some(src) = fields.list.iframe.clone() {
+                            <div class="row">
+                                <div class="col-12 col-lg-10 col-xl-8">
+                                    <iframe width="100%" height="380" frameborder="0" {src}></iframe>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            }),
+            TournamentState::Match => ("Tournament Mode", self.match_view(fields, ctx)),
+        };
+        html! {
+            <div>
+                <div class="d-flex gap-3">
+                    <button type="button" class="btn btn-primary mb-1" onclick={ctx.link().callback(|_| Msg::Toggle)} style="width: 156.33px">{toggle}</button>
+                    <button type="button" class="btn btn-danger mb-1" onclick={ctx.link().callback(|_| Msg::Reset)}>{"Reset"}</button>
+                </div>
+                {html}
+            </div>
+        }
     }
 }
 

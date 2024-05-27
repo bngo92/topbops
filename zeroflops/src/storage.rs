@@ -2,8 +2,7 @@ use crate::{Error, UserId};
 use async_trait::async_trait;
 #[cfg(feature = "azure")]
 use azure_data_cosmos::{
-    prelude::{self as cosmos, DatabaseClient, Param, Query},
-    CosmosEntity,
+    prelude::{self as cosmos, DatabaseClient, Param, Query as AzureQuery},
 };
 use rusqlite::{config::DbConfig, limits::Limit, Connection, OpenFlags, OptionalExtension, ToSql};
 use serde::{de::DeserializeOwned, Serialize};
@@ -32,9 +31,9 @@ impl CosmosQuery {
     }
 
     #[cfg(feature = "azure")]
-    pub fn into_query(self) -> Query {
-        Query::with_params(
-            self.query,
+    pub fn into_query(self) -> AzureQuery {
+        AzureQuery::with_params(
+            self.query.to_string(),
             self.parameters
                 .into_iter()
                 .map(|param| Param::new(param.name, param.value))

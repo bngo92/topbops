@@ -96,7 +96,7 @@ async fn logout_handler(
 ) -> impl IntoResponse {
     if let Some(user) = &mut auth.user {
         // Log out of all sessions with axum-login by changing the user secret
-        user.secret = zeroflops_web::user::generate_secret();
+        user.secret = user::generate_secret();
         let conn = Connection::open(state.sql_store.path).expect("Couldn't reset password");
         conn.execute(
             "UPDATE user SET secret = ?1 WHERE id = ?2",

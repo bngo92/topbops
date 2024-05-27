@@ -304,7 +304,7 @@ pub mod test {
             Mock {
                 call_args: Arc::new(Mutex::new(Vec::new())),
                 side_effect: Arc::new(Mutex::new(
-                    side_effect.into_iter().map(Option::Some).collect(),
+                    side_effect.into_iter().map(Some).collect(),
                 )),
             }
         }

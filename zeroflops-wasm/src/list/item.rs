@@ -109,185 +109,6 @@ impl Component for ListItems {
         }
     }
 
-    fn view(&self, ctx: &Context<Self>) -> Html {
-        let disabled =
-            ctx.props().user.is_none() || !crate::user_list(&ctx.props().list, &ctx.props().user);
-        let list = &ctx.props().list;
-        let modal_html = if let Some(i) = self.modal {
-            let item = &self.items[i];
-            let onchange = ctx
-                .link()
-                .callback(move |rating| Msg::UpdateRating(i, rating));
-            html! {
-                <Modal header={item.item.name.clone()} hide={ctx.link().callback(|_| Msg::HideModal)}>
-                    <div class="carousel slide">
-                        <div class="carousel-item active">
-                            if let Some(iframe) = &item.item.iframe {
-                                <iframe width="100%" height="380" frameborder="0" src={iframe.clone()}></iframe>
-                            }
-                        </div>
-                        <button class="carousel-control-prev" type="button" onclick={ctx.link().callback(|_| Msg::ModalBack)} style="top: 56px; bottom: auto; height: 137px">
-                            <span class="carousel-control-prev-icon"></span>
-                        </button>
-                        <button class="carousel-control-next" type="button" onclick={ctx.link().callback(|_| Msg::ModalForward)} style="top: 56px; bottom: auto; height: 137px">
-                            <span class="carousel-control-next-icon"></span>
-                        </button>
-                    </div>
-                    <div class="col-2">
-                        <Rating rating={self.state.as_ref().unwrap()[i].rating} {onchange} disabled={disabled}/>
-                    </div>
-                </Modal>
-            }
-        } else {
-            html! {}
-        };
-        let source_html = list.sources.iter().map(|source| {
-            let raw_id = match &source.source_type {
-                SourceType::Spotify(Spotify::Playlist(Id { raw_id, .. }))
-                | SourceType::Spotify(Spotify::Album(Id { raw_id, .. }))
-                | SourceType::Setlist(Id { raw_id, .. })
-                    if Url::new(raw_id).is_ok() =>
-                {
-                    Some(raw_id.clone())
-                }
-                _ => None,
-            };
-            html! {
-                if let SourceType::ListItems(id) = &source.source_type {
-                    <div class="mb-2"><Link<ListsRoute> to={ListsRoute::View { id: id.clone() }}>{&source.name}</Link<ListsRoute>></div>
-                } else if let Some(href) = raw_id {
-                    <div class="mb-2"><a {href}>{&source.name}</a></div>
-                } else {
-                    <p class="mb-2">{&source.name}</p>
-                }
-            }
-        });
-        let style = match self.mode {
-            ItemMode::View => "grid-template-columns: auto",
-            ItemMode::Update => "grid-template-columns: auto max-content max-content",
-            ItemMode::Delete => "grid-template-columns: auto max-content",
-        };
-        let html: Html = match self.mode {
-            ItemMode::View => self
-                .items
-                .iter()
-                .enumerate()
-                .map(|(i, ListItem { item, .. })| {
-                    let open = ctx.link().callback(move |_| Msg::Open(i));
-                    html! {
-                        <label class="col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
-                    }
-                })
-                .collect(),
-            ItemMode::Update => self
-                .items
-                .iter()
-                .enumerate()
-                .map(
-                    |(i, ListItem {
-                        item,
-                        hidden_ref,
-                    })| {
-                        let open = ctx.link().callback(move |_| Msg::Open(i));
-                        html! {
-                            <>
-                                <label class="col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
-                                if let Some(State { rating, hidden }) = self.state.as_ref().and_then(|s| s.get(i)) {
-                                    <div>
-                                        <Rating {rating} onchange={ctx.link().callback(move |rating| Msg::UpdateRating(i, rating))} {disabled}/>
-                                    </div>
-                                    <div class="d-flex justify-content-center">
-                                        <input ref={hidden_ref} class="form-check-input mt-2" type="checkbox" checked={*hidden}/>
-                                    </div>
-                                } else {
-                                    <div></div>
-                                    <div></div>
-                                }
-                            </>
-                        }
-                    },
-                )
-                .collect(),
-            ItemMode::Delete => self
-                .items
-                .iter()
-                .enumerate()
-                .map(|(i, ListItem { item, .. })| {
-                    let open = ctx.link().callback(move |_| Msg::Open(i));
-                    let delete = {
-                        let id = item.id.clone();
-                        ctx.link().callback(move |_| Msg::Delete((id.clone(), i)))
-                    };
-                    html! {
-                        <>
-                            <label class="col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
-                            <button type="button" class="btn btn-danger" onclick={delete} {disabled}>{"Delete"}</button>
-                        </>
-                    }
-                })
-                .collect(),
-        };
-        let save = ctx.link().callback(|_| Msg::Save);
-        let push = ctx.link().callback(|_| Msg::Push);
-        let push_available = if let Some(user) = &*ctx.props().user {
-            if let Ok((Some(source), _)) = list.get_unique_source() {
-                source == "spotify" && user.spotify_user.is_some()
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-        let hide = ctx.link().callback(|_| Msg::HideAlert);
-        html! {
-            <div>
-                <div class="d-flex flex-row-reverse flex-wrap justify-content-end row-gap-3 column-gap-5">
-                    {modal_html}
-                    if matches!(ctx.props().list.mode, ListMode::View(_)) {
-                        <div class="row mb-3">
-                            <label class="col-auto col-form-label">
-                                <strong>{"Item Mode:"}</strong>
-                            </label>
-                            <div class="col-auto">
-                                <select ref={self.select_ref.clone()} class="form-select" onchange={ctx.link().callback(|_| Msg::SelectView)}>
-                                    <option selected=true>{"Update"}</option>
-                                    <option>{"Delete"}</option>
-                                </select>
-                            </div>
-                        </div>
-                    }
-                    if let Some(src) = list.iframe.clone() {
-                        <iframe width="100%" height="380" frameborder="0" {src} style="flex-basis: 600px"></iframe>
-                    }
-                    <form style="flex-basis: 750px">
-                        <div class="d-grid row-gap-1 column-gap-3 mb-3" {style}>
-                            if let ItemMode::Update = self.mode {
-                                <div></div>
-                                <p><strong>{"Rating"}</strong></p>
-                                <p><strong>{"Hidden"}</strong></p>
-                            }
-                            <div class="d-grid row-gap-1 overflow-y-auto" style="max-height: 800px; grid-template-columns: subgrid; grid-column: span 3">
-                                {html}
-                            </div>
-                        </div>
-                        if let Some(result) = self.alert.clone() {
-                            <button type="button" class="btn btn-success mb-3" onclick={save} {disabled}>{"Save"}</button>
-                            <Alert {result} {hide}/>
-                        } else {
-                            <button type="button" class="btn btn-success" onclick={save} {disabled}>{"Save"}</button>
-                        }
-                    </form>
-                </div>
-                <hr/>
-                <h4>{"Data Sources"}</h4>
-                {for source_html}
-                if !matches!(list.mode, ListMode::External) {
-                    <button type="button" class="btn btn-success" onclick={push} disabled={!push_available}>{"Push"}</button>
-                }
-            </div>
-        }
-    }
-
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
             Msg::None => false,
@@ -476,6 +297,185 @@ impl Component for ListItems {
                 }
                 true
             }
+        }
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let disabled =
+            ctx.props().user.is_none() || !crate::user_list(&ctx.props().list, &ctx.props().user);
+        let list = &ctx.props().list;
+        let modal_html = if let Some(i) = self.modal {
+            let item = &self.items[i];
+            let onchange = ctx
+                .link()
+                .callback(move |rating| Msg::UpdateRating(i, rating));
+            html! {
+                <Modal header={item.item.name.clone()} hide={ctx.link().callback(|_| Msg::HideModal)}>
+                    <div class="carousel slide">
+                        <div class="carousel-item active">
+                            if let Some(iframe) = &item.item.iframe {
+                                <iframe width="100%" height="380" frameborder="0" src={iframe.clone()}></iframe>
+                            }
+                        </div>
+                        <button class="carousel-control-prev" type="button" onclick={ctx.link().callback(|_| Msg::ModalBack)} style="top: 56px; bottom: auto; height: 137px">
+                            <span class="carousel-control-prev-icon"></span>
+                        </button>
+                        <button class="carousel-control-next" type="button" onclick={ctx.link().callback(|_| Msg::ModalForward)} style="top: 56px; bottom: auto; height: 137px">
+                            <span class="carousel-control-next-icon"></span>
+                        </button>
+                    </div>
+                    <div class="col-2">
+                        <Rating rating={self.state.as_ref().unwrap()[i].rating} {onchange} disabled={disabled}/>
+                    </div>
+                </Modal>
+            }
+        } else {
+            html! {}
+        };
+        let source_html = list.sources.iter().map(|source| {
+            let raw_id = match &source.source_type {
+                SourceType::Spotify(Spotify::Playlist(Id { raw_id, .. }))
+                | SourceType::Spotify(Spotify::Album(Id { raw_id, .. }))
+                | SourceType::Setlist(Id { raw_id, .. })
+                    if Url::new(raw_id).is_ok() =>
+                {
+                    Some(raw_id.clone())
+                }
+                _ => None,
+            };
+            html! {
+                if let SourceType::ListItems(id) = &source.source_type {
+                    <div class="mb-2"><Link<ListsRoute> to={ListsRoute::View { id: id.clone() }}>{&source.name}</Link<ListsRoute>></div>
+                } else if let Some(href) = raw_id {
+                    <div class="mb-2"><a {href}>{&source.name}</a></div>
+                } else {
+                    <p class="mb-2">{&source.name}</p>
+                }
+            }
+        });
+        let style = match self.mode {
+            ItemMode::View => "grid-template-columns: auto",
+            ItemMode::Update => "grid-template-columns: auto max-content max-content",
+            ItemMode::Delete => "grid-template-columns: auto max-content",
+        };
+        let html: Html = match self.mode {
+            ItemMode::View => self
+                .items
+                .iter()
+                .enumerate()
+                .map(|(i, ListItem { item, .. })| {
+                    let open = ctx.link().callback(move |_| Msg::Open(i));
+                    html! {
+                        <label class="col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
+                    }
+                })
+                .collect(),
+            ItemMode::Update => self
+                .items
+                .iter()
+                .enumerate()
+                .map(
+                    |(i, ListItem {
+                        item,
+                        hidden_ref,
+                    })| {
+                        let open = ctx.link().callback(move |_| Msg::Open(i));
+                        html! {
+                            <>
+                                <label class="col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
+                                if let Some(State { rating, hidden }) = self.state.as_ref().and_then(|s| s.get(i)) {
+                                    <div>
+                                        <Rating {rating} onchange={ctx.link().callback(move |rating| Msg::UpdateRating(i, rating))} {disabled}/>
+                                    </div>
+                                    <div class="d-flex justify-content-center">
+                                        <input ref={hidden_ref} class="form-check-input mt-2" type="checkbox" checked={*hidden}/>
+                                    </div>
+                                } else {
+                                    <div></div>
+                                    <div></div>
+                                }
+                            </>
+                        }
+                    },
+                )
+                .collect(),
+            ItemMode::Delete => self
+                .items
+                .iter()
+                .enumerate()
+                .map(|(i, ListItem { item, .. })| {
+                    let open = ctx.link().callback(move |_| Msg::Open(i));
+                    let delete = {
+                        let id = item.id.clone();
+                        ctx.link().callback(move |_| Msg::Delete((id.clone(), i)))
+                    };
+                    html! {
+                        <>
+                            <label class="col-form-label"><a href="#" onclick={open}>{&item.name}</a></label>
+                            <button type="button" class="btn btn-danger" onclick={delete} {disabled}>{"Delete"}</button>
+                        </>
+                    }
+                })
+                .collect(),
+        };
+        let save = ctx.link().callback(|_| Msg::Save);
+        let push = ctx.link().callback(|_| Msg::Push);
+        let push_available = if let Some(user) = &*ctx.props().user {
+            if let Ok((Some(source), _)) = list.get_unique_source() {
+                source == "spotify" && user.spotify_user.is_some()
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        let hide = ctx.link().callback(|_| Msg::HideAlert);
+        html! {
+            <div>
+                <div class="d-flex flex-row-reverse flex-wrap justify-content-end row-gap-3 column-gap-5">
+                    {modal_html}
+                    if matches!(ctx.props().list.mode, ListMode::View(_)) {
+                        <div class="row mb-3">
+                            <label class="col-auto col-form-label">
+                                <strong>{"Item Mode:"}</strong>
+                            </label>
+                            <div class="col-auto">
+                                <select ref={self.select_ref.clone()} class="form-select" onchange={ctx.link().callback(|_| Msg::SelectView)}>
+                                    <option selected=true>{"Update"}</option>
+                                    <option>{"Delete"}</option>
+                                </select>
+                            </div>
+                        </div>
+                    }
+                    if let Some(src) = list.iframe.clone() {
+                        <iframe width="100%" height="380" frameborder="0" {src} style="flex-basis: 600px"></iframe>
+                    }
+                    <form style="flex-basis: 750px">
+                        <div class="d-grid row-gap-1 column-gap-3 mb-3" {style}>
+                            if let ItemMode::Update = self.mode {
+                                <div></div>
+                                <p><strong>{"Rating"}</strong></p>
+                                <p><strong>{"Hidden"}</strong></p>
+                            }
+                            <div class="d-grid row-gap-1 overflow-y-auto" style="max-height: 800px; grid-template-columns: subgrid; grid-column: span 3">
+                                {html}
+                            </div>
+                        </div>
+                        if let Some(result) = self.alert.clone() {
+                            <button type="button" class="btn btn-success mb-3" onclick={save} {disabled}>{"Save"}</button>
+                            <Alert {result} {hide}/>
+                        } else {
+                            <button type="button" class="btn btn-success" onclick={save} {disabled}>{"Save"}</button>
+                        }
+                    </form>
+                </div>
+                <hr/>
+                <h4>{"Data Sources"}</h4>
+                {for source_html}
+                if !matches!(list.mode, ListMode::External) {
+                    <button type="button" class="btn btn-success" onclick={push} disabled={!push_available}>{"Push"}</button>
+                }
+            </div>
         }
     }
 }

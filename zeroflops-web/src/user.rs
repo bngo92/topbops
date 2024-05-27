@@ -304,23 +304,6 @@ pub struct SqlStore {
 
 #[async_trait]
 impl SessionStore for SqlStore {
-    async fn load(&self, cookie_value: &Id) -> session_store::Result<Option<Record>> {
-        let id = cookie_value.to_string();
-        let conn = Connection::open(self.path)
-            .map_err(|e| session_store::Error::Backend(e.to_string()))?;
-        let mut stmt = conn
-            .prepare("SELECT data FROM session WHERE id = ?1")
-            .map_err(|e| session_store::Error::Backend(e.to_string()))?;
-        match stmt.query_row([&id], |row| row.get::<_, String>(0)) {
-            Ok(s) => match serde_json::from_str(&s) {
-                Ok(record) => Ok(Some(record)),
-                Err(e) => Err(session_store::Error::Decode(e.to_string())),
-            },
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(session_store::Error::Backend(e.to_string())),
-        }
-    }
-
     async fn save(&self, session: &Record) -> session_store::Result<()> {
         let conn = Connection::open(self.path)
             .map_err(|e| session_store::Error::Backend(e.to_string()))?;
@@ -335,6 +318,23 @@ impl SessionStore for SqlStore {
                 .map_err(|e| session_store::Error::Encode(e.to_string()))?,
         ]) {
             Ok(_) => Ok(()),
+            Err(e) => Err(session_store::Error::Backend(e.to_string())),
+        }
+    }
+
+    async fn load(&self, cookie_value: &Id) -> session_store::Result<Option<Record>> {
+        let id = cookie_value.to_string();
+        let conn = Connection::open(self.path)
+            .map_err(|e| session_store::Error::Backend(e.to_string()))?;
+        let mut stmt = conn
+            .prepare("SELECT data FROM session WHERE id = ?1")
+            .map_err(|e| session_store::Error::Backend(e.to_string()))?;
+        match stmt.query_row([&id], |row| row.get::<_, String>(0)) {
+            Ok(s) => match serde_json::from_str(&s) {
+                Ok(record) => Ok(Some(record)),
+                Err(e) => Err(session_store::Error::Decode(e.to_string())),
+            },
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(session_store::Error::Backend(e.to_string())),
         }
     }

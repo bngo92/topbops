@@ -26,6 +26,18 @@ impl Component for Accordion {
         }
     }
 
+    fn update(&mut self, _: &Context<Self>, _: Self::Message) -> bool {
+        self.collapsed = !self.collapsed;
+        true
+    }
+
+    fn changed(&mut self, ctx: &Context<Self>, _: &Self::Properties) -> bool {
+        if let Some(collapsed) = ctx.props().collapsed {
+            self.collapsed = collapsed;
+        }
+        true
+    }
+
     fn view(&self, ctx: &Context<Self>) -> Html {
         let (button_class, body_class) = if self.collapsed {
             ("accordion-button collapsed", "accordion-collapse collapse")
@@ -49,18 +61,6 @@ impl Component for Accordion {
                 </div>
             </div>
         }
-    }
-
-    fn update(&mut self, _: &Context<Self>, _: Self::Message) -> bool {
-        self.collapsed = !self.collapsed;
-        true
-    }
-
-    fn changed(&mut self, ctx: &Context<Self>, _: &Self::Properties) -> bool {
-        if let Some(collapsed) = ctx.props().collapsed {
-            self.collapsed = collapsed;
-        }
-        true
     }
 }
 

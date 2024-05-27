@@ -31,6 +31,14 @@ impl Component for Search {
         }
     }
 
+    fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
+        match msg {
+            SearchMsg::ToggleHelp => self.help_collapsed = !self.help_collapsed,
+            SearchMsg::Toggle => self.split_view = !self.split_view,
+        }
+        true
+    }
+
     fn view(&self, ctx: &Context<Self>) -> Html {
         let onclick = ctx.link().callback(|_| SearchMsg::Toggle);
         let button_text = if self.split_view {
@@ -105,14 +113,6 @@ impl Component for Search {
             },
         )
     }
-
-    fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
-        match msg {
-            SearchMsg::ToggleHelp => self.help_collapsed = !self.help_collapsed,
-            SearchMsg::Toggle => self.split_view = !self.split_view,
-        }
-        true
-    }
 }
 
 pub enum Msg {
@@ -161,6 +161,45 @@ impl Component for SearchPane {
         }
     }
 
+    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
+        match msg {
+            Msg::Fetching => {
+                let input = self.search_ref.cast::<HtmlSelectElement>().unwrap().value();
+                ctx.link().send_future(async move {
+                    match crate::find_items(&input).await {
+                        Ok(query) => Msg::Success(query),
+                        Err(error) => Msg::Failed(error.as_string().unwrap()),
+                    }
+                });
+                return false;
+            }
+            Msg::Success(query) => {
+                self.query = query;
+                self.error = None;
+            }
+            Msg::Failed(error) => {
+                self.error = Some(error);
+            }
+            Msg::Select => {
+                let view = self.select_ref.cast::<HtmlSelectElement>().unwrap().value();
+                self.view = match &*view {
+                    "Table" => DataView::Table,
+                    "Column Graph" => DataView::ColumnGraph,
+                    "Line Graph" => DataView::LineGraph,
+                    "Scatter Plot" => DataView::ScatterPlot,
+                    "Cumulative Line Graph" => DataView::CumLineGraph,
+                    _ => unreachable!(),
+                };
+            }
+        }
+        if let Some(df) = &self.query {
+            if let Err(e) = self.view.draw(df) {
+                self.error = Some(e.to_string());
+            }
+        }
+        true
+    }
+
     fn view(&self, ctx: &Context<Self>) -> Html {
         let default_search = Some("SELECT name, user_score FROM item");
         let onchange = ctx.link().callback(|_| Msg::Select);
@@ -202,45 +241,6 @@ impl Component for SearchPane {
                 }
             </div>
         }
-    }
-
-    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
-        match msg {
-            Msg::Fetching => {
-                let input = self.search_ref.cast::<HtmlSelectElement>().unwrap().value();
-                ctx.link().send_future(async move {
-                    match crate::find_items(&input).await {
-                        Ok(query) => Msg::Success(query),
-                        Err(error) => Msg::Failed(error.as_string().unwrap()),
-                    }
-                });
-                return false;
-            }
-            Msg::Success(query) => {
-                self.query = query;
-                self.error = None;
-            }
-            Msg::Failed(error) => {
-                self.error = Some(error);
-            }
-            Msg::Select => {
-                let view = self.select_ref.cast::<HtmlSelectElement>().unwrap().value();
-                self.view = match &*view {
-                    "Table" => DataView::Table,
-                    "Column Graph" => DataView::ColumnGraph,
-                    "Line Graph" => DataView::LineGraph,
-                    "Scatter Plot" => DataView::ScatterPlot,
-                    "Cumulative Line Graph" => DataView::CumLineGraph,
-                    _ => unreachable!(),
-                };
-            }
-        }
-        if let Some(df) = &self.query {
-            if let Err(e) = self.view.draw(df) {
-                self.error = Some(e.to_string());
-            }
-        }
-        true
     }
 }
 

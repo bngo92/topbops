@@ -40,6 +40,45 @@ impl Component for SpotifyIntegration {
         }
     }
 
+    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
+        match msg {
+            Msg::None => {}
+            Msg::LoadRecentTracks(tracks) => self.recent_tracks = Some(tracks),
+            Msg::LoadPlaylists(playlists) => self.playlists = Some(playlists),
+            Msg::Import => {
+                let input = self.import_ref.cast::<HtmlSelectElement>().unwrap().value();
+                // TODO: handle bad input
+                let (source, id) = match crate::parse_spotify_source(input) {
+                    Some(Spotify::Playlist(id)) => ("spotify:playlist", id),
+                    Some(Spotify::Album(id)) => ("spotify:album", id),
+                    Some(Spotify::Track(id)) => ("spotify:track", id),
+                    None => {
+                        return false;
+                    }
+                };
+                ctx.link().send_future(async move {
+                    crate::import_list(source, &id.id).await.unwrap();
+                    Msg::None
+                });
+            }
+            Msg::ImportTrack(input) => {
+                // TODO: handle bad input
+                let (source, id) = match crate::parse_spotify_source(input) {
+                    Some(Spotify::Track(id)) => ("spotify:track", id),
+                    _ => {
+                        return false;
+                    }
+                };
+                ctx.link().send_future(async move {
+                    crate::import_list(source, &id.id).await.unwrap();
+                    // TODO: refresh row
+                    Msg::None
+                });
+            }
+        }
+        true
+    }
+
     fn view(&self, ctx: &Context<Self>) -> Html {
         let default_import =
             "https://open.spotify.com/playlist/5MztFbRbMpyxbVYuOSfQV9?si=9db089ab25274efa";
@@ -111,45 +150,6 @@ impl Component for SpotifyIntegration {
               </div>
             },
         )
-    }
-
-    fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
-        match msg {
-            Msg::None => {}
-            Msg::LoadRecentTracks(tracks) => self.recent_tracks = Some(tracks),
-            Msg::LoadPlaylists(playlists) => self.playlists = Some(playlists),
-            Msg::Import => {
-                let input = self.import_ref.cast::<HtmlSelectElement>().unwrap().value();
-                // TODO: handle bad input
-                let (source, id) = match crate::parse_spotify_source(input) {
-                    Some(Spotify::Playlist(id)) => ("spotify:playlist", id),
-                    Some(Spotify::Album(id)) => ("spotify:album", id),
-                    Some(Spotify::Track(id)) => ("spotify:track", id),
-                    None => {
-                        return false;
-                    }
-                };
-                ctx.link().send_future(async move {
-                    crate::import_list(source, &id.id).await.unwrap();
-                    Msg::None
-                });
-            }
-            Msg::ImportTrack(input) => {
-                // TODO: handle bad input
-                let (source, id) = match crate::parse_spotify_source(input) {
-                    Some(Spotify::Track(id)) => ("spotify:track", id),
-                    _ => {
-                        return false;
-                    }
-                };
-                ctx.link().send_future(async move {
-                    crate::import_list(source, &id.id).await.unwrap();
-                    // TODO: refresh row
-                    Msg::None
-                });
-            }
-        }
-        true
     }
 }
 

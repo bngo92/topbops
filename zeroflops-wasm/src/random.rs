@@ -68,7 +68,7 @@ pub struct MatchComponentProps {
 }
 
 pub struct Match {
-    random_queue: Vec<Option<zeroflops::ItemMetadata>>,
+    random_queue: Vec<Option<ItemMetadata>>,
     data: Option<MatchData>,
 }
 
@@ -85,43 +85,6 @@ impl Component for Match {
         Match {
             random_queue: Vec::new(),
             data: None,
-        }
-    }
-
-    fn view(&self, ctx: &Context<Self>) -> Html {
-        let Some(MatchData { left, right, query }) = self.data.clone() else {
-            return html! {};
-        };
-        let left_param = (left.id.clone(), right.id.clone());
-        let on_left_select = ctx
-            .link()
-            .callback(move |_| Msg::UpdateStats(left_param.clone()));
-        let right_param = (right.id.clone(), left.id.clone());
-        let on_right_select = ctx
-            .link()
-            .callback(move |_| Msg::UpdateStats(right_param.clone()));
-        let items = query
-            .items
-            .iter()
-            .zip(1..)
-            .map(|(item, i)| {
-                item.as_ref().map(|m| {
-                    (
-                        i,
-                        Cow::from(vec![
-                            m.name.to_owned(),
-                            format!("{}-{}", m.wins, m.losses),
-                            m.score.to_string(),
-                        ]),
-                    )
-                })
-            })
-            .collect();
-        html! {
-            <div>
-                <IframeCompare left={left} {on_left_select} right={right} {on_right_select}/>
-                {crate::base::responsive_table_view(&["Track", "Record", "Score"], items)}
-            </div>
         }
     }
 
@@ -173,6 +136,43 @@ impl Component for Match {
                 });
                 false
             }
+        }
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let Some(MatchData { left, right, query }) = self.data.clone() else {
+            return html! {};
+        };
+        let left_param = (left.id.clone(), right.id.clone());
+        let on_left_select = ctx
+            .link()
+            .callback(move |_| Msg::UpdateStats(left_param.clone()));
+        let right_param = (right.id.clone(), left.id.clone());
+        let on_right_select = ctx
+            .link()
+            .callback(move |_| Msg::UpdateStats(right_param.clone()));
+        let items = query
+            .items
+            .iter()
+            .zip(1..)
+            .map(|(item, i)| {
+                item.as_ref().map(|m| {
+                    (
+                        i,
+                        Cow::from(vec![
+                            m.name.to_owned(),
+                            format!("{}-{}", m.wins, m.losses),
+                            m.score.to_string(),
+                        ]),
+                    )
+                })
+            })
+            .collect();
+        html! {
+            <div>
+                <IframeCompare left={left} {on_left_select} right={right} {on_right_select}/>
+                {crate::base::responsive_table_view(&["Track", "Record", "Score"], items)}
+            </div>
         }
     }
 }
