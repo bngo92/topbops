@@ -25,8 +25,6 @@ pub async fn get_view_items(
     };
     // GROUP BY queries create schemas that don't produce items
     let items = if select.group_by.is_empty() {
-        Vec::new()
-    } else {
         select.projection = ["id", "name", "iframe"]
             .into_iter()
             .map(|s| SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(s))))
@@ -39,6 +37,8 @@ pub async fn get_view_items(
                 CosmosQuery::new(query),
             ))
             .await?
+    } else {
+        Vec::new()
     };
     Ok(items.into_iter().map(|item| ItemMetadata {
         id: item["id"].as_str().unwrap().to_owned(),
@@ -303,9 +303,7 @@ pub mod test {
         pub fn new(side_effect: Vec<U>) -> Mock<T, U> {
             Mock {
                 call_args: Arc::new(Mutex::new(Vec::new())),
-                side_effect: Arc::new(Mutex::new(
-                    side_effect.into_iter().map(Some).collect(),
-                )),
+                side_effect: Arc::new(Mutex::new(side_effect.into_iter().map(Some).collect())),
             }
         }
 
