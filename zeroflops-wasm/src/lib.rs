@@ -350,10 +350,10 @@ pub struct UserProps {
     logged_in: bool,
 }
 
-fn parse_spotify_source(input: String) -> Option<Spotify> {
-    let playlist_re = Regex::new(r"https://open.spotify.com/playlist/([:alnum]*)").unwrap();
-    let album_re = Regex::new(r"https://open.spotify.com/album/([:alnum]*)").unwrap();
-    let track_re = Regex::new(r"https://open.spotify.com/track/([:alnum]*)").unwrap();
+pub fn parse_spotify_source(input: String) -> Option<Spotify> {
+    let playlist_re = Regex::new(r"https://open.spotify.com/playlist/([[:alnum:]]*)").unwrap();
+    let album_re = Regex::new(r"https://open.spotify.com/album/([[:alnum:]]*)").unwrap();
+    let track_re = Regex::new(r"https://open.spotify.com/track/([[:alnum:]]*)").unwrap();
     return if let Some(caps) = playlist_re.captures_iter(&input).next() {
         Some(Spotify::Playlist(Id {
             id: caps[1].to_owned(),
@@ -573,9 +573,8 @@ impl Component for ListComponent {
                 | ListsRoute::Match { id }
                 | ListsRoute::Tournament { id } => id.clone(),
             };
-            ctx.link().send_future(async move {
-                ListMsg::Load(fetch_list(&id).await.unwrap().unwrap())
-            });
+            ctx.link()
+                .send_future(async move { ListMsg::Load(fetch_list(&id).await.unwrap().unwrap()) });
         }
         // Rank dropdown breaks if this is set to false
         true
