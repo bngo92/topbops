@@ -80,7 +80,9 @@ impl Component for Edit {
                 if !matches!(self.list.mode, ListMode::External) {
                     self.list.name = self.name_ref.cast::<HtmlInputElement>().unwrap().value();
                 }
-                if let ListMode::User(external_id) = &mut self.list.mode {
+                if let ListMode::User(external_id) | ListMode::View(external_id) =
+                    &mut self.list.mode
+                {
                     let id = self
                         .external_ref
                         .cast::<HtmlInputElement>()
@@ -248,7 +250,7 @@ impl Component for Edit {
                         <input type="text" readonly=true class="form-control-plaintext" id="mode" value={mode} placeholder=""/>
                         <label for="mode">{"List mode"}</label>
                     </div>
-                    if let ListMode::User(_) = &self.list.mode {
+                    if let ListMode::User(_) | ListMode::View(_) = &self.list.mode {
                         <div class="form-floating mb-3">
                             <input class="form-control" id="externalId" ref={&self.external_ref} placeholder="External ID"/>
                             <label for="externalId">{"External ID"}</label>
