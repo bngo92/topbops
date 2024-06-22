@@ -1,9 +1,7 @@
 use crate::{Error, UserId};
 use async_trait::async_trait;
 #[cfg(feature = "azure")]
-use azure_data_cosmos::{
-    prelude::{self as cosmos, DatabaseClient, Param, Query as AzureQuery},
-};
+use azure_data_cosmos::prelude::{self as cosmos, DatabaseClient, Param, Query as AzureQuery};
 use rusqlite::{config::DbConfig, limits::Limit, Connection, OpenFlags, OptionalExtension, ToSql};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -166,13 +164,11 @@ impl SessionClient for SqlSessionClient {
         let conn = Connection::open(self.path)?;
         match builder.partition_key {
             View::User(user_id) => {
-                conn.execute_batch(
-                    &format!(
-                        "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{user_id}';
+                conn.execute_batch(&format!(
+                    "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{user_id}';
                         CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{user_id}';",
-                        user_id=user_id.0
-                    ),
-                )?;
+                    user_id = user_id.0
+                ))?;
             }
             View::Public => {
                 conn.execute_batch(
@@ -239,13 +235,11 @@ impl SessionClient for SqlSessionClient {
         // Emulate partitions with views
         match builder.partition_key {
             View::User(user_id) => {
-                conn.execute_batch(
-                    &format!(
-                        "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{user_id}';
+                conn.execute_batch(&format!(
+                    "CREATE TEMP VIEW list AS SELECT * FROM _list WHERE user_id = '{user_id}';
                         CREATE TEMP VIEW item AS SELECT * FROM _item WHERE user_id = '{user_id}';",
-                        user_id=user_id.0
-                    ),
-                )?;
+                    user_id = user_id.0
+                ))?;
             }
             View::List(user_id, ids) => {
                 conn.execute_batch(
