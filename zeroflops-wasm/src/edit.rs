@@ -294,7 +294,9 @@ impl Component for Edit {
                     .unwrap()
                     .set_value(&self.list.name);
             }
-            if let ListMode::User(Some(external_id)) = &self.list.mode {
+            if let ListMode::User(Some(external_id)) | ListMode::View(Some(external_id)) =
+                &self.list.mode
+            {
                 self.external_ref
                     .cast::<HtmlInputElement>()
                     .unwrap()
