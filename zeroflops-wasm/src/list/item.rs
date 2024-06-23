@@ -332,10 +332,10 @@ impl Component for ListItems {
                 }
             }
         });
-        let style = match ctx.props().mode {
-            ItemMode::View => "grid-template-columns: auto",
-            ItemMode::Update => "grid-template-columns: auto max-content max-content",
-            ItemMode::Delete => "grid-template-columns: auto max-content",
+        let (style, grid) = match ctx.props().mode {
+            ItemMode::View => ("", "max-height: 800px"),
+            ItemMode::Update => ("grid-template-columns: auto max-content max-content", "max-height: 800px; grid-template-columns: subgrid; grid-column: span 3"),
+            ItemMode::Delete => ("grid-template-columns: auto max-content", "max-height: 800px; grid-template-columns: subgrid; grid-column: span 2"),
         };
         let html: Html = match ctx.props().mode {
             ItemMode::View => self
@@ -423,7 +423,7 @@ impl Component for ListItems {
                                 <p><strong>{"Rating"}</strong></p>
                                 <p><strong>{"Hidden"}</strong></p>
                             }
-                            <div class="d-grid row-gap-1 overflow-y-auto" style="max-height: 800px; grid-template-columns: subgrid; grid-column: span 3">
+                            <div class="d-grid row-gap-1 overflow-y-auto" style={grid}>
                                 {html}
                             </div>
                         </div>
