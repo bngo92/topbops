@@ -510,9 +510,11 @@ impl Component for ListComponent {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        if let ListState::NotFound = self.state {
-            return crate::not_found();
-        }
+        let list = match &self.state {
+            ListState::NotFound => return crate::not_found(),
+            ListState::Fetching => return html! {},
+            ListState::Success(list) => list,
+        };
         let query = ctx
             .link()
             .location()
@@ -538,119 +540,113 @@ impl Component for ListComponent {
                 }
             }
         };
-        match &self.state {
-            ListState::NotFound => unreachable!(),
-            ListState::Fetching => html! {},
-            ListState::Success(list) => {
-                let mut tabs = ["nav-link"; 3];
-                let active = "nav-link active";
-                match view {
-                    ListPage::View => tabs[0] = active,
-                    ListPage::List => tabs[1] = active,
-                    ListPage::Edit => tabs[2] = active,
-                    _ => {}
+        let mut tabs = ["nav-link"; 3];
+        let active = "nav-link active";
+        match view {
+            ListPage::View => tabs[0] = active,
+            ListPage::List => tabs[1] = active,
+            ListPage::Edit => tabs[2] = active,
+            _ => {}
+        }
+        let component = if crate::user_list(list, &ctx.props().user) {
+            match view {
+                ListPage::View => html! { <ListView list={list.clone()}/> },
+                ListPage::List => {
+                    html! { <ListItems user={Rc::clone(&ctx.props().user)} list={list.clone()} mode={self.mode.clone()}/> }
                 }
-                let component = if crate::user_list(list, &ctx.props().user) {
-                    match view {
-                        ListPage::View => html! { <ListView list={list.clone()}/> },
-                        ListPage::List => {
-                            html! { <ListItems user={Rc::clone(&ctx.props().user)} list={list.clone()} mode={self.mode.clone()}/> }
-                        }
-                        ListPage::Edit => {
-                            html! { <Edit logged_in={ctx.props().user.is_some()} list={list.clone()}/> }
-                        }
-                        ListPage::RandomMatches => html! { <RandomMatches id={list.id.clone()}/> },
-                        ListPage::RandomRounds => html! { <RandomRounds id={list.id.clone()}/> },
-                        ListPage::RandomTournament => {
-                            html! { <RandomTournamentLoader list={list.clone()}/> }
-                        }
-                        ListPage::Tournament => html! { <TournamentLoader list={list.clone()}/> },
-                    }
-                } else {
-                    match view {
-                        ListPage::View => html! { <ListView list={list.clone()}/> },
-                        ListPage::List => {
-                            html! { <ListItems user={Rc::clone(&ctx.props().user)} list={list.clone()} mode={self.mode.clone()}/> }
-                        }
-                        // TODO: move this up?
-                        _ => crate::not_found(),
-                    }
-                };
-                let toggle = match view {
-                    ListPage::RandomMatches => "Random Matches",
-                    ListPage::RandomRounds => "Random Rounds",
-                    ListPage::Tournament => "Tournament",
-                    ListPage::RandomTournament => "Random Tournament",
-                    _ => "Rank",
-                };
-                let toggle_class = match (toggle, ctx.props().dropdown) {
-                    ("Rank", false) => "nav-link dropdown-toggle",
-                    ("Rank", true) => "nav-link dropdown-toggle show",
-                    (_, false) => "nav-link active dropdown-toggle",
-                    (_, true) => "nav-link active dropdown-toggle show",
-                };
-                let menu_class = if ctx.props().dropdown {
-                    "dropdown-menu show"
-                } else {
-                    "dropdown-menu"
-                };
-                // TODO: handle GROUP BY queries
-                let dropdown_html = if let ListMode::View(_) = list.mode {
-                    html! {}
-                } else {
-                    html! {
-                        <li class="nav-item dropdown">
-                            <a class={toggle_class} href="#" onclick={(*ctx.props().show_dropdown).clone()}>{toggle}</a>
-                            <ul class={menu_class}>
-                                <li><Link<ListsRoute> classes="dropdown-item" to={ListsRoute::Tournament{ id: list.id.clone() }}>{"Tournament"}</Link<ListsRoute>></li>
-                                <li><Link<ListsRoute, RouteQuery> classes="dropdown-item" to={ListsRoute::Tournament{ id: list.id.clone() }} query={Some(&[("mode", "random")][..])}>{"Random Tournament"}</Link<ListsRoute, RouteQuery>></li>
-                                <li><Link<ListsRoute> classes="dropdown-item" to={ListsRoute::Match{ id: list.id.clone() }}>{"Random Matches"}</Link<ListsRoute>></li>
-                                <li><Link<ListsRoute, RouteQuery> classes="dropdown-item" to={ListsRoute::Match{ id: list.id.clone() }} query={Some(&[("mode", "rounds")][..])}>{"Random Rounds"}</Link<ListsRoute, RouteQuery>></li>
-                            </ul>
-                        </li>
-                    }
-                };
-                let user = crate::user_list(list, &ctx.props().user);
-                html! {
-                  <Content
-                    heading={list.name.clone()}
-                    nav={html! {
-                      <>
-                        <ul class="navbar-nav me-auto">
-                          <li class="nav-item">
-                            <Link<ListsRoute> classes={tabs[0]} to={ListsRoute::View{id: list.id.clone()}}>{"View"}</Link<ListsRoute>>
-                          </li>
-                          <li class="nav-item">
-                            <Link<ListsRoute> classes={tabs[1]} to={ListsRoute::List{id: list.id.clone()}}>{"Items"}</Link<ListsRoute>>
-                          </li>
-                          if user {
-                            {dropdown_html}
-                            <li class="nav-item">
-                              <Link<ListsRoute> classes={tabs[2]} to={ListsRoute::Edit{id: list.id.clone()}}>{"Settings"}</Link<ListsRoute>>
-                            </li>
-                          }
-                        </ul>
-                        if matches!(view, ListPage::List) && !matches!(list.mode, ListMode::View(_)) {
-                          <div class="d-flex gap-3 align-items-baseline">
-                            <span class="navbar-text text-nowrap">{"Item Mode:"}</span>
-                            <select ref={self.select_ref.clone()} class="form-select" onchange={ctx.link().callback(|_| ListMsg::SelectView)}>
-                              <option selected=true>{"Update"}</option>
-                              <option>{"Delete"}</option>
-                            </select>
-                          </div>
-                        }
-                      </>
-                    }}
-                    content={html! {
-                      <>
-                        if !user {
-                          <h3>{&format!("{}'s list", list.user_id)}</h3>
-                        }
-                        {component}
-                      </>
-                    }}/>
+                ListPage::Edit => {
+                    html! { <Edit logged_in={ctx.props().user.is_some()} list={list.clone()}/> }
                 }
+                ListPage::RandomMatches => html! { <RandomMatches id={list.id.clone()}/> },
+                ListPage::RandomRounds => html! { <RandomRounds id={list.id.clone()}/> },
+                ListPage::RandomTournament => {
+                    html! { <RandomTournamentLoader list={list.clone()}/> }
+                }
+                ListPage::Tournament => html! { <TournamentLoader list={list.clone()}/> },
             }
+        } else {
+            match view {
+                ListPage::View => html! { <ListView list={list.clone()}/> },
+                ListPage::List => {
+                    html! { <ListItems user={Rc::clone(&ctx.props().user)} list={list.clone()} mode={self.mode.clone()}/> }
+                }
+                // TODO: move this up?
+                _ => crate::not_found(),
+            }
+        };
+        let toggle = match view {
+            ListPage::RandomMatches => "Random Matches",
+            ListPage::RandomRounds => "Random Rounds",
+            ListPage::Tournament => "Tournament",
+            ListPage::RandomTournament => "Random Tournament",
+            _ => "Rank",
+        };
+        let toggle_class = match (toggle, ctx.props().dropdown) {
+            ("Rank", false) => "nav-link dropdown-toggle",
+            ("Rank", true) => "nav-link dropdown-toggle show",
+            (_, false) => "nav-link active dropdown-toggle",
+            (_, true) => "nav-link active dropdown-toggle show",
+        };
+        let menu_class = if ctx.props().dropdown {
+            "dropdown-menu show"
+        } else {
+            "dropdown-menu"
+        };
+        // TODO: handle GROUP BY queries
+        let dropdown_html = if let ListMode::View(_) = list.mode {
+            html! {}
+        } else {
+            html! {
+                <li class="nav-item dropdown">
+                    <a class={toggle_class} href="#" onclick={(*ctx.props().show_dropdown).clone()}>{toggle}</a>
+                    <ul class={menu_class}>
+                        <li><Link<ListsRoute> classes="dropdown-item" to={ListsRoute::Tournament{ id: list.id.clone() }}>{"Tournament"}</Link<ListsRoute>></li>
+                        <li><Link<ListsRoute, RouteQuery> classes="dropdown-item" to={ListsRoute::Tournament{ id: list.id.clone() }} query={Some(&[("mode", "random")][..])}>{"Random Tournament"}</Link<ListsRoute, RouteQuery>></li>
+                        <li><Link<ListsRoute> classes="dropdown-item" to={ListsRoute::Match{ id: list.id.clone() }}>{"Random Matches"}</Link<ListsRoute>></li>
+                        <li><Link<ListsRoute, RouteQuery> classes="dropdown-item" to={ListsRoute::Match{ id: list.id.clone() }} query={Some(&[("mode", "rounds")][..])}>{"Random Rounds"}</Link<ListsRoute, RouteQuery>></li>
+                    </ul>
+                </li>
+            }
+        };
+        let user = crate::user_list(list, &ctx.props().user);
+        html! {
+          <Content
+            heading={list.name.clone()}
+            nav={html! {
+              <>
+                <ul class="navbar-nav me-auto">
+                  <li class="nav-item">
+                    <Link<ListsRoute> classes={tabs[0]} to={ListsRoute::View{id: list.id.clone()}}>{"View"}</Link<ListsRoute>>
+                  </li>
+                  <li class="nav-item">
+                    <Link<ListsRoute> classes={tabs[1]} to={ListsRoute::List{id: list.id.clone()}}>{"Items"}</Link<ListsRoute>>
+                  </li>
+                  if user {
+                    {dropdown_html}
+                    <li class="nav-item">
+                      <Link<ListsRoute> classes={tabs[2]} to={ListsRoute::Edit{id: list.id.clone()}}>{"Settings"}</Link<ListsRoute>>
+                    </li>
+                  }
+                </ul>
+                if matches!(view, ListPage::List) && !matches!(list.mode, ListMode::View(_)) {
+                  <div class="d-flex gap-3 align-items-baseline">
+                    <span class="navbar-text text-nowrap">{"Item Mode:"}</span>
+                    <select ref={self.select_ref.clone()} class="form-select" onchange={ctx.link().callback(|_| ListMsg::SelectView)}>
+                      <option selected=true>{"Update"}</option>
+                      <option>{"Delete"}</option>
+                    </select>
+                  </div>
+                }
+              </>
+            }}
+            content={html! {
+              <>
+                if !user {
+                  <h3>{&format!("{}'s list", list.user_id)}</h3>
+                }
+                {component}
+              </>
+            }}/>
         }
     }
 }
