@@ -64,28 +64,24 @@ impl Component for Home {
         let create = ctx.link().callback(|_| HomeMsg::Create);
         crate::nav_content(
             html! {
-              <ul class="navbar-nav me-auto">
-                <li class="navbar-brand">if disabled { {"Demo"} } else { { "Home" } }</li>
-              </ul>
+              <>
+                <ul class="navbar-nav me-auto">
+                  <li class="navbar-brand">if disabled { {"Demo"} } else { { "Home" } }</li>
+                </ul>
+                <div class="d-flex gap-3 align-items-baseline">
+                  <span class="navbar-text text-nowrap">{"Sort Mode:"}</span>
+                  <select ref={self.select_ref.clone()} class="form-select">
+                    <option>{"Tournament"}</option>
+                    <option selected=true>{"Random Tournament"}</option>
+                    <option>{"Random Matches"}</option>
+                    <option>{"Random Rounds"}</option>
+                  </select>
+                  <button class="btn btn-info" onclick={ctx.link().callback(|_| HomeMsg::ToggleHelp)}>{"Help"}</button>
+                </div>
+              </>
             },
             html! {
               <div>
-                <div class="row mb-3">
-                  <label class="col-auto col-form-label">
-                    <strong>{"Sort Mode:"}</strong>
-                  </label>
-                  <div class="col-auto">
-                    <select ref={self.select_ref.clone()} class="form-select">
-                      <option>{"Tournament"}</option>
-                      <option selected=true>{"Random Tournament"}</option>
-                      <option>{"Random Matches"}</option>
-                      <option>{"Random Rounds"}</option>
-                    </select>
-                  </div>
-                  <div class="col-auto">
-                    <button class="btn btn-info" onclick={ctx.link().callback(|_| HomeMsg::ToggleHelp)}>{"Help"}</button>
-                  </div>
-                </div>
                 <Collapse collapsed={self.help_collapsed}>
                   <p>
                   {"zeroflops is an app that helps you filter your data and remove flops from your life.

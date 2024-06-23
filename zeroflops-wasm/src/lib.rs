@@ -6,7 +6,7 @@ use crate::{
     edit::Edit,
     home::Home,
     integrations::spotify::SpotifyIntegration,
-    list::item::ListItems,
+    list::item::{ItemMode, ListItems},
     plot::DataView,
     random::{RandomMatches, RandomRounds},
     search::Search,
@@ -512,6 +512,7 @@ enum ListState {
 pub enum ListMsg {
     Load(List),
     NotFound,
+    SelectView,
 }
 
 #[derive(PartialEq, Properties)]
@@ -524,6 +525,8 @@ pub struct ListProps {
 
 pub struct ListComponent {
     state: ListState,
+    select_ref: NodeRef,
+    mode: ItemMode,
 }
 
 impl Component for ListComponent {
@@ -547,16 +550,36 @@ impl Component for ListComponent {
         });
         ListComponent {
             state: ListState::Fetching,
+            select_ref: NodeRef::default(),
+            mode: ItemMode::View,
         }
     }
 
     fn update(&mut self, _: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
             ListMsg::Load(list) => {
+                self.mode = if let ListMode::View(_) = list.mode {
+                    ItemMode::View
+                } else {
+                    ItemMode::Update
+                };
                 self.state = ListState::Success(list);
             }
             ListMsg::NotFound => {
                 self.state = ListState::NotFound;
+            }
+            ListMsg::SelectView => {
+                self.mode = match self
+                    .select_ref
+                    .cast::<HtmlSelectElement>()
+                    .map(|s| s.value())
+                    .as_deref()
+                    .unwrap_or("Update")
+                {
+                    "Update" => ItemMode::Update,
+                    "Delete" => ItemMode::Delete,
+                    _ => unreachable!(),
+                };
             }
         }
         true
@@ -625,7 +648,7 @@ impl Component for ListComponent {
                     match view {
                         ListPage::View => html! { <ListView list={list.clone()}/> },
                         ListPage::List => {
-                            html! { <ListItems user={Rc::clone(&ctx.props().user)} list={list.clone()}/> }
+                            html! { <ListItems user={Rc::clone(&ctx.props().user)} list={list.clone()} mode={self.mode.clone()}/> }
                         }
                         ListPage::Edit => {
                             html! { <Edit logged_in={ctx.props().user.is_some()} list={list.clone()}/> }
@@ -641,7 +664,7 @@ impl Component for ListComponent {
                     match view {
                         ListPage::View => html! { <ListView list={list.clone()}/> },
                         ListPage::List => {
-                            html! { <ListItems user={Rc::clone(&ctx.props().user)} list={list.clone()}/> }
+                            html! { <ListItems user={Rc::clone(&ctx.props().user)} list={list.clone()} mode={self.mode.clone()}/> }
                         }
                         // TODO: move this up?
                         _ => not_found(),
@@ -686,20 +709,31 @@ impl Component for ListComponent {
                   <Content
                     heading={list.name.clone()}
                     nav={html! {
-                      <ul class="navbar-nav me-auto">
-                        <li class="nav-item">
-                          <Link<ListsRoute> classes={tabs[0]} to={ListsRoute::View{id: list.id.clone()}}>{"View"}</Link<ListsRoute>>
-                        </li>
-                        <li class="nav-item">
-                          <Link<ListsRoute> classes={tabs[1]} to={ListsRoute::List{id: list.id.clone()}}>{"Items"}</Link<ListsRoute>>
-                        </li>
-                        if user {
-                          {dropdown_html}
+                      <>
+                        <ul class="navbar-nav me-auto">
                           <li class="nav-item">
-                            <Link<ListsRoute> classes={tabs[2]} to={ListsRoute::Edit{id: list.id.clone()}}>{"Settings"}</Link<ListsRoute>>
+                            <Link<ListsRoute> classes={tabs[0]} to={ListsRoute::View{id: list.id.clone()}}>{"View"}</Link<ListsRoute>>
                           </li>
+                          <li class="nav-item">
+                            <Link<ListsRoute> classes={tabs[1]} to={ListsRoute::List{id: list.id.clone()}}>{"Items"}</Link<ListsRoute>>
+                          </li>
+                          if user {
+                            {dropdown_html}
+                            <li class="nav-item">
+                              <Link<ListsRoute> classes={tabs[2]} to={ListsRoute::Edit{id: list.id.clone()}}>{"Settings"}</Link<ListsRoute>>
+                            </li>
+                          }
+                        </ul>
+                        if matches!(view, ListPage::List) && !matches!(list.mode, ListMode::View(_)) {
+                          <div class="d-flex gap-3 align-items-baseline">
+                            <span class="navbar-text text-nowrap">{"Item Mode:"}</span>
+                            <select ref={self.select_ref.clone()} class="form-select" onchange={ctx.link().callback(|_| ListMsg::SelectView)}>
+                              <option selected=true>{"Update"}</option>
+                              <option>{"Delete"}</option>
+                            </select>
+                          </div>
                         }
-                      </ul>
+                      </>
                     }}
                     content={html! {
                       <>

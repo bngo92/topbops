@@ -29,7 +29,6 @@ pub enum Msg {
     ModalBack,
     ModalForward,
     HideModal,
-    SelectView,
     Delete((String, usize)),
     DeleteSuccess(usize),
 }
@@ -38,14 +37,13 @@ pub enum Msg {
 pub struct ListProps {
     pub user: Rc<Option<User>>,
     pub list: List,
+    pub mode: ItemMode,
 }
 
 pub struct ListItems {
     items: Vec<ListItem>,
     prev_state: Option<Vec<State>>,
     state: Option<Vec<State>>,
-    select_ref: NodeRef,
-    mode: ItemMode,
     alert: Option<Result<String, String>>,
     modal: Option<usize>,
 }
@@ -61,7 +59,8 @@ struct State {
     hidden: bool,
 }
 
-enum ItemMode {
+#[derive(Clone, PartialEq)]
+pub enum ItemMode {
     View,
     Update,
     Delete,
@@ -98,12 +97,6 @@ impl Component for ListItems {
                 .collect(),
             prev_state: None,
             state: None,
-            select_ref: NodeRef::default(),
-            mode: if let ListMode::View(_) = ctx.props().list.mode {
-                ItemMode::View
-            } else {
-                ItemMode::Update
-            },
             alert: None,
             modal: None,
         }
@@ -269,20 +262,6 @@ impl Component for ListItems {
                 self.modal = None;
                 true
             }
-            Msg::SelectView => {
-                self.mode = match self
-                    .select_ref
-                    .cast::<HtmlSelectElement>()
-                    .map(|s| s.value())
-                    .as_deref()
-                    .unwrap_or("Update")
-                {
-                    "Update" => ItemMode::Update,
-                    "Delete" => ItemMode::Delete,
-                    _ => unreachable!(),
-                };
-                true
-            }
             Msg::Delete((id, i)) => {
                 ctx.link().send_future(async move {
                     crate::delete_items(&[id]).await.unwrap();
@@ -353,12 +332,12 @@ impl Component for ListItems {
                 }
             }
         });
-        let style = match self.mode {
+        let style = match ctx.props().mode {
             ItemMode::View => "grid-template-columns: auto",
             ItemMode::Update => "grid-template-columns: auto max-content max-content",
             ItemMode::Delete => "grid-template-columns: auto max-content",
         };
-        let html: Html = match self.mode {
+        let html: Html = match ctx.props().mode {
             ItemMode::View => self
                 .items
                 .iter()
@@ -434,25 +413,12 @@ impl Component for ListItems {
             <div>
                 <div class="d-flex flex-row-reverse flex-wrap justify-content-end row-gap-3 column-gap-5">
                     {modal_html}
-                    if matches!(ctx.props().list.mode, ListMode::View(_)) {
-                        <div class="row mb-3">
-                            <label class="col-auto col-form-label">
-                                <strong>{"Item Mode:"}</strong>
-                            </label>
-                            <div class="col-auto">
-                                <select ref={self.select_ref.clone()} class="form-select" onchange={ctx.link().callback(|_| Msg::SelectView)}>
-                                    <option selected=true>{"Update"}</option>
-                                    <option>{"Delete"}</option>
-                                </select>
-                            </div>
-                        </div>
-                    }
                     if let Some(src) = list.iframe.clone() {
                         <iframe width="100%" height="380" frameborder="0" {src} style="flex-basis: 600px"></iframe>
                     }
                     <form style="flex-basis: 750px">
                         <div class="d-grid row-gap-1 column-gap-3 mb-3" {style}>
-                            if let ItemMode::Update = self.mode {
+                            if let ItemMode::Update = ctx.props().mode {
                                 <div></div>
                                 <p><strong>{"Rating"}</strong></p>
                                 <p><strong>{"Hidden"}</strong></p>
