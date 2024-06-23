@@ -334,8 +334,14 @@ impl Component for ListItems {
         });
         let (style, grid) = match ctx.props().mode {
             ItemMode::View => ("", "max-height: 800px"),
-            ItemMode::Update => ("grid-template-columns: auto max-content max-content", "max-height: 800px; grid-template-columns: subgrid; grid-column: span 3"),
-            ItemMode::Delete => ("grid-template-columns: auto max-content", "max-height: 800px; grid-template-columns: subgrid; grid-column: span 2"),
+            ItemMode::Update => (
+                "grid-template-columns: auto max-content max-content",
+                "max-height: 800px; grid-template-columns: subgrid; grid-column: span 3",
+            ),
+            ItemMode::Delete => (
+                "grid-template-columns: auto max-content",
+                "max-height: 800px; grid-template-columns: subgrid; grid-column: span 2",
+            ),
         };
         let html: Html = match ctx.props().mode {
             ItemMode::View => self
