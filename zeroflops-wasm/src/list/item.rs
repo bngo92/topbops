@@ -289,24 +289,26 @@ impl Component for ListItems {
                 .link()
                 .callback(move |rating| Msg::UpdateRating(i, rating));
             html! {
-                <Modal header={item.item.name.clone()} hide={ctx.link().callback(|_| Msg::HideModal)}>
-                    <div class="carousel slide">
-                        <div class="carousel-item active">
-                            if let Some(iframe) = &item.item.iframe {
-                                <iframe width="100%" height="380" frameborder="0" src={iframe.clone()}></iframe>
-                            }
-                        </div>
-                        <button class="carousel-control-prev" type="button" onclick={ctx.link().callback(|_| Msg::ModalBack)} style="top: 56px; bottom: auto; height: 137px">
-                            <span class="carousel-control-prev-icon"></span>
-                        </button>
-                        <button class="carousel-control-next" type="button" onclick={ctx.link().callback(|_| Msg::ModalForward)} style="top: 56px; bottom: auto; height: 137px">
-                            <span class="carousel-control-next-icon"></span>
-                        </button>
-                    </div>
-                    <div class="col-2">
-                        <Rating rating={self.state.as_ref().unwrap()[i].rating} {onchange} disabled={disabled}/>
-                    </div>
-                </Modal>
+              <Modal header={item.item.name.clone()} hide={ctx.link().callback(|_| Msg::HideModal)}>
+                <div class="carousel slide">
+                  <div class="carousel-item active">
+                    if let Some(iframe) = &item.item.iframe {
+                      <iframe width="100%" height="380" frameborder="0" src={iframe.clone()}></iframe>
+                    }
+                  </div>
+                  <button class="carousel-control-prev" type="button" onclick={ctx.link().callback(|_| Msg::ModalBack)} style="top: 56px; bottom: auto; height: 137px">
+                    <span class="carousel-control-prev-icon"></span>
+                  </button>
+                  <button class="carousel-control-next" type="button" onclick={ctx.link().callback(|_| Msg::ModalForward)} style="top: 56px; bottom: auto; height: 137px">
+                    <span class="carousel-control-next-icon"></span>
+                  </button>
+                </div>
+                if let Some(state) = self.state.as_ref() {
+                  <div class="col-2">
+                    <Rating rating={state[i].rating} {onchange} disabled={disabled}/>
+                  </div>
+                }
+              </Modal>
             }
         } else {
             html! {}
