@@ -62,6 +62,17 @@ impl Component for Home {
     fn view(&self, ctx: &Context<Self>) -> Html {
         let disabled = !ctx.props().logged_in;
         let create = ctx.link().callback(|_| HomeMsg::Create);
+        let mut column = Vec::new();
+        let mut left = Vec::new();
+        let mut right = Vec::new();
+        for (l, &r) in self.lists.iter().zip([false, true].iter().cycle()) {
+            column.push(html! {<Widget list={l.clone()} select_ref={self.select_ref.clone()}/>});
+            if r {
+                right.push(html! {<Widget list={l.clone()} select_ref={self.select_ref.clone()}/>});
+            } else {
+                left.push(html! {<Widget list={l.clone()} select_ref={self.select_ref.clone()}/>});
+            }
+        }
         crate::nav_content(
             html! {
               <>
@@ -107,10 +118,21 @@ impl Component for Home {
                     <li>{"Search for data about your ratings and rankings by going to the "}<Link<Route> to={Route::Search}>{"Search"}</Link<Route>>{" page."}</li>
                   </ul>
                 </Collapse>
-                <div class="row mt-3">
-                  {for self.lists.iter().map(|l| html! {<Widget list={l.clone()} select_ref={self.select_ref.clone()}/>})}
+                <div class="mt-3">
+                  <div class="d-md-none">
+                    {column}
+                    <button type="button" class="btn btn-primary" onclick={create.clone()} {disabled}>{"Create List"}</button>
+                  </div>
+                  <div class="d-none d-md-block">
+                    <div class="d-grid gap-3" style="grid-template-columns: 1fr 1fr">
+                      <div>
+                        {left}
+                        <button type="button" class="btn btn-primary" onclick={create} {disabled}>{"Create List"}</button>
+                      </div>
+                      <div>{right}</div>
+                    </div>
+                  </div>
                 </div>
-                <button type="button" class="btn btn-primary" onclick={create} {disabled}>{"Create List"}</button>
               </div>
             },
         )
@@ -221,7 +243,7 @@ impl Component for Widget {
         // TODO: support actions on views
         let disabled = matches!(list.mode, ListMode::View(_));
         html! {
-            <div class="col-12 col-md-6">
+            <>
                 <Accordion header={list.name.clone()} collapsed={self.collapsed} {on_toggle}>
                     if let Some(query) = &self.query {
                         {crate::plot::df_table_view(query, false)}
@@ -237,7 +259,7 @@ impl Component for Widget {
                         <button type="button" class="btn btn-success" onclick={compare} {disabled}>{"Rank"}</button>
                     </div>
                 </div>
-            </div>
+            </>
         }
     }
 }
