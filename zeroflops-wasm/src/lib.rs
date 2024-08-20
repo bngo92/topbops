@@ -87,8 +87,8 @@ pub fn parse_spotify_source(input: String) -> Option<Spotify> {
     };
 }
 
-fn parse_setlist_source(input: String) -> Option<Id> {
-    let re = Regex::new(r"https://www.setlist.fm/setlist/.*-([:alnum]*).html").unwrap();
+pub fn parse_setlist_source(input: String) -> Option<Id> {
+    let re = Regex::new(r"https://www.setlist.fm/setlist/.*-([[:alnum:]]*).html").unwrap();
     return if let Some(caps) = re.captures_iter(&input).next() {
         Some(Id {
             id: caps[1].to_owned(),
