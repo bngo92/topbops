@@ -35,7 +35,7 @@ impl Component for Lists {
             ListsMsg::Create => {
                 let navigator = ctx.link().navigator().unwrap();
                 ctx.link().send_future_batch(async move {
-                    let list = crate::create_list().await.unwrap();
+                    let list = crate::create_list(None).await.unwrap();
                     navigator.push(&ListsRoute::Edit { id: list.id });
                     None
                 });

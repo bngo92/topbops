@@ -206,10 +206,14 @@ async fn fetch_list(id: &str) -> Result<Option<List>, JsValue> {
     Ok(Some(serde_wasm_bindgen::from_value(json).unwrap()))
 }
 
-async fn create_list() -> Result<List, JsValue> {
+async fn create_list(query: Option<String>) -> Result<List, JsValue> {
     let window = window();
     let request = Request::new_with_str_and_init(
-        "/api/lists",
+        &if let Some(query) = query {
+            format!("/api/lists?query={query}")
+        } else {
+            String::from("/api/lists")
+        },
         RequestInit::new().method("POST").mode(RequestMode::Cors),
     )?;
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;

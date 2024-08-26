@@ -1,4 +1,4 @@
-use crate::{base::Input, bootstrap::Collapse, dataframe::DataFrame, plot::DataView};
+use crate::{bootstrap::Collapse, dataframe::DataFrame, plot::DataView};
 use arrow::{array::RecordBatch, csv::writer::Writer};
 use std::{collections::HashMap, sync::Arc};
 use web_sys::{HtmlSelectElement, KeyboardEvent};
@@ -116,10 +116,12 @@ impl Component for Search {
 }
 
 pub enum Msg {
+    None,
     Fetching,
     Success(Option<DataFrame>),
     Failed(String),
     Select,
+    CreateList,
 }
 
 pub struct SearchPane {
@@ -163,6 +165,7 @@ impl Component for SearchPane {
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
+            Msg::None => {}
             Msg::Fetching => {
                 let input = self.search_ref.cast::<HtmlSelectElement>().unwrap().value();
                 ctx.link().send_future(async move {
@@ -191,6 +194,16 @@ impl Component for SearchPane {
                     _ => unreachable!(),
                 };
             }
+            Msg::CreateList => {
+                let input = self.search_ref.cast::<HtmlSelectElement>().unwrap().value();
+                ctx.link().send_future(async move {
+                    match crate::create_list(Some(input)).await {
+                        Ok(_) => Msg::None,
+                        Err(error) => Msg::Failed(error.as_string().unwrap()),
+                    }
+                });
+                return false;
+            }
         }
         if let Some(df) = &self.query {
             if let Err(e) = self.view.draw(df) {
@@ -204,6 +217,7 @@ impl Component for SearchPane {
         let default_search = Some("SELECT name, user_score FROM item");
         let onchange = ctx.link().callback(|_| Msg::Select);
         let search = ctx.link().callback(|_| Msg::Fetching);
+        let create = ctx.link().callback(|_| Msg::CreateList);
         let onkeydown = ctx.link().batch_callback(|event: KeyboardEvent| {
             if event.key_code() == 13 {
                 event.prevent_default();
@@ -212,6 +226,14 @@ impl Component for SearchPane {
                 None
             }
         });
+        let (class, error) = if let Some(error) = &self.error {
+            (
+                "flex-grow-1 is-invalid",
+                Some(html! {<div class="invalid-feedback">{error}</div>}),
+            )
+        } else {
+            ("flex-grow-1", None)
+        };
         html! {
             <div class="row w-100">
                 if let Format::Table = self.format {
@@ -226,7 +248,17 @@ impl Component for SearchPane {
                     </div>
                 }
                 <form {onkeydown}>
-                    <Input input_ref={self.search_ref.clone()} default={default_search} onclick={search.clone()} error={self.error.clone()} disabled={false}/>
+                    <div class="d-flex gap-2">
+                        <div class="flex-grow-1">
+                            // Copy only the styles from .form-control that are needed for sizing
+                            <input ref={self.search_ref.clone()} type="text" {class} style="padding: .5rem 1rem; font-size: .875rem; border-width: 1px; min-width: 100%" placeholder={default_search}/>
+                            if let Some(error) = error {
+                                {error}
+                            }
+                        </div>
+                        <button type="button" class="btn btn-success" onclick={search.clone()} style="height: fit-content">{"Search"}</button>
+                        <button type="button" class="btn btn-success" onclick={create.clone()} style="height: fit-content" disabled={self.query.is_none()}>{"Create List"}</button>
+                    </div>
                 </form>
                 if let Some(query) = &self.query {
                     if let Format::Table = self.format {

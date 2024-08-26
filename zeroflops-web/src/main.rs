@@ -257,10 +257,11 @@ fn serialize_arrow(mut records: Vec<Map<String, Value>>) -> Result<Vec<u8>, Erro
 
 async fn create_list(
     State(state): State<Arc<AppState>>,
+    Query(params): Query<HashMap<String, String>>,
     auth: AuthContext,
 ) -> Result<impl IntoResponse, Response> {
     let user = require_user(auth)?;
-    let list = List::new(
+    let mut list = List::new(
         Uuid::new_v4().to_hyphenated().to_string(),
         &UserId(user.user_id),
         ListMode::User(None),
@@ -269,6 +270,10 @@ async fn create_list(
         None,
         Vec::new(),
     );
+    if let Some(query) = params.get("query") {
+        list.mode = ListMode::View(None);
+        list.query = query.clone();
+    }
     create_list_doc(&state.sql_client, list.clone(), false).await?;
     Ok((StatusCode::CREATED, Json(list)))
 }
