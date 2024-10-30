@@ -356,6 +356,7 @@ impl Component for ListView {
                     "Line Graph" => DataView::LineGraph,
                     "Scatter Plot" => DataView::ScatterPlot,
                     "Cumulative Line Graph" => DataView::CumLineGraph,
+                    "CSV" => DataView::Csv,
                     _ => unreachable!(),
                 };
             }
@@ -390,6 +391,7 @@ impl Component for ListView {
                         <option>{"Line Graph"}</option>
                         <option>{"Scatter Plot"}</option>
                         <option>{"Cumulative Line Graph"}</option>
+                        <option>{"CSV"}</option>
                     </select>
                 </div>
                 <Input input_ref={self.query_ref.clone()} onclick={query.clone()} error={self.error.clone()} disabled={matches!(ctx.props().list.mode, ListMode::View(_))}/>

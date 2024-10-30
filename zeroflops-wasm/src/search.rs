@@ -1,9 +1,6 @@
 use crate::{bootstrap::Collapse, dataframe::DataFrame, plot::DataView};
-use arrow::{array::RecordBatch, csv::writer::Writer};
-use std::{collections::HashMap, sync::Arc};
 use web_sys::{HtmlSelectElement, KeyboardEvent};
 use yew::{html, Component, Context, Html, NodeRef, Properties};
-use yew_router::scope_ext::RouterScopeExt;
 
 pub enum SearchMsg {
     ToggleHelp,
@@ -128,36 +125,19 @@ pub struct SearchPane {
     search_ref: NodeRef,
     query: Option<DataFrame>,
     error: Option<String>,
-    format: Format,
     select_ref: NodeRef,
     view: DataView,
-}
-
-enum Format {
-    Table,
-    Csv,
 }
 
 impl Component for SearchPane {
     type Message = Msg;
     type Properties = ();
 
-    fn create(ctx: &Context<Self>) -> Self {
-        let query = ctx
-            .link()
-            .location()
-            .unwrap()
-            .query::<HashMap<String, String>>()
-            .unwrap_or_default();
-        let format = match query.get("mode").map(String::as_str) {
-            Some("csv") => Format::Csv,
-            _ => Format::Table,
-        };
+    fn create(_: &Context<Self>) -> Self {
         SearchPane {
             search_ref: NodeRef::default(),
             query: None,
             error: None,
-            format,
             select_ref: NodeRef::default(),
             view: DataView::Table,
         }
@@ -191,6 +171,7 @@ impl Component for SearchPane {
                     "Line Graph" => DataView::LineGraph,
                     "Scatter Plot" => DataView::ScatterPlot,
                     "Cumulative Line Graph" => DataView::CumLineGraph,
+                    "CSV" => DataView::Csv,
                     _ => unreachable!(),
                 };
             }
@@ -236,17 +217,16 @@ impl Component for SearchPane {
         };
         html! {
             <div class="row w-100">
-                if let Format::Table = self.format {
-                    <div class="col-auto">
-                        <select ref={self.select_ref.clone()} class="form-select mb-3" {onchange}>
-                            <option selected=true>{"Table"}</option>
-                            <option>{"Column Graph"}</option>
-                            <option>{"Line Graph"}</option>
-                            <option>{"Scatter Plot"}</option>
-                            <option>{"Cumulative Line Graph"}</option>
-                        </select>
-                    </div>
-                }
+                <div class="col-auto">
+                    <select ref={self.select_ref.clone()} class="form-select mb-3" {onchange}>
+                        <option selected=true>{"Table"}</option>
+                        <option>{"Column Graph"}</option>
+                        <option>{"Line Graph"}</option>
+                        <option>{"Scatter Plot"}</option>
+                        <option>{"Cumulative Line Graph"}</option>
+                        <option>{"CSV"}</option>
+                    </select>
+                </div>
                 <form {onkeydown}>
                     <div class="d-flex gap-2">
                         <div class="flex-grow-1">
@@ -261,26 +241,9 @@ impl Component for SearchPane {
                     </div>
                 </form>
                 if let Some(query) = &self.query {
-                    if let Format::Table = self.format {
-                        {self.view.render(query)}
-                    } else if let Format::Csv = self.format {
-                        <p>{write_csv(query)
-                            .lines()
-                                .map(|items| html! {items})
-                                .intersperse(html! {<br/>})
-                                .collect::<Html>()}</p>
-                    }
+                    {self.view.render(query)}
                 }
             </div>
         }
     }
-}
-
-fn write_csv(df: &DataFrame) -> String {
-    let output = Vec::new();
-    let mut writer = Writer::new(output);
-    writer
-        .write(&RecordBatch::try_new(Arc::clone(&df.schema), df.arrays.clone()).unwrap())
-        .unwrap();
-    String::from_utf8(writer.into_inner()).unwrap()
 }

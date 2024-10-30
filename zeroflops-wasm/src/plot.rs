@@ -1,6 +1,7 @@
 use arrow::{
-    array::AsArray,
+    array::{AsArray, RecordBatch},
     compute,
+    csv::Writer,
     datatypes::{DataType, Float64Type, UInt32Type},
     util::display,
 };
@@ -9,7 +10,7 @@ use plotters::prelude::{
     RED, WHITE,
 };
 use plotters_canvas::CanvasBackend;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use yew::{html, Html};
 
 use crate::dataframe::DataFrame;
@@ -20,15 +21,22 @@ pub enum DataView {
     LineGraph,
     ScatterPlot,
     CumLineGraph,
+    Csv,
 }
 
 impl DataView {
     pub fn render(&self, df: &DataFrame) -> Html {
         html! {
             <div>
-                <canvas id="canvas" width="640" height="426" class={if let DataView::Table = self { "d-none" } else { "" }}></canvas>
+                <canvas id="canvas" width="640" height="426" class={if let DataView::Table | DataView::Csv = self { "d-none" } else { "" }}></canvas>
                 if let DataView::Table = self {
                     {df_table_view(df, true)}
+                } else if let DataView::Csv = self {
+                    <p>{write_csv(df)
+                        .lines()
+                            .map(|items| html! {items})
+                            .intersperse(html! {<br/>})
+                            .collect::<Html>()}</p>
                 }
             </div>
         }
@@ -36,7 +44,7 @@ impl DataView {
 
     pub fn draw(&self, df: &DataFrame) -> Result<(), Box<dyn std::error::Error>> {
         match self {
-            DataView::Table => Ok(()),
+            DataView::Table | DataView::Csv => Ok(()),
             DataView::ColumnGraph => draw_column_graph(df),
             DataView::LineGraph => draw_line_graph(df),
             DataView::ScatterPlot => draw_scatter_plot(df),
@@ -263,4 +271,13 @@ fn df_coords(df: &DataFrame) -> Result<Vec<(f64, f64)>, Box<dyn std::error::Erro
             ))
         })
         .collect()
+}
+
+fn write_csv(df: &DataFrame) -> String {
+    let output = Vec::new();
+    let mut writer = Writer::new(output);
+    writer
+        .write(&RecordBatch::try_new(Arc::clone(&df.schema), df.arrays.clone()).unwrap())
+        .unwrap();
+    String::from_utf8(writer.into_inner()).unwrap()
 }
