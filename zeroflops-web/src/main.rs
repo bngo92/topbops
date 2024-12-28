@@ -1,7 +1,7 @@
 use ::spotify::SpotifyClient;
 use arrow_array::RecordBatch;
 use arrow_ipc::writer::FileWriter;
-use arrow_schema::{Field, Schema};
+use arrow_schema::{FieldRef, Schema};
 use async_trait::async_trait;
 use axum::{
     body::Bytes,
@@ -229,7 +229,7 @@ fn serialize_arrow(mut records: Vec<Map<String, Value>>) -> Result<Vec<u8>, Erro
             Ok(m)
         })
         .collect::<Result<_, Error>>()?;
-    let fields = match Vec::<Field>::from_samples(
+    let fields = match Vec::<FieldRef>::from_samples(
         &records,
         TracingOptions::default()
             .allow_null_fields(true)

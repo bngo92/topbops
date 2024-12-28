@@ -7,8 +7,8 @@ default-run = "zeroflops-web"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-arrow-array = "50.0.0"
-arrow-ipc = "50.0.0"
+arrow-array = "53.0.0"
+arrow-ipc = "53.0.0"
 arrow-schema.workspace = true
 async-trait.workspace = true
 axum.workspace = true
@@ -23,7 +23,7 @@ rand = { version = "0.8.4", features = ["min_const_gen"] }
 reqwest = { workspace = true, features = ["blocking"] }
 rusqlite = { workspace = true, features = ["limits"] }
 serde = { version = "1.0", features = ["derive"] }
-serde_arrow = { workspace = true, features = ["arrow-50"] }
+serde_arrow = { workspace = true, features = ["arrow-53"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_rusqlite.workspace = true
 spotify = { path = "../spotify/" }
@@ -42,4 +42,4 @@ dev = []
 azure = ["azure_core", "azure_data_cosmos"]
 
 [dev-dependencies]
-arrow = "50.0.0"
+arrow = "54.0.0"
