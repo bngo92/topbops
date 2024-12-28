@@ -42,4 +42,4 @@ dev = []
 azure = ["azure_core", "azure_data_cosmos"]
 
 [dev-dependencies]
-arrow = "54.0.0"
+arrow = "53.0.0"
