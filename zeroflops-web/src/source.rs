@@ -18,14 +18,19 @@ pub async fn update_list_items(
     mut list: List,
 ) -> Result<(), Error> {
     let current_list = get_list(client, user_id, &list.id).await?;
-    // Avoid updating sources if they haven't changed
+    // Avoid updating list items if sources haven't changed as reading from source can be expensive
     // TODO: we should also check the snapshot ID
-    if current_list
+    let source_update = current_list
         .sources
         .iter()
         .map(|s| &s.source_type)
-        .ne(list.sources.iter().map(|s| &s.source_type))
-    {
+        .ne(list.sources.iter().map(|s| &s.source_type));
+    // Always update items if ListItems is used as the underlying list could change at any time
+    let list_source = current_list
+        .sources
+        .iter()
+        .any(|s| matches!(s.source_type, SourceType::ListItems(_)));
+    if source_update || list_source {
         list.items.clear();
         let sources = list.sources;
         list.sources = Vec::with_capacity(sources.len());
