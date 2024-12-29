@@ -458,7 +458,7 @@ impl Component for Tournament {
         html! {
             <div>
                 <div class="d-flex gap-3">
-                    <button type="button" class="btn btn-primary mb-1" onclick={ctx.link().callback(|_| Msg::Toggle)} style="width: 156.33px">{toggle}</button>
+                    <button type="button" class="btn btn-primary mb-1" onclick={ctx.link().callback(|_| Msg::Toggle)} style="width: 156.58px">{toggle}</button>
                     <button type="button" class="btn btn-danger mb-1" onclick={ctx.link().callback(|_| Msg::Reset)}>{"Reset"}</button>
                 </div>
                 {html}
