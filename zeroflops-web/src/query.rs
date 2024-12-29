@@ -77,7 +77,7 @@ pub async fn get_list_items(
                 CosmosQuery::new(query.clone()),
             ))
             .await
-            .map_err(Error::from)?
+            .map_err(|_| Error::client_error(format!("{} is not valid", list.query)))?
             .into_iter()
             .map(|r| r["id"].as_str().unwrap().to_owned())
             .collect();
